@@ -1,0 +1,60 @@
+# Netto store configuration
+# Production environment at Netto
+
+[mqtt]
+host = "localhost"
+port = 1883
+topic = "#"
+username = "avero"
+password = "avero"
+
+[gate]
+mode = "tcp"
+tcp_addr = "10.120.48.9:8000"
+http_url = "http://admin:88888888@10.120.48.9/cdor.cgi?door=0&open=1"
+timeout_ms = 2000
+
+[rs485]
+device = "/dev/ttyAMA4"
+baud = 19200
+poll_interval_ms = 250
+
+[zones]
+pos_zones = [1001, 1002, 1003, 1004, 1005]
+gate_zone = 1000
+exit_line = 1006
+entry_line = 1008
+approach_line = 1010
+store_zone = 1009
+
+[zones.names]
+1000 = "GATE_1"
+1001 = "POS_3"
+1002 = "POS_4"
+1003 = "POS_5"
+1004 = "POS_1"
+1005 = "POS_2"
+1006 = "EXIT_1"
+1008 = "ENTRY_1"
+1009 = "STORE"
+1010 = "APPROACH_1"
+
+[authorization]
+min_dwell_ms = 7000
+
+[metrics]
+interval_secs = 10
+
+[acc]
+listener_enabled = true
+listener_port = 25803
+
+[acc.ip_to_pos]
+"10.120.48.211" = "POS_1"
+"10.120.48.212" = "POS_2"
+"10.120.48.213" = "POS_3"
+"10.120.48.214" = "POS_4"
+"10.120.48.215" = "POS_5"
+
+[mqtt_egress]
+enabled = true

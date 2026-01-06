@@ -1,0 +1,174 @@
+//! Gateway PoC - Rust MVP for gate control system
+//!
+//! Validates performance characteristics (latency, predictability) for gate control
+//! running on Raspberry Pi 5.
+//!
+//! Module structure:
+//! - `domain/` - Core business types (Journey, Person, Events)
+//! - `io/` - External interfaces (MQTT, RS485, CloudPlus, Egress)
+//! - `services/` - Business logic (Tracker, JourneyManager, Gate)
+//! - `infra/` - Infrastructure (Config, Metrics, Broker)
+
+mod domain;
+mod infra;
+mod io;
+mod services;
+
+use infra::{Config, GateMode, Metrics};
+use io::{create_egress_channel, start_acc_listener, AccListenerConfig, MqttPublisher, Rs485Monitor};
+use services::GateController;
+use std::sync::Arc;
+use tokio::sync::{mpsc, watch};
+use tracing::info;
+use tracing_subscriber::fmt::time::UtcTime;
+use tracing_subscriber::EnvFilter;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize structured logging with configurable level via RUST_LOG env var
+    // Default: INFO, use RUST_LOG=debug for full event visibility
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_timer(UtcTime::rfc_3339())
+        .with_target(false)
+        .init();
+
+    info!("gateway-poc starting");
+
+    // Load configuration from TOML file (needed for broker config)
+    let args: Vec<String> = std::env::args().collect();
+    let config = Config::load(&args);
+
+    // Start embedded MQTT broker with config
+    infra::broker::start_embedded_broker(&config);
+
+    // Log configuration
+    let gate_mode_str = match config.gate_mode() {
+        GateMode::Tcp => "tcp",
+        GateMode::Http => "http",
+    };
+    info!(
+        config_file = %config.config_file(),
+        mqtt_host = %config.mqtt_host(),
+        mqtt_port = %config.mqtt_port(),
+        mqtt_topic = %config.mqtt_topic(),
+        gate_mode = %gate_mode_str,
+        gate_tcp_addr = %config.gate_tcp_addr(),
+        min_dwell_ms = %config.min_dwell_ms(),
+        pos_zones = ?config.pos_zones(),
+        gate_zone = %config.gate_zone(),
+        "config_loaded"
+    );
+
+    // Create shutdown signal
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    // Create shared components
+    let gate = Arc::new(GateController::new(config.clone()));
+    let metrics = Arc::new(Metrics::new());
+
+    // Start CloudPlus TCP client if in TCP mode
+    if let Some(tcp_client) = gate.tcp_client() {
+        let tcp_shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            tcp_client.run(tcp_shutdown).await;
+        });
+    }
+
+    // Create event channel (bounded for backpressure)
+    let (event_tx, event_rx) = mpsc::channel(1000);
+
+    // Start RS485 monitor (with event channel for door state changes)
+    let rs485_tx = event_tx.clone();
+    let rs485_monitor = Rs485Monitor::new(&config).with_event_tx(rs485_tx);
+    let rs485_shutdown = shutdown_rx.clone();
+    tokio::spawn(async move {
+        rs485_monitor.run(rs485_shutdown).await;
+    });
+
+    // Start MQTT client
+    let mqtt_config = config.clone();
+    let mqtt_tx = event_tx.clone();
+    let mqtt_shutdown = shutdown_rx.clone();
+    tokio::spawn(async move {
+        if let Err(e) = io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_shutdown).await {
+            tracing::error!(error = %e, "MQTT client error");
+        }
+    });
+
+    // Start ACC TCP listener
+    let acc_config = AccListenerConfig {
+        port: config.acc_listener_port(),
+        enabled: config.acc_listener_enabled(),
+    };
+    let acc_tx = event_tx;
+    let acc_shutdown = shutdown_rx.clone();
+    tokio::spawn(async move {
+        if let Err(e) = start_acc_listener(acc_config, acc_tx, acc_shutdown).await {
+            tracing::error!(error = %e, "ACC listener error");
+        }
+    });
+
+    // Start metrics reporter (lock-free reads with full summary)
+    let metrics_clone = metrics.clone();
+    let metrics_interval = config.metrics_interval_secs();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(metrics_interval));
+        loop {
+            interval.tick().await;
+            // Use full report with placeholder track counts (actual counts are in tracker)
+            let summary = metrics_clone.report(0, 0);
+            summary.log();
+        }
+    });
+
+    // Create MQTT egress channel and publisher (if enabled)
+    let egress_sender = if config.mqtt_egress_enabled() {
+        let (egress_sender, egress_rx) = create_egress_channel(1000);
+
+        // Start MQTT egress publisher
+        let publisher = MqttPublisher::new(&config, egress_rx);
+        let publisher_shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            publisher.run(publisher_shutdown).await;
+        });
+
+        // Start metrics egress publisher (separate from logging)
+        let metrics_egress = egress_sender.clone();
+        let metrics_for_egress = metrics.clone();
+        let egress_interval = config.mqtt_egress_metrics_interval_secs();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(egress_interval));
+            loop {
+                interval.tick().await;
+                let summary = metrics_for_egress.report(0, 0);
+                metrics_egress.send_metrics(summary);
+            }
+        });
+
+        Some(egress_sender)
+    } else {
+        None
+    };
+
+    // Start tracker (main event processing loop)
+    let mut tracker = services::Tracker::new(config, gate, metrics, egress_sender);
+    info!("tracker_started");
+
+    // Handle shutdown on Ctrl+C
+    let shutdown_signal = shutdown_tx;
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        info!("shutdown_signal_received");
+        let _ = shutdown_signal.send(true);
+    });
+
+    // Run tracker - consumes events until channel closes
+    tracker.run(event_rx).await;
+
+    info!("gateway-poc shutdown complete");
+    Ok(())
+}

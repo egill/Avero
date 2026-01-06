@@ -1,0 +1,49 @@
+# Grandi store configuration
+# Production environment at Grandi
+
+[mqtt]
+host = "localhost"
+port = 1883
+topic = "#"
+
+[gate]
+# TODO: Update with actual Grandi gate controller settings
+mode = "tcp"
+tcp_addr = "192.168.0.245:8000"
+http_url = "http://admin:88888888@192.168.0.245/cdor.cgi?door=0&open=1"
+timeout_ms = 2000
+
+[rs485]
+# TODO: Update with actual Grandi RS485 device
+device = "/dev/ttyAMA4"
+baud = 19200
+poll_interval_ms = 250
+
+[zones]
+# TODO: Update with actual Grandi zone IDs from Xovis sensor
+pos_zones = [1001, 1002, 1003, 1004, 1005]
+gate_zone = 1007
+exit_line = 1006
+# TODO: Set actual zone IDs when known
+# entry_line = 1000
+# approach_line = 1008
+# store_zone = 1009
+
+[zones.names]
+1001 = "POS_1"
+1002 = "POS_2"
+1003 = "POS_3"
+1004 = "POS_4"
+1005 = "POS_5"
+1006 = "EXIT_1"
+1007 = "GATE_1"
+
+[authorization]
+min_dwell_ms = 7000
+
+[metrics]
+interval_secs = 10
+
+[acc]
+listener_enabled = true
+listener_port = 25803

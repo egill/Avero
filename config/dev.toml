@@ -1,0 +1,61 @@
+# Development configuration
+# Use for local testing
+
+[mqtt]
+host = "localhost"
+port = 1883
+topic = "#"
+
+[gate]
+mode = "tcp"  # "tcp" or "http"
+tcp_addr = "192.168.0.245:8000"
+http_url = "http://admin:88888888@192.168.0.245/cdor.cgi?door=0&open=1"
+timeout_ms = 2000
+
+[rs485]
+device = "/dev/ttyAMA4"
+baud = 19200
+poll_interval_ms = 250
+
+[zones]
+# POS zones where dwell time is accumulated
+pos_zones = [1001, 1002, 1003, 1004, 1005]
+# Gate zone that triggers door open when authorized
+gate_zone = 1007
+# Exit line for journey completion tracking
+exit_line = 1006
+# Optional: Entry line (people entering the store)
+# entry_line = 1008
+# Optional: Approach line (people approaching gate area)
+# approach_line = 1009
+# Optional: Store zone (entire store area)
+# store_zone = 1010
+
+[zones.names]
+1001 = "POS_1"
+1002 = "POS_2"
+1003 = "POS_3"
+1004 = "POS_4"
+1005 = "POS_5"
+1006 = "EXIT_1"
+1007 = "GATE_1"
+
+[authorization]
+min_dwell_ms = 7000
+
+[metrics]
+interval_secs = 10
+
+[acc]
+# Enable ACC TCP listener for payment terminal events
+listener_enabled = true
+# Port for ACC TCP listener (protocol: "ACC <receipt_id>\n")
+listener_port = 25803
+
+# IP to POS zone mapping - maps ACC terminal IP to POS zone
+[acc.ip_to_pos]
+# For testing from localhost
+"127.0.0.1" = "POS_1"
+# Production ACC terminal IPs (update with real IPs)
+# "192.168.1.10" = "POS_1"
+# "192.168.1.11" = "POS_2"
