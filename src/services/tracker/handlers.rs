@@ -515,9 +515,19 @@ impl Tracker {
         // Look up POS zone from IP
         let pos = self.acc_collector.pos_for_ip(ip).cloned();
 
+        // Build accumulated dwell map from persons for ACC matching
+        // This ensures ACC uses total journey dwell, not just current POS session dwell
+        let accumulated_dwells: std::collections::HashMap<i64, u64> = self
+            .persons
+            .iter()
+            .map(|(&tid, p)| (tid, p.accumulated_dwell_ms))
+            .collect();
+
         // Try to match ACC to journeys using IP → POS lookup
         // Returns all group members if any member qualifies (sufficient dwell)
-        let matched_tracks = self.acc_collector.process_acc(ip, &mut self.journey_manager);
+        let matched_tracks = self
+            .acc_collector
+            .process_acc(ip, &mut self.journey_manager, Some(&accumulated_dwells));
 
         // Record ACC metric
         self.metrics.record_acc_event(!matched_tracks.is_empty());
