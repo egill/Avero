@@ -71,3 +71,49 @@ Started: 2026-01-07
   - Import with `use rustc_hash::FxHashMap;`
   - mqtt.rs uses std::collections::HashMap locally for temporary position tracking - no need to change local variables
 ---
+
+## 2026-01-07 - US-006 - Replace Vec::remove with swap_remove where order doesn't matter
+- Files changed: src/services/door_correlator.rs, src/services/stitcher.rs, src/services/journey_manager.rs, src/services/acc_collector.rs
+- **Learnings:**
+  - `swap_remove(idx)` is O(1) vs `remove(idx)` which is O(n) - swaps last element into removed position
+  - Safe to use when element order after removal doesn't matter for subsequent operations
+  - Analyze each case: if code searches/filters the Vec on each access (not relying on order), swap_remove is safe
+  - All four locations found by searching `\.remove(idx)` were safe candidates
+---
+
+## 2026-01-07 - US-007 - Add Vec::with_capacity to hot-path allocations
+- Files changed: src/io/mqtt.rs, src/domain/journey.rs
+- **Learnings:**
+  - `Vec::with_capacity(n)` pre-allocates memory, avoiding reallocations during push operations
+  - Use for Vecs where typical size is known: mqtt events ~8, journey events ~16
+  - Both `parse_xovis_message` and `parse_frame` get capacity(8) since typical frame has 0-10 events
+  - `Journey::new()` events get capacity(16) since typical journey has 5-15 events
+---
+
+## 2026-01-07 - US-008 - Add Copy derive to JourneyOutcome enum
+- Files changed: src/domain/journey.rs, src/services/journey_manager.rs
+- **Learnings:**
+  - Fieldless enums (no data in variants) can implement Copy for zero-cost pass-by-value
+  - Adding Copy to a type causes clippy to warn on unnecessary .clone() calls
+  - Clippy `clone_on_copy` lint catches this: `using clone on type which implements Copy`
+  - Found and removed `outcome.clone()` in journey_manager.rs:171
+---
+
+## 2026-01-07 - US-009 - Implement FromStr trait for EventType
+- Files changed: src/domain/types.rs, src/io/mqtt.rs
+- **Learnings:**
+  - Implement `std::str::FromStr` trait instead of inherent `from_str` method for idiomatic Rust
+  - Use `std::convert::Infallible` as error type when parsing can never fail (e.g., returns Unknown variant for unmatched values)
+  - Call sites change from `EventType::from_str(s)` to `s.parse::<EventType>().unwrap()` or `s.parse().unwrap()` with type annotation
+  - With `Infallible` error type, `.unwrap()` is always safe and optimizes away
+---
+
+## 2026-01-07 - US-010 - Add #[cold] attribute to error handling paths
+- Files changed: src/services/gate.rs, src/io/cloudplus.rs
+- **Learnings:**
+  - `#[cold]` attribute tells the compiler a function is unlikely to be called, helping optimize the hot path
+  - Extract error logging into dedicated `#[cold]` functions instead of inline error! macros
+  - Useful for error paths that should rarely execute: connection failures, read/write errors, timeouts
+  - Works best when the function is called from a single location, so the compiler can optimize the branch
+  - Use with `&(dyn std::error::Error + Send + Sync)` for generic error types that implement Display
+---
