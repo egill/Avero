@@ -749,6 +749,7 @@ dependencies = [
  "reqwest",
  "rumqttc",
  "rumqttd",
+ "rustc-hash",
  "serde",
  "serde_json",
  "tempfile",

@@ -18,7 +18,7 @@ Started: 2026-01-07
 
 ### Conventions
 - Metrics use AtomicU64 for lock-free counters
-- HashMaps keyed by track_id (i64) or geometry_id (i32)
+- FxHashMap for integer-keyed maps (track_id: i64, geometry_id: i32) - faster than std HashMap
 - JourneyEvent uses builder pattern with_type().with_zone()
 - Config via TOML in config/ directory
 
@@ -27,9 +27,11 @@ Started: 2026-01-07
 - tokio (async runtime)
 - tracing (logging)
 - clap (CLI parsing - not yet used)
+- parking_lot (better Mutex - no poisoning)
+- rustc-hash (fast FxHashMap for integer keys)
 
 ### Gotchas
-- Mutex in metrics.rs uses std::sync::Mutex (can poison)
+- Mutex in metrics.rs now uses parking_lot::Mutex (no poisoning, no .unwrap() needed)
 - cargo clippy -- -D warnings now passes clean
 - Cross-compile target: aarch64-unknown-linux-gnu (RPi5)
 - Unused fields prefixed with underscore to suppress dead_code warnings
@@ -59,4 +61,13 @@ Started: 2026-01-07
   - `cargo clippy --fix` auto-fixes: useless format!, option_as_ref_deref, bind_instead_of_map, println_empty_string, unused imports
   - #[allow(dead_code)] is acceptable for public API methods not yet used
   - #[allow(clippy::too_many_arguments)] acceptable for internal functions when refactoring is impractical
+---
+
+## 2026-01-07 - US-005 - Add rustc-hash and replace integer-keyed HashMaps with FxHashMap
+- Files changed: Cargo.toml, Cargo.lock, src/services/tracker/mod.rs, src/services/journey_manager.rs
+- **Learnings:**
+  - FxHashMap is a drop-in replacement for HashMap with faster performance for integer keys
+  - Use `FxHashMap::default()` instead of `FxHashMap::new()` for initialization
+  - Import with `use rustc_hash::FxHashMap;`
+  - mqtt.rs uses std::collections::HashMap locally for temporary position tracking - no need to change local variables
 ---

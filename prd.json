@@ -44,7 +44,7 @@
       "instructions": "Search: grep -n 'std::sync::Mutex' src/. In metrics.rs, replace Mutex imports and remove .unwrap() on .lock() calls. parking_lot::Mutex::lock() returns the guard directly.",
       "priority": 1,
       "estimatedMinutes": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -60,7 +60,7 @@
       "instructions": "The Metrics struct only contains AtomicU64 and Mutex<T> which are automatically Send+Sync. Try removing lines 641-642 and verify it compiles. If it doesn't compile, investigate which field is not Send+Sync.",
       "priority": 1,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -75,7 +75,7 @@
       "instructions": "Search: grep -rn 'HashMap<i64' src/. Key locations: tracker/mod.rs (persons), journey_manager.rs (active, pid_by_track). Import with 'use rustc_hash::FxHashMap;'. FxHashMap is faster for integer keys, drop-in replacement.",
       "priority": 2,
       "estimatedMinutes": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

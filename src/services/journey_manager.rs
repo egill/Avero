@@ -1,7 +1,7 @@
 //! Journey manager for tracking and persisting customer journeys
 
 use crate::domain::journey::{epoch_ms, Journey, JourneyEvent, JourneyOutcome};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
@@ -17,19 +17,19 @@ struct PendingEgress {
 /// Manages active journeys and handles stitching/egress
 pub struct JourneyManager {
     /// Active journeys by current track_id
-    active: HashMap<i64, Journey>,
+    active: FxHashMap<i64, Journey>,
     /// Journeys waiting for egress (10s delay)
     pending_egress: Vec<PendingEgress>,
     /// Mapping of track_id to person_id for stitch lookups
-    pid_by_track: HashMap<i64, String>,
+    pid_by_track: FxHashMap<i64, String>,
 }
 
 impl JourneyManager {
     pub fn new() -> Self {
         Self {
-            active: HashMap::new(),
+            active: FxHashMap::default(),
             pending_egress: Vec::new(),
-            pid_by_track: HashMap::new(),
+            pid_by_track: FxHashMap::default(),
         }
     }
 
