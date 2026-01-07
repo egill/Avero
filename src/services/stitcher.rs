@@ -51,6 +51,7 @@ pub struct Stitcher {
 }
 
 impl Stitcher {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             pending: Vec::new(),
@@ -147,9 +148,9 @@ impl Stitcher {
                 }
                 Some((_, best_dist, best_same)) => {
                     // Prefer same_zone, or if equal same_zone status, prefer closer
-                    if same_zone && !best_same {
-                        best_match = Some((i, distance_cm, same_zone));
-                    } else if same_zone == *best_same && distance_cm < *best_dist {
+                    if (same_zone && !best_same)
+                        || (same_zone == *best_same && distance_cm < *best_dist)
+                    {
                         best_match = Some((i, distance_cm, same_zone));
                     }
                 }

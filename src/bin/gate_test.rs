@@ -61,7 +61,7 @@ impl DoorStatus {
 struct StateEvent {
     time_ms: u64,
     event: String,
-    status: DoorStatus,
+    _status: DoorStatus,
 }
 
 #[derive(Parser, Debug)]
@@ -159,7 +159,7 @@ impl GateInvestigator {
         self.events.push(StateEvent {
             time_ms: t,
             event: format!("OPEN_CMD_{}", cmd_num),
-            status,
+            _status: status,
         });
 
         let Some(ref mut stream) = self.tcp_stream else {
@@ -218,8 +218,8 @@ impl GateInvestigator {
             );
             self.events.push(StateEvent {
                 time_ms: t,
-                event: format!("{}", new_status.as_str()),
-                status: new_status,
+                event: new_status.as_str().to_string(),
+                _status: new_status,
             });
             self.last_status = new_status;
             true

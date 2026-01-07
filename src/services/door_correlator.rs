@@ -17,7 +17,7 @@ const MAX_GATE_CORRELATION_MS: u64 = 5000;
 struct PendingGateCmd {
     track_id: i64,
     sent_at: Instant,
-    sent_at_ms: u64, // epoch ms
+    _sent_at_ms: u64, // epoch ms
     door_was_open: bool, // door state when command was sent
 }
 
@@ -58,7 +58,7 @@ impl DoorCorrelator {
         self.pending_cmds.push(PendingGateCmd {
             track_id,
             sent_at: now,
-            sent_at_ms: now_ms,
+            _sent_at_ms: now_ms,
             door_was_open,
         });
     }
@@ -148,6 +148,7 @@ impl DoorCorrelator {
     }
 
     /// Get the current door status
+    #[allow(dead_code)]
     pub fn current_status(&self) -> DoorStatus {
         self.last_status
     }
@@ -160,6 +161,7 @@ impl DoorCorrelator {
     }
 
     /// Get the current flow track ID (only set after correlation, cleared on close)
+    #[allow(dead_code)]
     pub fn current_flow_track_id(&self) -> Option<i64> {
         self.current_flow_track_id
     }
@@ -274,7 +276,7 @@ mod tests {
         correlator.pending_cmds.push(PendingGateCmd {
             track_id: 100,
             sent_at: Instant::now() - std::time::Duration::from_secs(15),
-            sent_at_ms: 0,
+            _sent_at_ms: 0,
             door_was_open: false,
         });
 

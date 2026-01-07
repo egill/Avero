@@ -396,33 +396,27 @@ impl ThroughputStats {
 // ============================================================================
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 enum ZoneStatus {
+    #[default]
     Empty,
     Pending { tid: i64, dwell_ms: u64 },
-    Authorized { tid: i64, dwell_ms: u64 },
+    Authorized { tid: i64, _dwell_ms: u64 },
     Waiting { tid: i64, dwell_ms: u64 },
     Overdue { tid: i64, dwell_ms: u64 },
 }
 
-impl Default for ZoneStatus {
-    fn default() -> Self {
-        ZoneStatus::Empty
-    }
-}
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 enum GateZoneStatus {
+    #[default]
     Empty,
     Authorized { tid: i64, door_state: String },
     Blocked { tid: i64 },
     Exiting { tid: i64, door_state: String },
 }
 
-impl Default for GateZoneStatus {
-    fn default() -> Self {
-        GateZoneStatus::Empty
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 struct ZoneState {
@@ -442,7 +436,7 @@ impl ZoneState {
                 let dwell_ms = self.live_dwell_ms();
 
                 if self.occupant_auth {
-                    ZoneStatus::Authorized { tid, dwell_ms }
+                    ZoneStatus::Authorized { tid, _dwell_ms: dwell_ms }
                 } else if dwell_ms > POS_OVERDUE_THRESHOLD_MS {
                     ZoneStatus::Overdue { tid, dwell_ms }
                 } else if dwell_ms > POS_WARNING_THRESHOLD_MS {
@@ -468,7 +462,7 @@ impl ZoneState {
 #[derive(Debug, Clone, Default)]
 struct GateFlow {
     tid: Option<i64>,
-    gate_entry_event_ts: Option<u64>,
+    _gate_entry_event_ts: Option<u64>,
     gate_entry_received: Option<Instant>,
     cmd_sent_ts: Option<u64>,
     cmd_sent_received: Option<Instant>,
@@ -647,9 +641,9 @@ struct DashboardState {
     last_message: Option<Instant>,
 
     // Debug counters for MQTT messages received
-    msg_count_gate: u64,
-    msg_count_metrics: u64,
-    msg_count_events: u64,
+    _msg_count_gate: u64,
+    _msg_count_metrics: u64,
+    _msg_count_events: u64,
 
     // Gate controller (for manual test)
     gate_host: Option<String>,
@@ -684,9 +678,9 @@ impl Default for DashboardState {
             last_journey: None,
             connected: false,
             last_message: None,
-            msg_count_gate: 0,
-            msg_count_metrics: 0,
-            msg_count_events: 0,
+            _msg_count_gate: 0,
+            _msg_count_metrics: 0,
+            _msg_count_events: 0,
             gate_host: None,
         };
 
@@ -778,7 +772,7 @@ impl DashboardState {
                         // Start new flow
                         self.current_gate_flow = GateFlow {
                             tid: Some(event.tid),
-                            gate_entry_event_ts: Some(event.ts),
+                            _gate_entry_event_ts: Some(event.ts),
                             gate_entry_received: Some(now),
                             ..Default::default()
                         };
@@ -808,12 +802,11 @@ impl DashboardState {
             }
 
             // Track EXIT line crossing
-            if zone_name == "EXIT_1" && event.t == "line_cross" {
-                if self.current_gate_flow.tid == Some(event.tid) {
+            if zone_name == "EXIT_1" && event.t == "line_cross"
+                && self.current_gate_flow.tid == Some(event.tid) {
                     self.current_gate_flow.exit_ts = Some(event.ts);
                     self.current_gate_flow.exit_received = Some(now);
                 }
-            }
         }
 
         self.last_message = Some(now);
@@ -1019,7 +1012,7 @@ impl DashboardState {
             }
             "unmatched" => {
                 self.acc_stats.orphaned_count += 1;
-                let pos = event.pos.as_ref().map(|s| s.as_str()).unwrap_or("?");
+                let pos = event.pos.as_deref().unwrap_or("?");
 
                 // Build a more informative message showing nearby candidates
                 let mut msg = format!("ACC no match at {}", pos);
@@ -1046,7 +1039,7 @@ impl DashboardState {
                     self.add_issue(
                         IssueSeverity::Warning,
                         format!("ACC LATE {} - {}ms after gate",
-                            event.pos.as_ref().map(|s| s.as_str()).unwrap_or("-"), delta)
+                            event.pos.as_deref().unwrap_or("-"), delta)
                     );
                 }
             }
@@ -1108,8 +1101,8 @@ struct TuiMqttConfig {
     username: Option<String>,
     password: Option<String>,
     // Ignored fields from full config
-    #[serde(default)]
-    topic: Option<String>,
+    #[serde(default, rename = "topic")]
+    _topic: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -1117,14 +1110,14 @@ struct TuiMqttConfig {
 struct TuiGateConfig {
     host: Option<String>,
     // Ignored fields from full config
-    #[serde(default)]
-    mode: Option<String>,
+    #[serde(default, rename = "mode")]
+    _mode: Option<String>,
     #[serde(default)]
     tcp_addr: Option<String>,
-    #[serde(default)]
-    http_url: Option<String>,
-    #[serde(default)]
-    timeout_ms: Option<u64>,
+    #[serde(default, rename = "http_url")]
+    _http_url: Option<String>,
+    #[serde(default, rename = "timeout_ms")]
+    _timeout_ms: Option<u64>,
 }
 
 fn load_config(path: &str) -> Option<TuiConfig> {
@@ -1146,37 +1139,33 @@ fn load_config(path: &str) -> Option<TuiConfig> {
     };
 
     // Extract mqtt section
-    let mqtt = value.get("mqtt").and_then(|m| {
-        Some(TuiMqttConfig {
+    let mqtt = value.get("mqtt").map(|m| TuiMqttConfig {
             host: m.get("host").and_then(|v| v.as_str().map(String::from)),
             port: m.get("port").and_then(|v| v.as_integer().map(|p| p as u16)),
             username: m.get("username").and_then(|v| v.as_str().map(String::from)),
             password: m.get("password").and_then(|v| v.as_str().map(String::from)),
-            topic: m.get("topic").and_then(|v| v.as_str().map(String::from)),
-        })
-    });
+            _topic: m.get("topic").and_then(|v| v.as_str().map(String::from)),
+        });
 
     // Extract gate section (for gate_host used in manual test)
-    let gate = value.get("gate").and_then(|g| {
-        Some(TuiGateConfig {
+    let gate = value.get("gate").map(|g| TuiGateConfig {
             host: g.get("host").and_then(|v| v.as_str().map(String::from)),
-            mode: g.get("mode").and_then(|v| v.as_str().map(String::from)),
+            _mode: g.get("mode").and_then(|v| v.as_str().map(String::from)),
             tcp_addr: g.get("tcp_addr").and_then(|v| v.as_str().map(String::from)),
-            http_url: g.get("http_url").and_then(|v| v.as_str().map(String::from)),
-            timeout_ms: g.get("timeout_ms").and_then(|v| v.as_integer().map(|t| t as u64)),
-        })
-    });
+            _http_url: g.get("http_url").and_then(|v| v.as_str().map(String::from)),
+            _timeout_ms: g.get("timeout_ms").and_then(|v| v.as_integer().map(|t| t as u64)),
+        });
 
     Some(TuiConfig { mqtt, gate })
 }
 
 fn print_usage() {
     eprintln!("Usage: gateway-tui [OPTIONS] [HOST PORT USER PASS [GATE_HOST]]");
-    eprintln!("");
+    eprintln!();
     eprintln!("Options:");
     eprintln!("  -c, --config <FILE>  Load configuration from TOML file");
     eprintln!("  -h, --help           Show this help message");
-    eprintln!("");
+    eprintln!();
     eprintln!("Examples:");
     eprintln!("  gateway-tui --config /opt/avero/gateway-poc.toml");
     eprintln!("  gateway-tui localhost 1883 avero avero");
@@ -1745,7 +1734,7 @@ fn draw_acc_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
             _ => ("·", Color::White),
         };
 
-        let pos = e.pos.as_ref().map(|p| p.as_str()).unwrap_or("-");
+        let pos = e.pos.as_deref().unwrap_or("-");
         let tid = e.tid.map(|t| format!("T{}", t)).unwrap_or("-".to_string());
 
         ListItem::new(Line::from(vec![

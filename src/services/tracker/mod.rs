@@ -167,6 +167,7 @@ impl Tracker {
     }
 
     /// Tick the journey manager and return journeys ready for egress
+    #[allow(dead_code)]
     pub fn tick_journeys(&mut self) -> Vec<Journey> {
         self.journey_manager.tick()
     }

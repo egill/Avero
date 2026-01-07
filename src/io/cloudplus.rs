@@ -26,11 +26,15 @@ const CMD_REQUEST: u8 = 0x53;
 
 // Commands to device
 const CMD_OPEN_DOOR: u8 = 0x2C;
+#[allow(dead_code)]
 const CMD_DOOR_NORM_OPEN: u8 = 0x2D;
+#[allow(dead_code)]
 const CMD_CLOSE_DOOR: u8 = 0x2E;
+#[allow(dead_code)]
 const CMD_TIME_SYNC: u8 = 0x07;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct HeartbeatData {
     pub received_at: Instant,
     pub door_state: u8,
@@ -225,6 +229,7 @@ pub struct CloudPlusConfig {
     pub dial_timeout: Duration,
     pub read_timeout: Duration,
     pub write_timeout: Duration,
+    #[allow(dead_code)]
     pub heartbeat_wait: Duration,
 }
 
@@ -375,6 +380,7 @@ impl CloudPlusClient {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn read_loop(
         read_half: Arc<Mutex<Option<ReadHalf<TcpStream>>>>,
         internal_tx: mpsc::Sender<Vec<u8>>,
@@ -564,6 +570,7 @@ impl CloudPlusClient {
     }
 
     /// Send door close command
+    #[allow(dead_code)]
     pub async fn send_close(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !self.is_connected().await {
             return Err("not connected".into());
@@ -580,6 +587,7 @@ impl CloudPlusClient {
     }
 
     /// Send time sync command
+    #[allow(dead_code)]
     pub async fn send_time_sync(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !self.is_connected().await {
             return Err("not connected".into());
@@ -609,10 +617,12 @@ impl CloudPlusClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn last_heartbeat(&self) -> Option<HeartbeatData> {
         self.last_heartbeat.read().await.clone()
     }
 
+    #[allow(dead_code)]
     pub async fn stats(&self) -> (u64, u64) {
         let rx = *self.heartbeats_rx.read().await;
         let ack = *self.heartbeats_ack.read().await;

@@ -38,7 +38,7 @@ impl Tracker {
             let StitchMatch { mut person, time_ms, distance_cm } = stitch;
             self.metrics.record_stitch_matched();
             self.metrics.record_stitch_distance(distance_cm as u64);
-            self.metrics.record_stitch_time(time_ms as u64);
+            self.metrics.record_stitch_time(time_ms);
 
             // Stitch found! Transfer state from old track to new track
             let old_track_id = person.track_id;
@@ -66,7 +66,7 @@ impl Tracker {
                     auth: person.authorized,
                     dwell_ms: person.accumulated_dwell_ms,
                     stitch_dist_cm: Some(distance_cm as u64),
-                    stitch_time_ms: Some(time_ms as u64),
+                    stitch_time_ms: Some(time_ms),
                     parent_jid: None,
                 });
             }

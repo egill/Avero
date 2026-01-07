@@ -11,5 +11,3 @@ pub mod journey;
 pub mod types;
 
 // Re-export commonly used types at module level
-pub use journey::{Journey, JourneyEvent, JourneyOutcome, epoch_ms, new_uuid_v7};
-pub use types::{DoorStatus, EventType, ParsedEvent, Person};

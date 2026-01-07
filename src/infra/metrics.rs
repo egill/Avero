@@ -137,16 +137,14 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new() -> Self {
-        // Initialize atomic arrays with const default
-        const ZERO: AtomicU64 = AtomicU64::new(0);
         Self {
             events_total: AtomicU64::new(0),
             events_since_report: AtomicU64::new(0),
             latency_sum_us: AtomicU64::new(0),
             latency_max_us: AtomicU64::new(0),
-            latency_buckets: [ZERO; NUM_BUCKETS],
+            latency_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_commands_sent: AtomicU64::new(0),
-            gate_latency_buckets: [ZERO; NUM_BUCKETS],
+            gate_latency_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_latency_sum_us: AtomicU64::new(0),
             gate_latency_max_us: AtomicU64::new(0),
             gate_commands_since_report: AtomicU64::new(0),
@@ -156,13 +154,13 @@ impl Metrics {
             acc_matched_total: AtomicU64::new(0),
             stitch_matched_total: AtomicU64::new(0),
             stitch_expired_total: AtomicU64::new(0),
-            stitch_distance_buckets: [ZERO; NUM_BUCKETS],
+            stitch_distance_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             stitch_distance_sum: AtomicU64::new(0),
-            stitch_time_buckets: [ZERO; NUM_BUCKETS],
+            stitch_time_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             stitch_time_sum: AtomicU64::new(0),
             acc_late_total: AtomicU64::new(0),
             acc_no_journey_total: AtomicU64::new(0),
-            pos_occupancy: [ZERO; MAX_POS_ZONES],
+            pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
             pos_zone_ids: std::sync::Mutex::new(Vec::new()),
             last_report_time: std::sync::Mutex::new(Instant::now()),
         }
@@ -275,6 +273,7 @@ impl Metrics {
 
     /// Get total events processed
     #[inline]
+    #[allow(dead_code)]
     pub fn events_total(&self) -> u64 {
         self.events_total.load(Ordering::Relaxed)
     }
@@ -287,6 +286,7 @@ impl Metrics {
 
     /// Get current gate state
     #[inline]
+    #[allow(dead_code)]
     pub fn gate_state(&self) -> u64 {
         self.gate_state.load(Ordering::Relaxed)
     }
@@ -299,6 +299,7 @@ impl Metrics {
 
     /// Get total exits
     #[inline]
+    #[allow(dead_code)]
     pub fn exits_total(&self) -> u64 {
         self.exits_total.load(Ordering::Relaxed)
     }
@@ -355,24 +356,28 @@ impl Metrics {
 
     /// Get ACC events total
     #[inline]
+    #[allow(dead_code)]
     pub fn acc_events_total(&self) -> u64 {
         self.acc_events_total.load(Ordering::Relaxed)
     }
 
     /// Get ACC matched total
     #[inline]
+    #[allow(dead_code)]
     pub fn acc_matched_total(&self) -> u64 {
         self.acc_matched_total.load(Ordering::Relaxed)
     }
 
     /// Get stitch matched total
     #[inline]
+    #[allow(dead_code)]
     pub fn stitch_matched_total(&self) -> u64 {
         self.stitch_matched_total.load(Ordering::Relaxed)
     }
 
     /// Get stitch expired total (truly lost)
     #[inline]
+    #[allow(dead_code)]
     pub fn stitch_expired_total(&self) -> u64 {
         self.stitch_expired_total.load(Ordering::Relaxed)
     }

@@ -13,7 +13,7 @@
       "instructions": "Create file at project root. This ensures consistent Rust version across all developers and deployment targets (RPi5).",
       "priority": 1,
       "estimatedMinutes": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -28,7 +28,7 @@
       "instructions": "Run 'cargo clippy' to see 33 warnings. Key fixes: (1) metrics.rs:172 - change const ZERO to static, (2) acc_collector.rs:321 - use !contains_key(), (3) stitcher.rs:153 - fix duplicate if/else, (4) handlers.rs:41,69 - remove unnecessary u64 casts. Run 'cargo clippy --fix' for auto-fixable ones first.",
       "priority": 1,
       "estimatedMinutes": 30,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -238,6 +238,7 @@ impl JourneyManager {
     }
 
     /// Check if a track has an active journey
+    #[allow(dead_code)]
     pub fn has_journey(&self, track_id: i64) -> bool {
         self.active.contains_key(&track_id)
     }

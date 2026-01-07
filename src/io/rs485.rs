@@ -14,7 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::time::interval;
 use tokio_serial::SerialPortBuilderExt;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 // Protocol constants
 const START_BYTE_COMMAND: u8 = 0x7E;
