@@ -67,10 +67,20 @@ impl PosGroup {
     }
 
     /// Get all track_ids of members with sufficient dwell
-    fn members_with_sufficient_dwell(&self) -> Vec<i64> {
+    /// Uses accumulated dwell from tracker if provided, otherwise falls back to time since entry
+    fn members_with_sufficient_dwell(&self, accumulated_dwells: Option<&HashMap<i64, u64>>) -> Vec<i64> {
         self.members
             .iter()
-            .filter(|m| m.entered_at.elapsed().as_millis() as u64 >= self.min_dwell_for_acc)
+            .filter(|m| {
+                // Use accumulated dwell from tracker if available
+                if let Some(dwells) = accumulated_dwells {
+                    if let Some(&dwell) = dwells.get(&m.track_id) {
+                        return dwell >= self.min_dwell_for_acc;
+                    }
+                }
+                // Fallback to time since entry to this POS
+                m.entered_at.elapsed().as_millis() as u64 >= self.min_dwell_for_acc
+            })
             .map(|m| m.track_id)
             .collect()
     }
@@ -185,20 +195,28 @@ impl AccCollector {
 
     /// Process an ACC event by IP address and try to match it to a journey
     /// Returns all matched track_ids (group members)
-    pub fn process_acc(&mut self, ip: &str, journey_manager: &mut JourneyManager) -> Vec<i64> {
+    /// accumulated_dwells: map of track_id -> total accumulated dwell time from Person state
+    pub fn process_acc(
+        &mut self,
+        ip: &str,
+        journey_manager: &mut JourneyManager,
+        accumulated_dwells: Option<&HashMap<i64, u64>>,
+    ) -> Vec<i64> {
         let Some(pos) = self.ip_to_pos.get(ip).cloned() else {
             return vec![];
         };
-        self.process_acc_by_pos(&pos, Some(ip), journey_manager)
+        self.process_acc_by_pos(&pos, Some(ip), journey_manager, accumulated_dwells)
     }
 
     /// Process an ACC event by POS zone directly (used when kiosk_id IS the zone name)
     /// Returns all matched track_ids (entire group if any member qualifies)
+    /// accumulated_dwells: map of track_id -> total accumulated dwell time from Person state
     pub fn process_acc_by_pos(
         &mut self,
         pos: &str,
         kiosk_id: Option<&str>,
         journey_manager: &mut JourneyManager,
+        accumulated_dwells: Option<&HashMap<i64, u64>>,
     ) -> Vec<i64> {
         let ts = epoch_ms();
         let kiosk_str = kiosk_id.unwrap_or(pos);
@@ -208,9 +226,14 @@ impl AccCollector {
         // First try: current group at POS with at least one member having sufficient dwell
         if let Some(group) = self.pos_groups.get(pos) {
             let all_members = group.all_members();
-            let member_dwells: Vec<(i64, u64)> = group.members
+            // Show both session dwell and accumulated dwell for debugging
+            let member_dwells: Vec<(i64, u64, Option<u64>)> = group.members
                 .iter()
-                .map(|m| (m.track_id, m.entered_at.elapsed().as_millis() as u64))
+                .map(|m| {
+                    let session_dwell = m.entered_at.elapsed().as_millis() as u64;
+                    let acc_dwell = accumulated_dwells.and_then(|d| d.get(&m.track_id).copied());
+                    (m.track_id, session_dwell, acc_dwell)
+                })
                 .collect();
             debug!(
                 pos = %pos,
@@ -220,7 +243,7 @@ impl AccCollector {
                 "acc_checking_pos_group"
             );
 
-            let qualified = group.members_with_sufficient_dwell();
+            let qualified = group.members_with_sufficient_dwell(accumulated_dwells);
             if qualified.is_empty() {
                 debug!(
                     pos = %pos,
@@ -373,7 +396,7 @@ mod tests {
         }
 
         // Process ACC
-        let result = collector.process_acc("192.168.1.10", &mut jm);
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         assert_eq!(result, vec![100]);
         let journey = jm.get(100).unwrap();
@@ -391,7 +414,7 @@ mod tests {
         collector.record_pos_exit(100, "POS_1", 8000);
 
         // Process ACC within time window
-        let result = collector.process_acc("192.168.1.10", &mut jm);
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         assert!(result.contains(&100));
     }
@@ -405,7 +428,7 @@ mod tests {
         collector.record_pos_entry(100, "POS_1");
 
         // Process ACC immediately (insufficient dwell)
-        let result = collector.process_acc("192.168.1.10", &mut jm);
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         assert!(result.is_empty());
     }
@@ -415,7 +438,7 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        let result = collector.process_acc("192.168.1.99", &mut jm);
+        let result = collector.process_acc("192.168.1.99", &mut jm, None);
 
         assert!(result.is_empty());
     }
@@ -449,7 +472,7 @@ mod tests {
         }
 
         // Process ACC - should match BOTH group members
-        let result = collector.process_acc("192.168.1.10", &mut jm);
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         assert_eq!(result.len(), 2);
         assert!(result.contains(&100));
@@ -473,10 +496,29 @@ mod tests {
         collector.record_pos_exit(200, "POS_1", 5000); // insufficient dwell alone
 
         // Process ACC - should match both since they were in a group
-        let result = collector.process_acc("192.168.1.10", &mut jm);
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         // The newest exit (200) is matched, along with group members
         assert!(result.contains(&200));
         assert!(result.contains(&100));
+    }
+
+    #[test]
+    fn test_acc_uses_accumulated_dwell() {
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+        collector.record_pos_entry(100, "POS_1");
+
+        // Without accumulated dwell, should not match (just entered)
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+        assert!(result.is_empty());
+
+        // With accumulated dwell >= min_dwell, should match even with recent entry
+        let mut accumulated = HashMap::new();
+        accumulated.insert(100, 10000); // 10s accumulated dwell
+        let result = collector.process_acc("192.168.1.10", &mut jm, Some(&accumulated));
+        assert_eq!(result, vec![100]);
     }
 }
