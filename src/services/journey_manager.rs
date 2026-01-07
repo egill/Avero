@@ -168,7 +168,7 @@ impl JourneyManager {
     /// End a journey and move to pending egress
     pub fn end_journey(&mut self, track_id: i64, outcome: JourneyOutcome) {
         if let Some(mut journey) = self.active.remove(&track_id) {
-            journey.complete(outcome.clone());
+            journey.complete(outcome);
 
             info!(
                 track_id = %track_id,

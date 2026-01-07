@@ -18,7 +18,7 @@ pub fn epoch_ms() -> u64 {
 }
 
 /// Journey outcome
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum JourneyOutcome {
     InProgress,
     Completed,  // crossed EXIT
