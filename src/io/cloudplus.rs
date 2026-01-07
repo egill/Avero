@@ -14,6 +14,30 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
+/// Log connection failure (cold path)
+#[cold]
+fn log_connect_failed(e: &(dyn std::error::Error + Send + Sync)) {
+    error!(error = %e, "cloudplus_connect_failed");
+}
+
+/// Log read error (cold path)
+#[cold]
+fn log_read_error(e: &std::io::Error) {
+    error!(error = %e, "cloudplus_read_error");
+}
+
+/// Log write error (cold path)
+#[cold]
+fn log_write_error(e: &std::io::Error) {
+    error!(error = %e, "cloudplus_write_error");
+}
+
+/// Log write timeout (cold path)
+#[cold]
+fn log_write_timeout() {
+    error!("cloudplus_write_timeout");
+}
+
 // Protocol constants
 const STX: u8 = 0x02;
 const ETX: u8 = 0x03;
@@ -313,7 +337,7 @@ impl CloudPlusClient {
         loop {
             // Try to connect
             if let Err(e) = self.connect().await {
-                error!(error = %e, "cloudplus_connect_failed");
+                log_connect_failed(e.as_ref());
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             }
@@ -408,7 +432,7 @@ impl CloudPlusClient {
                     }
                     Ok(Ok(n)) => n,
                     Ok(Err(e)) => {
-                        error!(error = %e, "cloudplus_read_error");
+                        log_read_error(&e);
                         return;
                     }
                     Err(_) => continue, // Timeout, try again
@@ -531,11 +555,11 @@ impl CloudPlusClient {
                     debug!(len = msg.len(), hex = %hex, "cloudplus_frame_sent");
                 }
                 Ok(Err(e)) => {
-                    error!(error = %e, "cloudplus_write_error");
+                    log_write_error(&e);
                     return;
                 }
                 Err(_) => {
-                    error!("cloudplus_write_timeout");
+                    log_write_timeout();
                     return;
                 }
             }
