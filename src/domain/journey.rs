@@ -118,7 +118,7 @@ impl Journey {
             started_at: now,
             ended_at: None,
             crossed_entry: false,
-            events: Vec::new(),
+            events: Vec::with_capacity(16),
         }
     }
 
