@@ -1,0 +1,89 @@
+{
+  "branchName": "bench/gate-latency-comparison",
+  "description": "Baseline latency comparison benchmark between Rust and Go for gate control. Measures TCP command to door moving latency using RS485 monitoring.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Rust benchmark implements RS485 polling",
+      "acceptanceCriteria": [
+        "Opens serial port at 19200 baud",
+        "Sends 8-byte query command (0x7E start byte)",
+        "Reads 18-byte response with 200ms timeout",
+        "Parses door status from byte 4 of response",
+        "Validates checksum (sum + 1 == 0)",
+        "Recognizes status codes: 0x00/0x02=closed, 0x03=moving"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Must match production rs485.rs implementation exactly"
+    },
+    {
+      "id": "US-002",
+      "title": "Rust benchmark sends CloudPlus open command",
+      "acceptanceCriteria": [
+        "Connects to gate TCP port 8000",
+        "Builds 9-byte frame: STX, rand, CMD_OPEN_DOOR(0x2C), addr(0xFF), door(0x01), len(0x00,0x00), checksum, ETX",
+        "Fresh TCP connection per trial (gate closes idle connections)",
+        "Command triggers door movement"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Must match production cloudplus.rs implementation"
+    },
+    {
+      "id": "US-003",
+      "title": "Rust benchmark measures latency correctly",
+      "acceptanceCriteria": [
+        "Timer starts when TCP command is sent",
+        "Timer stops when RS485 reports moving status",
+        "Polls RS485 every 250ms (production interval)",
+        "Reports per-trial latency in milliseconds",
+        "Calculates min/max/avg/P50/P95 statistics"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Go benchmark implements identical logic",
+      "acceptanceCriteria": [
+        "Same RS485 protocol implementation as Rust",
+        "Same CloudPlus protocol implementation as Rust",
+        "Same 250ms polling interval",
+        "Same statistics output format",
+        "Cross-compiles for aarch64-linux"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Build script produces Pi binaries",
+      "acceptanceCriteria": [
+        "Rust: cargo zigbuild for aarch64-unknown-linux-gnu",
+        "Go: GOOS=linux GOARCH=arm64",
+        "Binaries output to bin/aarch64-linux/",
+        "Both binaries under 3MB"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Build script works correctly"
+    },
+    {
+      "id": "US-006",
+      "title": "Benchmarks run successfully on Avero HQ Pi",
+      "acceptanceCriteria": [
+        "Connects to RS485 at /dev/ttyAMA4",
+        "Connects to gate at 192.168.0.245:8000",
+        "Completes 20 trials with 11s delay",
+        "Less than 3 timeouts per 20 trials",
+        "Reports consistent latency values (not flat 500ms artifacts)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Currently failing - RS485 and timing issues"
+    }
+  ]
+}

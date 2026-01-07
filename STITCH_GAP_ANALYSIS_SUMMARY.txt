@@ -1,0 +1,145 @@
+================================================================================
+STITCH GAP ANALYSIS - QUICK REFERENCE SUMMARY
+================================================================================
+
+QUESTION: Should we support multi-stitching (when many tracks are created 
+between the lost track and its continuation)?
+
+ANSWER: YES - Strongly Recommended
+
+================================================================================
+HEADLINE METRICS
+================================================================================
+
+Dataset:
+  - 125 successful stitches analyzed
+  - Time period: 5 hours (2026-01-07 10:00-15:00 UTC)
+  - Source: Netto Gateway POC (AP-NETTO-GR-01)
+
+Gap Size:
+  - MAX gap observed: 13 tracks (1 occurrence)
+  - Average gap: 1.71 tracks
+  - Most common: Gap of 1 (75.2% of cases)
+
+Multi-Stitch Need:
+  - 31 out of 125 stitches (24.8%) require multi-stitch capability
+  - 94 out of 125 stitches (75.2%) can be handled with simple stitch
+
+================================================================================
+COVERAGE BY IMPLEMENTATION SCOPE
+================================================================================
+
+Gap = 1 only:        75.2% coverage (current)
+Gap ≤ 2:             90.4% coverage  ← RECOMMENDED START
+Gap ≤ 5:             95.2% coverage  ← RECOMMENDED FULL
+Gap ≤ 13:           100.0% coverage  (edge cases only)
+
+To get from 75% to 90%: +15 additional stitches handled, +15.2% improvement
+To get from 90% to 95%: +6 additional stitches handled, +4.8% improvement
+To get from 95% to 100%: +6 additional stitches handled, +4.8% improvement
+
+ROI is best for gap≤2 support.
+
+================================================================================
+TIMING IMPACT
+================================================================================
+
+Simple Stitch (gap=1):
+  - Average time: 746 ms
+  - Fast cases: 30 ms
+  - Slow cases: 4263 ms
+
+Multi-Stitch (gap>1):
+  - Average time: 1825 ms
+  - Fast cases: 74 ms
+  - Slow cases: 4188 ms
+  - Overhead: +1079 ms (144% increase)
+
+Gap Distribution in Multi-Stitches:
+  - Gap = 2: 19 cases (61% of multi-stitches) - avg 1571 ms
+  - Gap = 3-6: 8 cases (26% of multi-stitches) - avg 2814 ms
+  - Gap = 9-13: 4 cases (13% of multi-stitches) - avg 1431 ms
+
+Performance is ACCEPTABLE for retail/warehouse use cases.
+
+================================================================================
+IMPLEMENTATION RECOMMENDATION
+================================================================================
+
+PHASE 1 (IMMEDIATE):
+  Implement multi-stitch support for gaps 1-2
+  - Effort: Medium (2-3 weeks)
+  - Benefit: 90.4% coverage
+  - Impact: Handles 94% of stitches with no gap, 100% of gap=2 cases
+
+PHASE 2 (RECOMMENDED):
+  Extend to gaps 1-5
+  - Effort: Low (1 additional week)
+  - Benefit: 95.2% coverage
+  - Impact: Handles remaining cases (except 6 rare edge cases)
+
+PHASE 3 (OPTIONAL):
+  Full support for gaps 1-13
+  - Effort: Medium (2-3 weeks)
+  - Benefit: 100% coverage
+  - Impact: Handles all edge cases (rare, 1 case per 5 hours)
+  - Timing: Can defer unless operational data shows increased gap frequency
+
+================================================================================
+KEY INSIGHTS
+================================================================================
+
+1. Gap=2 is the "Sweet Spot"
+   - Most common multi-stitch case (19 out of 31)
+   - Supporting it alone handles 61% of multi-stitch needs
+   - Recommend optimization path for this case
+
+2. Timing Not Linear with Gap Size
+   - Gap 13 took only 487ms (fastest outlier)
+   - Gap 3 took 4188ms (slowest outlier)
+   - Suggests gap size is not the limiting factor
+   - External factors (movement, sensor proximity) dominate
+
+3. Wide Variance in All Cases
+   - Even simple stitches range from 30ms to 4263ms
+   - Standard deviation of 890ms for gap=1
+   - Not due to gap size, likely related to dwell time and movement patterns
+
+4. No Systemic Problems Detected
+   - Distribution is reasonable
+   - No evidence of excessive track creation rates
+   - Gaps appear random and unrelated to time of day
+
+================================================================================
+DELIVERABLES PROVIDED
+================================================================================
+
+1. STITCH_GAP_ANALYSIS.md
+   - Comprehensive analysis report with all tables and recommendations
+   - Implementation considerations and next steps
+
+2. stitch_data.csv
+   - Raw data export of all 125 stitches
+   - Columns: timestamp, old_track_id, new_track_id, gap, authorized, 
+     dwell_ms, time_ms, distance_cm
+   - Can be imported into Excel/Python for further analysis
+
+3. This Summary
+   - Quick reference for decision-making
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. Review this analysis with your team
+2. Make decision: Phase 1 (gaps 1-2) or Phase 1+2 (gaps 1-5)?
+3. Design multi-stitch state machine for track chain linking
+4. Implement and test with Phase 1 scope
+5. Collect production metrics on gap frequency at other locations
+6. Extend to Phase 2 or 3 as needed based on operational data
+
+The data strongly supports implementing multi-stitch capability. Nearly 25%
+of your real stitches need it. Starting with gaps 1-2 is a safe, high-ROI
+choice that covers 90% of cases.
+
+================================================================================

@@ -1,0 +1,44 @@
+# Ralph Progress Log - Code Quality & Performance
+Started: 2026-01-07
+
+## Codebase Patterns
+
+### Architecture
+- Async runtime: Tokio
+- Domain types: src/domain/ (types.rs, journey.rs)
+- Services: src/services/ (tracker is central orchestrator)
+- I/O adapters: src/io/ (mqtt, rs485, cloudplus, egress, prometheus)
+- Infrastructure: src/infra/ (config, metrics, broker)
+
+### Testing
+- Primary tests: src/services/tracker/tests.rs
+- Test helpers: create_test_tracker(), create_event()
+- All tests use #[tokio::test]
+- Run: cargo test
+
+### Conventions
+- Metrics use AtomicU64 for lock-free counters
+- HashMaps keyed by track_id (i64) or geometry_id (i32)
+- JourneyEvent uses builder pattern with_type().with_zone()
+- Config via TOML in config/ directory
+
+### Dependencies Already Available
+- serde, serde_json (serialization)
+- tokio (async runtime)
+- tracing (logging)
+- clap (CLI parsing - not yet used)
+
+### Gotchas
+- Mutex in metrics.rs uses std::sync::Mutex (can poison)
+- Some clippy warnings exist - check with cargo clippy
+- Cross-compile target: aarch64-unknown-linux-gnu (RPi5)
+
+## Key Files
+- Cargo.toml (dependencies, profiles)
+- src/main.rs (entry point)
+- src/domain/types.rs (ParsedEvent, Person, EventType)
+- src/domain/journey.rs (Journey, JourneyEvent, JourneyOutcome)
+- src/infra/metrics.rs (Metrics struct)
+- src/services/tracker/mod.rs (Tracker - main orchestrator)
+
+---
