@@ -522,10 +522,6 @@ impl Default for Metrics {
     }
 }
 
-// Metrics is Send + Sync because all fields are atomic or Mutex-wrapped
-unsafe impl Send for Metrics {}
-unsafe impl Sync for Metrics {}
-
 /// Number of histogram buckets (exported for egress)
 pub const METRICS_NUM_BUCKETS: usize = NUM_BUCKETS;
 
