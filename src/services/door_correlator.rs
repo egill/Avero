@@ -15,7 +15,7 @@ const MAX_GATE_CORRELATION_MS: u64 = 5000;
 /// Tracks recent gate commands for correlation
 #[derive(Debug, Clone)]
 struct PendingGateCmd {
-    track_id: i32,
+    track_id: i64,
     sent_at: Instant,
     sent_at_ms: u64, // epoch ms
     door_was_open: bool, // door state when command was sent
@@ -27,6 +27,8 @@ pub struct DoorCorrelator {
     last_status: DoorStatus,
     /// Pending gate commands waiting for correlation
     pending_cmds: Vec<PendingGateCmd>,
+    /// Track ID of current gate flow (preserved across open/moving/closed cycle)
+    current_flow_track_id: Option<i64>,
 }
 
 impl DoorCorrelator {
@@ -34,11 +36,12 @@ impl DoorCorrelator {
         Self {
             last_status: DoorStatus::Unknown,
             pending_cmds: Vec::new(),
+            current_flow_track_id: None,
         }
     }
 
     /// Record that a gate command was sent for a track
-    pub fn record_gate_cmd(&mut self, track_id: i32) {
+    pub fn record_gate_cmd(&mut self, track_id: i64) {
         let now = Instant::now();
         let now_ms = epoch_ms();
 
@@ -66,12 +69,17 @@ impl DoorCorrelator {
         &mut self,
         status: DoorStatus,
         journey_manager: &mut JourneyManager,
-    ) -> Option<i32> {
+    ) -> Option<i64> {
         let prev_status = self.last_status;
         self.last_status = status;
 
         // Clean up old pending commands
         self.cleanup_old_cmds();
+
+        // Clear current flow when door closes (cycle complete)
+        if status == DoorStatus::Closed {
+            self.current_flow_track_id = None;
+        }
 
         // Only correlate on transition TO open
         if status != DoorStatus::Open || prev_status == DoorStatus::Open {
@@ -80,7 +88,7 @@ impl DoorCorrelator {
                 prev_status = %prev_status.as_str(),
                 "door_state_no_correlation"
             );
-            return None;
+            return self.current_flow_track_id; // Return current flow even if no new correlation
         }
 
         let now = Instant::now();
@@ -99,6 +107,9 @@ impl DoorCorrelator {
             let cmd = self.pending_cmds.remove(idx);
             let delta_ms = now.duration_since(cmd.sent_at).as_millis() as u64;
             let track_id = cmd.track_id;
+
+            // Set current flow track_id (preserved across moving/open/closed)
+            self.current_flow_track_id = Some(track_id);
 
             info!(
                 track_id = %track_id,
@@ -141,9 +152,16 @@ impl DoorCorrelator {
         self.last_status
     }
 
-    /// Get the track ID of the most recent gate command (if any)
-    pub fn last_gate_cmd_track_id(&self) -> Option<i32> {
-        self.pending_cmds.last().map(|cmd| cmd.track_id)
+    /// Get the track ID of the current gate flow (preserved across door cycle)
+    /// Falls back to most recent pending command if no flow active
+    pub fn last_gate_cmd_track_id(&self) -> Option<i64> {
+        self.current_flow_track_id
+            .or_else(|| self.pending_cmds.last().map(|cmd| cmd.track_id))
+    }
+
+    /// Get the current flow track ID (only set after correlation, cleared on close)
+    pub fn current_flow_track_id(&self) -> Option<i64> {
+        self.current_flow_track_id
     }
 }
 

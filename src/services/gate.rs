@@ -85,7 +85,7 @@ impl GateController {
 
     /// Send gate open command
     /// Returns latency in microseconds
-    pub async fn send_open_command(&self, track_id: i32) -> u64 {
+    pub async fn send_open_command(&self, track_id: i64) -> u64 {
         let start = Instant::now();
 
         #[cfg(test)]
@@ -106,7 +106,7 @@ impl GateController {
         }
     }
 
-    async fn send_open_tcp(&self, track_id: i32, start: Instant) -> u64 {
+    async fn send_open_tcp(&self, track_id: i64, start: Instant) -> u64 {
         let Some(ref client) = self.tcp_client else {
             error!(track_id = %track_id, "gate_tcp_client_not_initialized");
             return start.elapsed().as_micros() as u64;
@@ -138,7 +138,7 @@ impl GateController {
         }
     }
 
-    async fn send_open_http(&self, track_id: i32, start: Instant) -> u64 {
+    async fn send_open_http(&self, track_id: i64, start: Instant) -> u64 {
         let Some(ref client) = self.http_client else {
             error!(track_id = %track_id, "gate_http_client_not_initialized");
             return start.elapsed().as_micros() as u64;

@@ -19,7 +19,7 @@ const GROUP_WINDOW_MS: u64 = 10000;
 /// A member of a POS group
 #[derive(Debug, Clone)]
 struct GroupMember {
-    track_id: i32,
+    track_id: i64,
     entered_at: Instant,
 }
 
@@ -32,7 +32,7 @@ struct PosGroup {
 }
 
 impl PosGroup {
-    fn new(track_id: i32, min_dwell_for_acc: u64) -> Self {
+    fn new(track_id: i64, min_dwell_for_acc: u64) -> Self {
         let now = Instant::now();
         Self {
             members: vec![GroupMember {
@@ -44,7 +44,7 @@ impl PosGroup {
         }
     }
 
-    fn add_member(&mut self, track_id: i32) {
+    fn add_member(&mut self, track_id: i64) {
         let now = Instant::now();
         self.members.push(GroupMember {
             track_id,
@@ -53,7 +53,7 @@ impl PosGroup {
         self.last_entry = now;
     }
 
-    fn remove_member(&mut self, track_id: i32) {
+    fn remove_member(&mut self, track_id: i64) {
         self.members.retain(|m| m.track_id != track_id);
     }
 
@@ -67,7 +67,7 @@ impl PosGroup {
     }
 
     /// Get all track_ids of members with sufficient dwell
-    fn members_with_sufficient_dwell(&self) -> Vec<i32> {
+    fn members_with_sufficient_dwell(&self) -> Vec<i64> {
         self.members
             .iter()
             .filter(|m| m.entered_at.elapsed().as_millis() as u64 >= self.min_dwell_for_acc)
@@ -76,7 +76,7 @@ impl PosGroup {
     }
 
     /// Get all track_ids in the group
-    fn all_members(&self) -> Vec<i32> {
+    fn all_members(&self) -> Vec<i64> {
         self.members.iter().map(|m| m.track_id).collect()
     }
 }
@@ -84,8 +84,8 @@ impl PosGroup {
 /// Tracks recent zone exits for matching
 #[derive(Debug, Clone)]
 struct RecentExit {
-    track_id: i32,
-    group_members: Vec<i32>, // Other members who were in the same group
+    track_id: i64,
+    group_members: Vec<i64>, // Other members who were in the same group
     exited_at: Instant,
     dwell_ms: u64,
 }
@@ -113,23 +113,43 @@ impl AccCollector {
 
     /// Record that a track entered a POS zone
     /// If others are present (within GROUP_WINDOW_MS), they form a group
-    pub fn record_pos_entry(&mut self, track_id: i32, pos_zone: &str) {
+    ///
+    /// IMPORTANT: We never replace an existing group that has members.
+    /// This prevents losing track of people who are still at the POS zone.
+    pub fn record_pos_entry(&mut self, track_id: i64, pos_zone: &str) {
+        // Debug: log current state of all POS groups
+        let all_groups: Vec<(&String, Vec<i64>)> = self
+            .pos_groups
+            .iter()
+            .map(|(k, g)| (k, g.all_members()))
+            .collect();
+        debug!(
+            track_id = %track_id,
+            pos = %pos_zone,
+            current_groups = ?all_groups,
+            "acc_pos_entry_state"
+        );
+
         if let Some(group) = self.pos_groups.get_mut(pos_zone) {
-            if group.should_join() {
-                // Join existing group
+            // Group exists - always add to it to preserve existing members
+            // The should_join() check is only for logging (co-presence detection)
+            let is_cogroup = group.should_join();
+            if is_cogroup {
                 debug!(track_id = %track_id, pos = %pos_zone, group_size = %(group.members.len() + 1), "acc_pos_entry_join_group");
-                group.add_member(track_id);
-                return;
+            } else {
+                debug!(track_id = %track_id, pos = %pos_zone, existing_members = %group.members.len(), "acc_pos_entry_add_to_existing");
             }
+            group.add_member(track_id);
+            return;
         }
-        // Start new group
+        // No group exists - start new group
         debug!(track_id = %track_id, pos = %pos_zone, "acc_pos_entry_new_group");
         self.pos_groups
             .insert(pos_zone.to_string(), PosGroup::new(track_id, self.min_dwell_for_acc));
     }
 
     /// Record that a track exited a POS zone
-    pub fn record_pos_exit(&mut self, track_id: i32, pos_zone: &str, dwell_ms: u64) {
+    pub fn record_pos_exit(&mut self, track_id: i64, pos_zone: &str, dwell_ms: u64) {
         // Get group members before removing this track
         let group_members = self
             .pos_groups
@@ -143,8 +163,14 @@ impl AccCollector {
         if let Some(group) = self.pos_groups.get_mut(pos_zone) {
             group.remove_member(track_id);
             if group.is_empty() {
+                debug!(track_id = %track_id, pos = %pos_zone, "acc_pos_group_removed_empty");
                 self.pos_groups.remove(pos_zone);
+            } else {
+                let remaining: Vec<i64> = group.all_members();
+                debug!(track_id = %track_id, pos = %pos_zone, remaining = ?remaining, "acc_pos_exit_group_remains");
             }
+        } else {
+            debug!(track_id = %track_id, pos = %pos_zone, "acc_pos_exit_no_group_found");
         }
 
         // Record recent exit with group info for delayed matching
@@ -159,7 +185,7 @@ impl AccCollector {
 
     /// Process an ACC event by IP address and try to match it to a journey
     /// Returns all matched track_ids (group members)
-    pub fn process_acc(&mut self, ip: &str, journey_manager: &mut JourneyManager) -> Vec<i32> {
+    pub fn process_acc(&mut self, ip: &str, journey_manager: &mut JourneyManager) -> Vec<i64> {
         let Some(pos) = self.ip_to_pos.get(ip).cloned() else {
             return vec![];
         };
@@ -173,7 +199,7 @@ impl AccCollector {
         pos: &str,
         kiosk_id: Option<&str>,
         journey_manager: &mut JourneyManager,
-    ) -> Vec<i32> {
+    ) -> Vec<i64> {
         let ts = epoch_ms();
         let kiosk_str = kiosk_id.unwrap_or(pos);
 
@@ -181,7 +207,29 @@ impl AccCollector {
 
         // First try: current group at POS with at least one member having sufficient dwell
         if let Some(group) = self.pos_groups.get(pos) {
+            let all_members = group.all_members();
+            let member_dwells: Vec<(i64, u64)> = group.members
+                .iter()
+                .map(|m| (m.track_id, m.entered_at.elapsed().as_millis() as u64))
+                .collect();
+            debug!(
+                pos = %pos,
+                members = ?all_members,
+                dwells_ms = ?member_dwells,
+                min_dwell = %self.min_dwell_for_acc,
+                "acc_checking_pos_group"
+            );
+
             let qualified = group.members_with_sufficient_dwell();
+            if qualified.is_empty() {
+                debug!(
+                    pos = %pos,
+                    members = ?all_members,
+                    dwells_ms = ?member_dwells,
+                    min_dwell = %self.min_dwell_for_acc,
+                    "acc_group_exists_but_no_qualified_members"
+                );
+            }
             if !qualified.is_empty() {
                 // At least one member qualifies - authorize entire group
                 let all_members = group.all_members();
@@ -211,6 +259,7 @@ impl AccCollector {
 
         // Second try: recently exited with sufficient dwell AND pos now empty
         if self.pos_groups.get(pos).is_none() {
+            debug!(pos = %pos, "acc_pos_empty_checking_recent_exits");
             self.cleanup_old_exits();
 
             if let Some(exits) = self.recent_exits.get_mut(pos) {
@@ -263,7 +312,15 @@ impl AccCollector {
             }
         }
 
-        debug!(pos = %pos, "acc_no_match");
+        // Log detailed debug info for unmatched ACC
+        let all_pos_zones: Vec<&String> = self.pos_groups.keys().collect();
+        let recent_exit_zones: Vec<&String> = self.recent_exits.keys().collect();
+        debug!(
+            pos = %pos,
+            available_pos_groups = ?all_pos_zones,
+            recent_exit_zones = ?recent_exit_zones,
+            "acc_no_match"
+        );
         vec![]
     }
 

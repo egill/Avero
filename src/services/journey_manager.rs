@@ -17,11 +17,11 @@ struct PendingEgress {
 /// Manages active journeys and handles stitching/egress
 pub struct JourneyManager {
     /// Active journeys by current track_id
-    active: HashMap<i32, Journey>,
+    active: HashMap<i64, Journey>,
     /// Journeys waiting for egress (10s delay)
     pending_egress: Vec<PendingEgress>,
     /// Mapping of track_id to person_id for stitch lookups
-    pid_by_track: HashMap<i32, String>,
+    pid_by_track: HashMap<i64, String>,
 }
 
 impl JourneyManager {
@@ -34,7 +34,7 @@ impl JourneyManager {
     }
 
     /// Create a new journey for a track
-    pub fn new_journey(&mut self, track_id: i32) -> &Journey {
+    pub fn new_journey(&mut self, track_id: i64) -> &Journey {
         let journey = Journey::new(track_id);
         let pid = journey.pid.clone();
 
@@ -51,7 +51,7 @@ impl JourneyManager {
     }
 
     /// Create a new journey with parent reference (for re-entry)
-    pub fn new_journey_with_parent(&mut self, track_id: i32, parent_jid: &str, parent_pid: &str) -> &Journey {
+    pub fn new_journey_with_parent(&mut self, track_id: i64, parent_jid: &str, parent_pid: &str) -> &Journey {
         let journey = Journey::new_with_parent(track_id, parent_jid, parent_pid);
         let pid = journey.pid.clone();
 
@@ -70,7 +70,7 @@ impl JourneyManager {
 
     /// Stitch a journey from old track to new track
     /// Returns true if stitch was successful
-    pub fn stitch_journey(&mut self, old_track_id: i32, new_track_id: i32, time_ms: u64, distance_cm: u32) -> bool {
+    pub fn stitch_journey(&mut self, old_track_id: i64, new_track_id: i64, time_ms: u64, distance_cm: u32) -> bool {
         // First try to find in pending_egress
         let pending_idx = self.pending_egress.iter()
             .position(|p| p.journey.current_track_id() == old_track_id);
@@ -129,18 +129,18 @@ impl JourneyManager {
     }
 
     /// Add an event to a journey
-    pub fn add_event(&mut self, track_id: i32, event: JourneyEvent) {
+    pub fn add_event(&mut self, track_id: i64, event: JourneyEvent) {
         if let Some(journey) = self.active.get_mut(&track_id) {
             journey.add_event(event);
         }
     }
 
     /// Get mutable reference to journey for a track
-    pub fn get_mut(&mut self, track_id: i32) -> Option<&mut Journey> {
+    pub fn get_mut(&mut self, track_id: i64) -> Option<&mut Journey> {
         self.active.get_mut(&track_id)
     }
 
-    pub fn get_mut_any(&mut self, track_id: i32) -> Option<&mut Journey> {
+    pub fn get_mut_any(&mut self, track_id: i64) -> Option<&mut Journey> {
         if self.active.contains_key(&track_id) {
             return self.active.get_mut(&track_id);
         }
@@ -151,11 +151,11 @@ impl JourneyManager {
     }
 
     /// Get immutable reference to journey for a track
-    pub fn get(&self, track_id: i32) -> Option<&Journey> {
+    pub fn get(&self, track_id: i64) -> Option<&Journey> {
         self.active.get(&track_id)
     }
 
-    pub fn get_any(&self, track_id: i32) -> Option<&Journey> {
+    pub fn get_any(&self, track_id: i64) -> Option<&Journey> {
         if self.active.contains_key(&track_id) {
             return self.active.get(&track_id);
         }
@@ -166,7 +166,7 @@ impl JourneyManager {
     }
 
     /// End a journey and move to pending egress
-    pub fn end_journey(&mut self, track_id: i32, outcome: JourneyOutcome) {
+    pub fn end_journey(&mut self, track_id: i64, outcome: JourneyOutcome) {
         if let Some(mut journey) = self.active.remove(&track_id) {
             journey.complete(outcome.clone());
 
@@ -238,7 +238,7 @@ impl JourneyManager {
     }
 
     /// Check if a track has an active journey
-    pub fn has_journey(&self, track_id: i32) -> bool {
+    pub fn has_journey(&self, track_id: i64) -> bool {
         self.active.contains_key(&track_id)
     }
 }

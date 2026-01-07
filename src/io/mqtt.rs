@@ -123,7 +123,7 @@ fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
     let mut events = Vec::new();
 
     // Build position map from tracked_objects
-    let mut positions: std::collections::HashMap<i32, [f64; 3]> = std::collections::HashMap::new();
+    let mut positions: std::collections::HashMap<i64, [f64; 3]> = std::collections::HashMap::new();
     for obj in &frame.tracked_objects {
         if obj.position.len() >= 3 {
             positions.insert(obj.track_id, [obj.position[0], obj.position[1], obj.position[2]]);

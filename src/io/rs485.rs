@@ -94,9 +94,9 @@ impl Rs485Monitor {
             }
         }
 
-        // No valid frame found - demoted to debug to avoid log spam under noise
+        // No valid frame found - at trace level to avoid log spam under noise
         let hex_dump: Vec<String> = data.iter().map(|b| format!("{:02X}", b)).collect();
-        debug!(
+        tracing::trace!(
             raw_bytes = %hex_dump.join(" "),
             len = data.len(),
             "rs485_no_valid_start_byte"
@@ -131,8 +131,8 @@ impl Rs485Monitor {
         let command_execute = data[13];
         let supply_voltage = data[14];
 
-        // Log detailed status
-        debug!(
+        // Log detailed status at trace level (very frequent)
+        tracing::trace!(
             fault = fault_event,
             door = door_status,
             alarm = alarm_event,
@@ -297,7 +297,9 @@ impl Rs485Monitor {
 
                 self.last_status = status;
             } else {
-                debug!(
+                // Use trace level for routine polling to avoid log spam
+                // State changes are logged at info level above
+                tracing::trace!(
                     door = %status.as_str(),
                     poll_duration_us = %poll_duration_us,
                     "rs485_poll"

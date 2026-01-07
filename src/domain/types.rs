@@ -85,7 +85,7 @@ where
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct TrackedObject {
-    pub track_id: i32,
+    pub track_id: i64,
     #[serde(rename = "type")]
     pub obj_type: String,
     #[serde(default)]
@@ -101,7 +101,7 @@ pub struct XovisEvent {
 
 #[derive(Debug, Deserialize)]
 pub struct EventAttributes {
-    pub track_id: Option<i32>,
+    pub track_id: Option<i64>,
     pub geometry_id: Option<i32>,
     pub direction: Option<String>,
 }
@@ -111,7 +111,7 @@ pub struct EventAttributes {
 #[allow(dead_code)]
 pub struct ParsedEvent {
     pub event_type: EventType,
-    pub track_id: i32,
+    pub track_id: i64,
     pub geometry_id: Option<i32>,
     pub direction: Option<String>,
     pub event_time: u64,
@@ -166,7 +166,7 @@ impl EventType {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Person {
-    pub track_id: i32,
+    pub track_id: i64,
     pub current_zone: Option<i32>,
     pub zone_entered_at: Option<Instant>,
     pub accumulated_dwell_ms: u64,
@@ -175,7 +175,7 @@ pub struct Person {
 }
 
 impl Person {
-    pub fn new(track_id: i32) -> Self {
+    pub fn new(track_id: i64) -> Self {
         Self {
             track_id,
             current_zone: None,

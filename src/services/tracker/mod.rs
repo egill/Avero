@@ -31,7 +31,7 @@ use tokio::time::{interval, Duration};
 /// Central event processor for person tracking and journey management
 pub struct Tracker {
     /// Active persons by track_id
-    pub(crate) persons: HashMap<i32, Person>,
+    pub(crate) persons: HashMap<i64, Person>,
     /// Handles track identity stitching across sensor gaps
     pub(crate) stitcher: Stitcher,
     /// Manages journey lifecycle and persistence
@@ -66,7 +66,7 @@ impl Tracker {
         let acc_collector = AccCollector::new(&config);
         Self {
             persons: HashMap::new(),
-            stitcher: Stitcher::new(),
+            stitcher: Stitcher::with_metrics(metrics.clone()),
             journey_manager: JourneyManager::new(),
             door_correlator: DoorCorrelator::new(),
             reentry_detector: ReentryDetector::new(),
@@ -144,7 +144,7 @@ impl Tracker {
                 self.handle_door_state_change(status);
             }
             EventType::AccEvent(ip) => {
-                self.handle_acc_event(&ip).await;
+                self.handle_acc_event(&ip, event.received_at).await;
             }
             EventType::Unknown(_) => {}
         }

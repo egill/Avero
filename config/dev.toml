@@ -44,6 +44,7 @@ exit_line = 1006
 min_dwell_ms = 7000
 
 [metrics]
+prometheus_port = 9090
 interval_secs = 10
 
 [acc]

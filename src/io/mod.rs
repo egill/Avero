@@ -8,6 +8,7 @@
 //! - `cloudplus` - TCP client for CloudPlus gate controller protocol
 //! - `egress` - Journey output to file (JSONL format)
 //! - `acc_listener` - TCP listener for ACC payment terminal events
+//! - `prometheus` - Prometheus metrics HTTP endpoint
 
 pub mod acc_listener;
 pub mod cloudplus;
@@ -15,6 +16,7 @@ pub mod egress;
 pub mod egress_channel;
 pub mod mqtt;
 pub mod mqtt_egress;
+pub mod prometheus;
 pub mod rs485;
 
 // Re-export commonly used types
@@ -22,8 +24,8 @@ pub use acc_listener::{start_acc_listener, AccListenerConfig};
 pub use cloudplus::CloudPlusClient;
 pub use egress::Egress;
 pub use egress_channel::{
-    create_egress_channel, AccEventPayload, EgressMessage, EgressSender, GateStatePayload,
-    TrackEventPayload, ZoneEventPayload,
+    create_egress_channel, AccDebugPending, AccDebugTrack, AccEventPayload, EgressMessage,
+    EgressSender, GateStatePayload, TrackEventPayload, ZoneEventPayload,
 };
 pub use mqtt_egress::MqttPublisher;
 pub use rs485::Rs485Monitor;

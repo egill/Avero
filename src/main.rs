@@ -60,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         min_dwell_ms = %config.min_dwell_ms(),
         pos_zones = ?config.pos_zones(),
         gate_zone = %config.gate_zone(),
+        prometheus_port = %config.prometheus_port(),
         "config_loaded"
     );
 
@@ -69,6 +70,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create shared components
     let gate = Arc::new(GateController::new(config.clone()));
     let metrics = Arc::new(Metrics::new());
+
+    // Initialize POS zone tracking
+    metrics.set_pos_zones(config.pos_zones());
 
     // Start CloudPlus TCP client if in TCP mode
     if let Some(tcp_client) = gate.tcp_client() {
@@ -112,6 +116,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Start Prometheus metrics HTTP server (if port > 0)
+    let prometheus_port = config.prometheus_port();
+    if prometheus_port > 0 {
+        let prom_metrics = metrics.clone();
+        let prom_shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = io::prometheus::start_metrics_server(prometheus_port, prom_metrics, prom_shutdown).await {
+                tracing::error!(error = %e, "Prometheus metrics server error");
+            }
+        });
+    }
+
     // Start metrics reporter (lock-free reads with full summary)
     let metrics_clone = metrics.clone();
     let metrics_interval = config.metrics_interval_secs();
@@ -127,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create MQTT egress channel and publisher (if enabled)
     let egress_sender = if config.mqtt_egress_enabled() {
-        let (egress_sender, egress_rx) = create_egress_channel(1000);
+        let (egress_sender, egress_rx) = create_egress_channel(1000, config.site_id().to_string());
 
         // Start MQTT egress publisher
         let publisher = MqttPublisher::new(&config, egress_rx);

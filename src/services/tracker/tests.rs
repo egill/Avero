@@ -22,7 +22,7 @@ fn create_test_tracker_with_config(config: Config) -> Tracker {
 }
 
 /// Create a test event with basic fields
-fn create_event(event_type: EventType, track_id: i32, geometry_id: Option<i32>) -> ParsedEvent {
+fn create_event(event_type: EventType, track_id: i64, geometry_id: Option<i32>) -> ParsedEvent {
     ParsedEvent {
         event_type,
         track_id,
@@ -35,7 +35,7 @@ fn create_event(event_type: EventType, track_id: i32, geometry_id: Option<i32>) 
 }
 
 /// Create a test event with position data
-fn create_event_with_pos(event_type: EventType, track_id: i32, position: [f64; 3]) -> ParsedEvent {
+fn create_event_with_pos(event_type: EventType, track_id: i64, position: [f64; 3]) -> ParsedEvent {
     ParsedEvent {
         event_type,
         track_id,

@@ -84,7 +84,7 @@ impl JourneyEvent {
 pub struct Journey {
     pub jid: String,                    // UUIDv7 journey ID
     pub pid: String,                    // UUIDv7 person ID (stable across stitches)
-    pub tids: Vec<i32>,                 // Xovis track_ids (stitch history)
+    pub tids: Vec<i64>,                 // Xovis track_ids (stitch history)
     pub parent: Option<String>,         // Previous journey's jid (for re-entry)
     pub outcome: JourneyOutcome,
     pub authorized: bool,
@@ -101,7 +101,7 @@ pub struct Journey {
 
 impl Journey {
     /// Create a new journey for a track
-    pub fn new(track_id: i32) -> Self {
+    pub fn new(track_id: i64) -> Self {
         let now = epoch_ms();
         Self {
             jid: new_uuid_v7(),
@@ -123,7 +123,7 @@ impl Journey {
     }
 
     /// Create a new journey that continues from a previous one (re-entry)
-    pub fn new_with_parent(track_id: i32, parent_jid: &str, parent_pid: &str) -> Self {
+    pub fn new_with_parent(track_id: i64, parent_jid: &str, parent_pid: &str) -> Self {
         let mut journey = Self::new(track_id);
         journey.parent = Some(parent_jid.to_string());
         journey.pid = parent_pid.to_string();
@@ -131,7 +131,7 @@ impl Journey {
     }
 
     /// Add a track ID when stitching
-    pub fn add_track_id(&mut self, track_id: i32) {
+    pub fn add_track_id(&mut self, track_id: i64) {
         self.tids.push(track_id);
     }
 
@@ -147,13 +147,28 @@ impl Journey {
     }
 
     /// Get the current/last track ID
-    pub fn current_track_id(&self) -> i32 {
+    pub fn current_track_id(&self) -> i64 {
         *self.tids.last().unwrap_or(&0)
     }
 
-    /// Convert to short-key JSON string
+    /// Convert to short-key JSON string (without site)
     pub fn to_json(&self) -> String {
+        self.to_json_with_site_opt(None)
+    }
+
+    /// Convert to short-key JSON string with site_id included
+    pub fn to_json_with_site(&self, site_id: &str) -> String {
+        self.to_json_with_site_opt(Some(site_id))
+    }
+
+    /// Internal method for JSON serialization with optional site
+    fn to_json_with_site_opt(&self, site_id: Option<&str>) -> String {
         let mut obj = serde_json::Map::new();
+
+        // Include site_id if provided
+        if let Some(site) = site_id {
+            obj.insert("site".to_string(), serde_json::Value::String(site.to_string()));
+        }
 
         obj.insert("jid".to_string(), serde_json::Value::String(self.jid.clone()));
         obj.insert("pid".to_string(), serde_json::Value::String(self.pid.clone()));

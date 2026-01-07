@@ -11,7 +11,12 @@ path = "src/main.rs"
 name = "gateway-tui"
 path = "src/bin/tui.rs"
 
+[[bin]]
+name = "gate_test"
+path = "src/bin/gate_test.rs"
+
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 rumqttc = "0.24"
 rumqttd = "0.19"
@@ -20,6 +25,9 @@ serde_json = "1"
 toml = "0.8"
 tokio-serial = "5.4"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
+http-body-util = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
 time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
@@ -32,3 +40,7 @@ crossterm = "0.28"
 
 [dev-dependencies]
 tempfile = "3.24.0"
+
+[profile.release]
+lto = true
+codegen-units = 1

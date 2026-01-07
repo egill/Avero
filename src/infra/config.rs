@@ -67,6 +67,13 @@ pub struct AuthorizationConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MetricsConfig {
     pub interval_secs: u64,
+    /// Prometheus metrics HTTP port (0 to disable)
+    #[serde(default = "default_prometheus_port")]
+    pub prometheus_port: u16,
+}
+
+fn default_prometheus_port() -> u16 {
+    80 // Default to port 80 for Prometheus scraping
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -90,11 +97,19 @@ fn default_acc_listener_port() -> u16 {
     25803
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct EgressConfig {
     /// File path for journey egress (JSONL format)
     #[serde(default = "default_egress_file")]
     pub file: String,
+}
+
+impl Default for EgressConfig {
+    fn default() -> Self {
+        Self {
+            file: default_egress_file(),
+        }
+    }
 }
 
 fn default_egress_file() -> String {
@@ -186,8 +201,21 @@ impl Default for BrokerConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SiteConfig {
+    /// Unique site identifier (e.g., "netto", "grandi")
+    #[serde(default = "default_site_id")]
+    pub id: String,
+}
+
+fn default_site_id() -> String {
+    "gateway".to_string()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct TomlConfig {
+    #[serde(default)]
+    pub site: SiteConfig,
     pub mqtt: MqttConfig,
     pub gate: GateConfig,
     pub rs485: Rs485Config,
@@ -207,6 +235,7 @@ pub struct TomlConfig {
 /// Main configuration struct used throughout the application
 #[derive(Debug, Clone)]
 pub struct Config {
+    site_id: String,
     mqtt_host: String,
     mqtt_port: u16,
     mqtt_topic: String,
@@ -228,6 +257,7 @@ pub struct Config {
     zone_names: HashMap<i32, String>,
     min_dwell_ms: u64,
     metrics_interval_secs: u64,
+    prometheus_port: u16,
     config_file: String,
     acc_ip_to_pos: HashMap<String, String>,
     acc_listener_enabled: bool,
@@ -249,6 +279,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            site_id: "gateway".to_string(),
             mqtt_host: "localhost".to_string(),
             mqtt_port: 1883,
             mqtt_topic: "#".to_string(),
@@ -270,6 +301,7 @@ impl Default for Config {
             zone_names: Self::default_zone_names(),
             min_dwell_ms: 7000,
             metrics_interval_secs: 10,
+            prometheus_port: 80,
             config_file: "default".to_string(),
             acc_ip_to_pos: HashMap::new(),
             acc_listener_enabled: true,
@@ -343,6 +375,7 @@ impl Config {
         }
 
         Ok(Self {
+            site_id: toml_config.site.id,
             mqtt_host: toml_config.mqtt.host,
             mqtt_port: toml_config.mqtt.port,
             mqtt_topic: toml_config.mqtt.topic,
@@ -364,6 +397,7 @@ impl Config {
             zone_names,
             min_dwell_ms: toml_config.authorization.min_dwell_ms,
             metrics_interval_secs: toml_config.metrics.interval_secs,
+            prometheus_port: toml_config.metrics.prometheus_port,
             config_file: path.display().to_string(),
             acc_ip_to_pos: toml_config.acc.ip_to_pos,
             acc_listener_enabled: toml_config.acc.listener_enabled,
@@ -409,6 +443,10 @@ impl Config {
     }
 
     // Getters for all config fields
+    pub fn site_id(&self) -> &str {
+        &self.site_id
+    }
+
     pub fn mqtt_host(&self) -> &str {
         &self.mqtt_host
     }
@@ -487,6 +525,10 @@ impl Config {
 
     pub fn metrics_interval_secs(&self) -> u64 {
         self.metrics_interval_secs
+    }
+
+    pub fn prometheus_port(&self) -> u16 {
+        self.prometheus_port
     }
 
     pub fn config_file(&self) -> &str {
@@ -622,5 +664,17 @@ mod tests {
             "--config=config/grandi.toml".to_string(),
         ];
         assert_eq!(Config::resolve_config_path(&args), "config/grandi.toml");
+    }
+
+    #[test]
+    fn test_egress_file_default() {
+        // Verify that EgressConfig::default() returns proper default, not empty string
+        let egress = EgressConfig::default();
+        assert_eq!(egress.file, "journeys.jsonl");
+        assert!(!egress.file.is_empty());
+
+        // Verify that Config::default() also has proper egress file
+        let config = Config::default();
+        assert_eq!(config.egress_file(), "journeys.jsonl");
     }
 }

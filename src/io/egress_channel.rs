@@ -4,7 +4,7 @@
 //! Uses bounded mpsc channels to prevent unbounded memory growth.
 
 use crate::domain::journey::{epoch_ms, Journey};
-use crate::infra::metrics::MetricsSummary;
+use crate::infra::metrics::{MetricsSummary, METRICS_NUM_BUCKETS};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
@@ -34,8 +34,11 @@ pub struct JourneyPayload {
 /// Payload for live zone events
 #[derive(Debug, Clone, Serialize)]
 pub struct ZoneEventPayload {
+    /// Site identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
     /// Track ID from Xovis
-    pub tid: i32,
+    pub tid: i64,
     /// Event type (zone_entry, zone_exit, line_cross)
     pub t: String,
     /// Zone name
@@ -66,12 +69,29 @@ pub struct MetricsPayload {
     pub avg_latency_us: u64,
     /// Max processing latency (microseconds)
     pub max_latency_us: u64,
+    /// Event processing latency histogram buckets (Prometheus-style exponential)
+    /// Bounds: ≤100, ≤200, ≤400, ≤800, ≤1600, ≤3200, ≤6400, ≤12800, ≤25600, ≤51200, >51200 µs
+    pub lat_buckets: [u64; METRICS_NUM_BUCKETS],
+    /// 50th percentile latency (µs)
+    pub lat_p50_us: u64,
+    /// 95th percentile latency (µs)
+    pub lat_p95_us: u64,
+    /// 99th percentile latency (µs)
+    pub lat_p99_us: u64,
     /// Current active tracks
     pub active_tracks: usize,
     /// Authorized tracks
     pub authorized_tracks: usize,
     /// Total gate commands sent
     pub gate_cmds: u64,
+    /// Gate command E2E latency histogram buckets (same bounds)
+    pub gate_lat_buckets: [u64; METRICS_NUM_BUCKETS],
+    /// Average gate command latency (µs)
+    pub gate_lat_avg_us: u64,
+    /// Max gate command latency (µs)
+    pub gate_lat_max_us: u64,
+    /// 99th percentile gate command latency (µs)
+    pub gate_lat_p99_us: u64,
 }
 
 impl From<MetricsSummary> for MetricsPayload {
@@ -82,9 +102,17 @@ impl From<MetricsSummary> for MetricsPayload {
             events_per_sec: summary.events_per_sec,
             avg_latency_us: summary.avg_process_latency_us,
             max_latency_us: summary.max_process_latency_us,
+            lat_buckets: summary.lat_buckets,
+            lat_p50_us: summary.lat_p50_us,
+            lat_p95_us: summary.lat_p95_us,
+            lat_p99_us: summary.lat_p99_us,
             active_tracks: summary.active_tracks,
             authorized_tracks: summary.authorized_tracks,
             gate_cmds: summary.gate_commands_sent,
+            gate_lat_buckets: summary.gate_lat_buckets,
+            gate_lat_avg_us: summary.gate_lat_avg_us,
+            gate_lat_max_us: summary.gate_lat_max_us,
+            gate_lat_p99_us: summary.gate_lat_p99_us,
         }
     }
 }
@@ -92,13 +120,16 @@ impl From<MetricsSummary> for MetricsPayload {
 /// Payload for gate state changes
 #[derive(Debug, Clone, Serialize)]
 pub struct GateStatePayload {
+    /// Site identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
     /// Timestamp (epoch ms)
     pub ts: u64,
     /// Gate state (cmd_sent, open, closed, moving)
     pub state: String,
     /// Associated track ID (if any)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tid: Option<i32>,
+    pub tid: Option<i64>,
     /// Source of the state change (rs485, tcp, cmd)
     pub src: String,
 }
@@ -106,15 +137,18 @@ pub struct GateStatePayload {
 /// Payload for track lifecycle events
 #[derive(Debug, Clone, Serialize)]
 pub struct TrackEventPayload {
+    /// Site identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
     /// Timestamp (epoch ms)
     pub ts: u64,
     /// Event type: create, delete, stitch, lost, reentry
     pub t: String,
     /// Primary track ID
-    pub tid: i32,
+    pub tid: i64,
     /// Previous track ID (for stitch events)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub prev_tid: Option<i32>,
+    pub prev_tid: Option<i64>,
     /// Authorization status
     pub auth: bool,
     /// Accumulated dwell time
@@ -130,9 +164,31 @@ pub struct TrackEventPayload {
     pub parent_jid: Option<String>,
 }
 
+/// Debug info for a track when ACC unmatched
+#[derive(Debug, Clone, Serialize)]
+pub struct AccDebugTrack {
+    pub tid: i64,
+    pub zone: Option<String>,
+    pub dwell_ms: u64,
+    pub auth: bool,
+}
+
+/// Debug info for recently lost/pending tracks
+#[derive(Debug, Clone, Serialize)]
+pub struct AccDebugPending {
+    pub tid: i64,
+    pub last_zone: Option<String>,
+    pub dwell_ms: u64,
+    pub auth: bool,
+    pub pending_ms: u64,
+}
+
 /// Payload for ACC (payment terminal) events
 #[derive(Debug, Clone, Serialize)]
 pub struct AccEventPayload {
+    /// Site identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
     /// Timestamp (epoch ms)
     pub ts: u64,
     /// Event type: received, matched, unmatched
@@ -144,7 +200,7 @@ pub struct AccEventPayload {
     pub pos: Option<String>,
     /// Matched track ID (if matched)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tid: Option<i32>,
+    pub tid: Option<i64>,
     /// Dwell time at match (if matched)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dwell_ms: Option<u64>,
@@ -156,6 +212,12 @@ pub struct AccEventPayload {
     pub delta_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gate_cmd_at: Option<u64>,
+    /// Debug: active tracks when unmatched
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug_active: Option<Vec<AccDebugTrack>>,
+    /// Debug: pending/lost tracks when unmatched
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug_pending: Option<Vec<AccDebugPending>>,
 }
 
 /// Sender handle for egress messages
@@ -165,24 +227,28 @@ pub struct AccEventPayload {
 #[derive(Clone)]
 pub struct EgressSender {
     tx: mpsc::Sender<EgressMessage>,
+    site_id: String,
 }
 
 impl EgressSender {
     /// Create a new sender from an mpsc sender
-    pub fn new(tx: mpsc::Sender<EgressMessage>) -> Self {
-        Self { tx }
+    pub fn new(tx: mpsc::Sender<EgressMessage>, site_id: String) -> Self {
+        Self { tx, site_id }
     }
 
     /// Send a completed journey for publishing
+    /// Includes site_id in the JSON payload
     pub fn send_journey(&self, journey: &Journey) {
-        let json = journey.to_json();
+        let json = journey.to_json_with_site(&self.site_id);
         let payload = JourneyPayload { json };
         // Use try_send to avoid blocking - drop if channel full
         let _ = self.tx.try_send(EgressMessage::Journey(payload));
     }
 
     /// Send a zone event for live display
-    pub fn send_zone_event(&self, payload: ZoneEventPayload) {
+    /// Injects site_id into the payload
+    pub fn send_zone_event(&self, mut payload: ZoneEventPayload) {
+        payload.site = Some(self.site_id.clone());
         let _ = self.tx.try_send(EgressMessage::ZoneEvent(payload));
     }
 
@@ -193,17 +259,23 @@ impl EgressSender {
     }
 
     /// Send a gate state change
-    pub fn send_gate_state(&self, payload: GateStatePayload) {
+    /// Injects site_id into the payload
+    pub fn send_gate_state(&self, mut payload: GateStatePayload) {
+        payload.site = Some(self.site_id.clone());
         let _ = self.tx.try_send(EgressMessage::GateState(payload));
     }
 
     /// Send a track lifecycle event
-    pub fn send_track_event(&self, payload: TrackEventPayload) {
+    /// Injects site_id into the payload
+    pub fn send_track_event(&self, mut payload: TrackEventPayload) {
+        payload.site = Some(self.site_id.clone());
         let _ = self.tx.try_send(EgressMessage::TrackEvent(payload));
     }
 
     /// Send an ACC (payment terminal) event
-    pub fn send_acc_event(&self, payload: AccEventPayload) {
+    /// Injects site_id into the payload
+    pub fn send_acc_event(&self, mut payload: AccEventPayload) {
+        payload.site = Some(self.site_id.clone());
         let _ = self.tx.try_send(EgressMessage::AccEvent(payload));
     }
 }
@@ -212,7 +284,8 @@ impl EgressSender {
 ///
 /// Returns (sender, receiver) where sender can be cloned and shared.
 /// Buffer size determines how many messages can be queued.
-pub fn create_egress_channel(buffer_size: usize) -> (EgressSender, mpsc::Receiver<EgressMessage>) {
+/// site_id is included in journey payloads for downstream consumers.
+pub fn create_egress_channel(buffer_size: usize, site_id: String) -> (EgressSender, mpsc::Receiver<EgressMessage>) {
     let (tx, rx) = mpsc::channel(buffer_size);
-    (EgressSender::new(tx), rx)
+    (EgressSender::new(tx, site_id), rx)
 }

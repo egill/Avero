@@ -1,6 +1,9 @@
 # Netto store configuration
 # Production environment at Netto
 
+[site]
+id = "netto"
+
 [mqtt]
 host = "localhost"
 port = 1883
@@ -43,6 +46,7 @@ store_zone = 1009
 min_dwell_ms = 7000
 
 [metrics]
+prometheus_port = 9090
 interval_secs = 10
 
 [acc]
