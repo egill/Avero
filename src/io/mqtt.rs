@@ -134,7 +134,7 @@ fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
     let event_time = timestamp_to_epoch_ms(&frame.time);
 
     for xovis_event in &frame.events {
-        let event_type = EventType::from_str(&xovis_event.event_type);
+        let event_type: EventType = xovis_event.event_type.parse().unwrap();
 
         let attrs = xovis_event.attributes.as_ref().unwrap_or(&EventAttributes {
             track_id: None,
