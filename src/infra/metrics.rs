@@ -130,9 +130,9 @@ pub struct Metrics {
     /// Index is determined by order in pos_zones config
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
     /// Zone IDs for POS zones (set once at init)
-    pos_zone_ids: std::sync::Mutex<Vec<i32>>,
+    pos_zone_ids: parking_lot::Mutex<Vec<i32>>,
     /// Last report time (only accessed from reporter, not atomic)
-    last_report_time: std::sync::Mutex<Instant>,
+    last_report_time: parking_lot::Mutex<Instant>,
 }
 
 impl Metrics {
@@ -161,21 +161,21 @@ impl Metrics {
             acc_late_total: AtomicU64::new(0),
             acc_no_journey_total: AtomicU64::new(0),
             pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
-            pos_zone_ids: std::sync::Mutex::new(Vec::new()),
-            last_report_time: std::sync::Mutex::new(Instant::now()),
+            pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
+            last_report_time: parking_lot::Mutex::new(Instant::now()),
         }
     }
 
     /// Set the POS zone IDs (call once at initialization)
     pub fn set_pos_zones(&self, zone_ids: &[i32]) {
-        let mut zones = self.pos_zone_ids.lock().unwrap();
+        let mut zones = self.pos_zone_ids.lock();
         zones.clear();
         zones.extend(zone_ids.iter().take(MAX_POS_ZONES));
     }
 
     /// Get the index for a zone ID, or None if not a POS zone
     fn zone_index(&self, zone_id: i32) -> Option<usize> {
-        let zones = self.pos_zone_ids.lock().unwrap();
+        let zones = self.pos_zone_ids.lock();
         zones.iter().position(|&id| id == zone_id)
     }
 
@@ -201,7 +201,7 @@ impl Metrics {
 
     /// Get current POS zone occupancy for all zones
     pub fn pos_occupancy(&self) -> Vec<(i32, u64)> {
-        let zones = self.pos_zone_ids.lock().unwrap();
+        let zones = self.pos_zone_ids.lock();
         zones
             .iter()
             .enumerate()
@@ -415,7 +415,7 @@ impl Metrics {
 
         // Calculate elapsed time and reset
         let elapsed = {
-            let mut last = self.last_report_time.lock().unwrap();
+            let mut last = self.last_report_time.lock();
             let elapsed = last.elapsed();
             *last = Instant::now();
             elapsed

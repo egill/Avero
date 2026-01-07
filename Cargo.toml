@@ -34,6 +34,7 @@ time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
 base64 = "0.22"
 uuid = { version = "1", features = ["v7"] }
 bytes = "1"
+parking_lot = "0.12"
 # TUI dependencies
 ratatui = "0.29"
 crossterm = "0.28"
