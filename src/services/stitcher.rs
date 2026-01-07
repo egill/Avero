@@ -158,7 +158,7 @@ impl Stitcher {
         }
 
         best_match.map(|(idx, distance_cm, same_zone)| {
-            let pending = self.pending.remove(idx);
+            let pending = self.pending.swap_remove(idx);
             let time_ms = now.duration_since(pending.deleted_at).as_millis() as u64;
             info!(
                 old_track_id = %pending.person.track_id,

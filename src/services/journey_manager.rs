@@ -77,7 +77,7 @@ impl JourneyManager {
 
         let journey = if let Some(idx) = pending_idx {
             // Remove from pending egress
-            let pending = self.pending_egress.remove(idx);
+            let pending = self.pending_egress.swap_remove(idx);
             Some(pending.journey)
         } else {
             // Try active journeys

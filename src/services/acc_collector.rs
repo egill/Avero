@@ -277,7 +277,7 @@ impl AccCollector {
                     .map(|(idx, _)| idx);
 
                 if let Some(idx) = idx {
-                    let exit = exits.remove(idx);
+                    let exit = exits.swap_remove(idx);
                     let track_id = exit.track_id;
                     let time_since = now.duration_since(exit.exited_at).as_millis() as u64;
 

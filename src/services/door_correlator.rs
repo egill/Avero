@@ -104,7 +104,7 @@ impl DoorCorrelator {
             .map(|(idx, _)| idx);
 
         if let Some(idx) = cmd_idx {
-            let cmd = self.pending_cmds.remove(idx);
+            let cmd = self.pending_cmds.swap_remove(idx);
             let delta_ms = now.duration_since(cmd.sent_at).as_millis() as u64;
             let track_id = cmd.track_id;
 
