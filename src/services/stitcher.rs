@@ -50,6 +50,12 @@ pub struct Stitcher {
     metrics: Option<Arc<Metrics>>,
 }
 
+impl Default for Stitcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Stitcher {
     #[allow(dead_code)]
     pub fn new() -> Self {

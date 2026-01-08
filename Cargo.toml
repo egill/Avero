@@ -3,6 +3,10 @@ name = "gateway-poc"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "gateway_poc"
+path = "src/lib.rs"
+
 [[bin]]
 name = "gateway-poc"
 path = "src/main.rs"
