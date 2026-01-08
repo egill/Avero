@@ -46,6 +46,6 @@ crossterm = "0.28"
 tempfile = "3.24.0"
 
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
 panic = "abort"
