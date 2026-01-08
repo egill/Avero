@@ -4,7 +4,7 @@
 //! are present (within GROUP_WINDOW_MS) are considered a group.
 //! When ACC matches any group member, all members are authorized.
 
-use crate::domain::journey::{epoch_ms, JourneyEvent};
+use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyEventType};
 use crate::domain::types::TrackId;
 use crate::infra::config::Config;
 use crate::services::journey_manager::JourneyManager;
@@ -271,7 +271,7 @@ impl AccCollector {
                     }
                     journey_manager.add_event(
                         track_id,
-                        JourneyEvent::new("acc", ts)
+                        JourneyEvent::new(JourneyEventType::Acc, ts)
                             .with_zone(pos)
                             .with_extra(&format!("kiosk={kiosk_str},group={}", all_members.len())),
                     );
@@ -325,7 +325,7 @@ impl AccCollector {
                         }
                         journey_manager.add_event(
                             tid,
-                            JourneyEvent::new("acc", ts).with_zone(pos).with_extra(&format!(
+                            JourneyEvent::new(JourneyEventType::Acc, ts).with_zone(pos).with_extra(&format!(
                                 "kiosk={kiosk_str},group={}",
                                 all_members.len()
                             )),

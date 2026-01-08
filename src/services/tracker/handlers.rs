@@ -4,7 +4,7 @@
 //! journey state, and triggering side effects (gate commands, etc.)
 
 use super::Tracker;
-use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyOutcome};
+use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyEventType, JourneyOutcome};
 use crate::domain::types::{DoorStatus, GeometryId, ParsedEvent, Person, TrackId};
 use crate::infra::metrics::{GATE_STATE_CLOSED, GATE_STATE_MOVING, GATE_STATE_OPEN};
 use crate::io::{
@@ -110,7 +110,7 @@ impl Tracker {
                 );
                 self.journey_manager.add_event(
                     track_id,
-                    JourneyEvent::new("track_create", ts)
+                    JourneyEvent::new(JourneyEventType::TrackCreate, ts)
                         .with_extra(&format!("reentry_from={}", reentry.parent_jid)),
                 );
 
@@ -131,7 +131,7 @@ impl Tracker {
                 }
             } else {
                 self.journey_manager.new_journey(track_id);
-                self.journey_manager.add_event(track_id, JourneyEvent::new("track_create", ts));
+                self.journey_manager.add_event(track_id, JourneyEvent::new(JourneyEventType::TrackCreate, ts));
 
                 // Publish create event to MQTT
                 if let Some(ref sender) = self.egress_sender {
@@ -206,7 +206,7 @@ impl Tracker {
             }
             self.journey_manager.add_event(
                 track_id,
-                JourneyEvent::new("pending", ts).with_zone(&last_zone).with_extra(&format!(
+                JourneyEvent::new(JourneyEventType::Pending, ts).with_zone(&last_zone).with_extra(&format!(
                     "auth={},dwell={}",
                     person.authorized, person.accumulated_dwell_ms
                 )),
@@ -260,7 +260,7 @@ impl Tracker {
 
         // Add to journey manager
         self.journey_manager
-            .add_event(track_id, JourneyEvent::new("zone_entry", ts).with_zone(&zone));
+            .add_event(track_id, JourneyEvent::new(JourneyEventType::ZoneEntry, ts).with_zone(&zone));
 
         // Publish zone event to MQTT
         if let Some(ref sender) = self.egress_sender {
@@ -348,7 +348,7 @@ impl Tracker {
                 // Update journey manager
                 self.journey_manager.add_event(
                     track_id,
-                    JourneyEvent::new("zone_exit", ts)
+                    JourneyEvent::new(JourneyEventType::ZoneExit, ts)
                         .with_zone(&zone)
                         .with_extra(&format!("dwell={dwell_ms}")),
                 );
@@ -371,7 +371,7 @@ impl Tracker {
             }
         } else {
             self.journey_manager
-                .add_event(track_id, JourneyEvent::new("zone_exit", ts).with_zone(&zone));
+                .add_event(track_id, JourneyEvent::new(JourneyEventType::ZoneExit, ts).with_zone(&zone));
             None
         };
 
@@ -419,13 +419,13 @@ impl Tracker {
 
         // Determine event type based on line
         let event_type = if self.config.entry_line() == Some(geometry_id.0) {
-            "entry_cross"
+            JourneyEventType::EntryCross
         } else if geometry_id.0 == self.config.exit_line() {
-            "exit_cross"
+            JourneyEventType::ExitCross
         } else if self.config.approach_line() == Some(geometry_id.0) {
-            "approach_cross"
+            JourneyEventType::ApproachCross
         } else {
-            "line_cross"
+            JourneyEventType::LineCross
         };
 
         // Add line cross event to journey manager
@@ -593,7 +593,7 @@ impl Tracker {
                     .iter()
                     .rev()
                     .find(|e| {
-                        e.t == "zone_entry" && e.z.as_deref() == Some(gate_zone_name.as_str())
+                        e.t == JourneyEventType::ZoneEntry && e.z.as_deref() == Some(gate_zone_name.as_str())
                     })
                     .map(|e| e.ts);
                 if let Some(entry_ts) = gate_entry_ts {
@@ -761,7 +761,7 @@ impl Tracker {
         }
         self.journey_manager.add_event(
             track_id,
-            JourneyEvent::new("gate_cmd", ts)
+            JourneyEvent::new(JourneyEventType::GateCmd, ts)
                 .with_extra(&format!("cmd_us={cmd_latency_us},e2e_us={e2e_latency_us}")),
         );
 

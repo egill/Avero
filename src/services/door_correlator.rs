@@ -3,7 +3,7 @@
 //! Correlates gate commands sent by the tracker with actual door state
 //! changes from the RS485 monitor.
 
-use crate::domain::journey::{epoch_ms, JourneyEvent};
+use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyEventType};
 use crate::domain::types::{DoorStatus, TrackId};
 use crate::services::journey_manager::JourneyManager;
 use smallvec::SmallVec;
@@ -132,7 +132,7 @@ impl DoorCorrelator {
             // Add event to journey
             journey_manager.add_event(
                 track_id,
-                JourneyEvent::new("gate_open", now_ms).with_extra(&format!("delta_ms={delta_ms}")),
+                JourneyEvent::new(JourneyEventType::GateOpen, now_ms).with_extra(&format!("delta_ms={delta_ms}")),
             );
 
             return Some(track_id);

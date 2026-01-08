@@ -164,7 +164,7 @@
       "instructions": "Create clippy.toml with sensible defaults. Consider: too-many-arguments-threshold = 8 (cloudplus.rs:378 has 8 args). Can also enable additional lints like clippy::pedantic selectively.",
       "priority": 3,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -179,7 +179,7 @@
       "instructions": "Create rustfmt.toml with project preferences. Common settings: max_width = 100, use_small_heuristics = 'Max'. Run 'cargo fmt' after creating.",
       "priority": 3,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -194,7 +194,7 @@
       "instructions": "In bin/gate_test.rs:415, 'Box::leak(name.into_boxed_str())' leaks memory to get &'static str. Change results vector to use owned String instead.",
       "priority": 2,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -210,7 +210,7 @@
       "instructions": "In io/cloudplus.rs:245-255, multiple locks are acquired in different orders (lines 295-298 vs 369-371). Create a single CloudPlusState struct to hold all state, protected by one lock. This is a larger refactor.",
       "priority": 3,
       "estimatedMinutes": 60,
-      "passes": false,
+      "passes": true,
       "notes": "Larger refactor - consider breaking into sub-tasks if needed"
     },
     {
@@ -226,7 +226,7 @@
       "instructions": "Add anyhow to dependencies. In infra/config.rs, Config::from_file returns Result<Self, String>. Change to anyhow::Result<Self> and use .context() instead of .map_err(|e| format!(...)). Preserves original error in chain.",
       "priority": 3,
       "estimatedMinutes": 20,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -243,7 +243,7 @@
       "instructions": "Start with Person struct only. Create 'pub struct TrackId(pub i64);' with appropriate derives. Update Person.track_id to use TrackId. This is phase 1 - don't change all 30+ locations at once.",
       "priority": 3,
       "estimatedMinutes": 20,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 of newtype rollout - Person struct only"
     },
     {
@@ -258,7 +258,7 @@
       "instructions": "After US-016. Update tracker/mod.rs and handlers.rs to use TrackId. The compiler will guide you to all locations that need updating.",
       "priority": 3,
       "estimatedMinutes": 30,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 2 of newtype rollout - depends on US-016"
     },
     {
@@ -273,7 +273,7 @@
       "instructions": "After US-017. Update services/journey_manager.rs to use TrackId throughout. Compiler errors will guide you.",
       "priority": 3,
       "estimatedMinutes": 20,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 3 of newtype rollout - depends on US-017"
     },
     {
@@ -288,7 +288,7 @@
       "instructions": "After US-018. Final phase - update all remaining modules. Search: grep -rn 'track_id: i64' src/ to find remaining locations.",
       "priority": 3,
       "estimatedMinutes": 40,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 4 of newtype rollout - depends on US-018"
     },
     {
@@ -304,7 +304,7 @@
       "instructions": "Similar to TrackId. Create newtype, update ParsedEvent.geometry_id and EventAttributes.geometry_id. Prevents mixing geometry_id with other i32 values.",
       "priority": 4,
       "estimatedMinutes": 25,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -319,7 +319,7 @@
       "instructions": "In services/acc_collector.rs:431, 'pub fn pos_for_ip(&self, ip: &str) -> Option<&String>' should return Option<&str>. More idiomatic Rust.",
       "priority": 4,
       "estimatedMinutes": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -334,7 +334,7 @@
       "instructions": "In domain/types.rs:78, 'Ok(TimestampValue::EpochMs(value as u64))' silently wraps negative i64 to large u64. Use u64::try_from(value).map_err(...) or .unwrap_or(0) with a warning log.",
       "priority": 4,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -350,7 +350,7 @@
       "instructions": "Search for small utility functions called frequently. epoch_ms() is called throughout for timestamps. Add #[inline] attribute above function definition.",
       "priority": 4,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -365,7 +365,7 @@
       "instructions": "Journey.tids rarely has >4 elements. SmallVec stores up to N elements inline without heap allocation. In domain/journey.rs, change 'tids: Vec<i64>' to 'tids: SmallVec<[i64; 4]>'. Import with 'use smallvec::SmallVec;'.",
       "priority": 4,
       "estimatedMinutes": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -379,7 +379,7 @@
       "instructions": "After US-024 (smallvec added). In services/door_correlator.rs:29, pending_cmds typically has 0-2 elements. Change to SmallVec<[PendingGateCmd; 2]>.",
       "priority": 4,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-024"
     },
     {
@@ -394,7 +394,7 @@
       "instructions": "In Cargo.toml [profile.release], add 'panic = \"abort\"'. This skips unwinding overhead, appropriate for embedded RPi5 deployment. Reduces binary size.",
       "priority": 4,
       "estimatedMinutes": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -409,7 +409,7 @@
       "instructions": "Create .cargo/config.toml with:\n[target.aarch64-unknown-linux-gnu]\nrustflags = [\"-C\", \"target-cpu=cortex-a76\"]\n\nThis enables RPi5-specific optimizations when cross-compiling.",
       "priority": 4,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -440,7 +440,7 @@
       "instructions": "clap is already in Cargo.toml but not used. In main.rs, replace 'let args: Vec<String> = std::env::args().collect()' with clap Parser. Add struct Args with #[arg(short, long)] for config path.",
       "priority": 4,
       "estimatedMinutes": 20,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

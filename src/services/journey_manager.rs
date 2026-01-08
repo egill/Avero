@@ -1,6 +1,6 @@
 //! Journey manager for tracking and persisting customer journeys
 
-use crate::domain::journey::{epoch_ms, Journey, JourneyEvent, JourneyOutcome};
+use crate::domain::journey::{epoch_ms, Journey, JourneyEvent, JourneyEventType, JourneyOutcome};
 use crate::domain::types::TrackId;
 use rustc_hash::FxHashMap;
 use std::time::{Duration, Instant};
@@ -101,7 +101,7 @@ impl JourneyManager {
             let old_jid = journey.jid.clone();
 
             // Add stitch event
-            journey.add_event(JourneyEvent::new("stitch", epoch_ms()).with_extra(&format!(
+            journey.add_event(JourneyEvent::new(JourneyEventType::Stitch, epoch_ms()).with_extra(&format!(
                 "from={old_track_id},time_ms={time_ms},dist_cm={distance_cm}"
             )));
 
@@ -279,11 +279,11 @@ mod tests {
         let mut manager = JourneyManager::new();
         manager.new_journey(TrackId(100));
 
-        manager.add_event(100, JourneyEvent::new("zone_entry", 1000).with_zone("POS_1"));
+        manager.add_event(TrackId(100), JourneyEvent::new("zone_entry", 1000).with_zone("POS_1"));
 
         let journey = manager.get(TrackId(100)).unwrap();
         assert_eq!(journey.events.len(), 1);
-        assert_eq!(journey.events[0].t, "zone_entry");
+        assert_eq!(journey.events[0].t, JourneyEventType::ZoneEntry);
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
         assert!(journey.authorized);
         assert_eq!(journey.total_dwell_ms, 5000);
         assert_eq!(journey.events.len(), 1);
-        assert_eq!(journey.events[0].t, "stitch");
+        assert_eq!(journey.events[0].t, JourneyEventType::Stitch);
     }
 
     #[test]

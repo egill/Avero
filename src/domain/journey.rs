@@ -36,18 +36,55 @@ impl JourneyOutcome {
     }
 }
 
+/// Event types that can occur in a journey
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JourneyEventType {
+    TrackCreate,
+    ZoneEntry,
+    ZoneExit,
+    EntryCross,
+    ExitCross,
+    ApproachCross,
+    LineCross,
+    Pending,
+    Stitch,
+    GateCmd,
+    GateOpen,
+    Acc,
+}
+
+impl JourneyEventType {
+    /// Convert to string representation for JSON serialization
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JourneyEventType::TrackCreate => "track_create",
+            JourneyEventType::ZoneEntry => "zone_entry",
+            JourneyEventType::ZoneExit => "zone_exit",
+            JourneyEventType::EntryCross => "entry_cross",
+            JourneyEventType::ExitCross => "exit_cross",
+            JourneyEventType::ApproachCross => "approach_cross",
+            JourneyEventType::LineCross => "line_cross",
+            JourneyEventType::Pending => "pending",
+            JourneyEventType::Stitch => "stitch",
+            JourneyEventType::GateCmd => "gate_cmd",
+            JourneyEventType::GateOpen => "gate_open",
+            JourneyEventType::Acc => "acc",
+        }
+    }
+}
+
 /// A single event in a journey
 #[derive(Debug, Clone)]
 pub struct JourneyEvent {
-    pub t: String,             // event type
+    pub t: JourneyEventType,   // event type
     pub z: Option<String>,     // zone or line name
     pub ts: u64,               // epoch ms
     pub extra: Option<String>, // additional data
 }
 
 impl JourneyEvent {
-    pub fn new(event_type: &str, ts: u64) -> Self {
-        Self { t: event_type.to_string(), z: None, ts, extra: None }
+    pub fn new(event_type: JourneyEventType, ts: u64) -> Self {
+        Self { t: event_type, z: None, ts, extra: None }
     }
 
     pub fn with_zone(mut self, zone: &str) -> Self {
@@ -63,7 +100,7 @@ impl JourneyEvent {
     /// Convert to JSON value for short-key format
     fn to_json_value(&self) -> serde_json::Value {
         let mut obj = serde_json::Map::new();
-        obj.insert("t".to_string(), serde_json::Value::String(self.t.clone()));
+        obj.insert("t".to_string(), serde_json::Value::String(self.t.as_str().to_string()));
         if let Some(z) = &self.z {
             obj.insert("z".to_string(), serde_json::Value::String(z.clone()));
         }
@@ -267,11 +304,11 @@ mod tests {
 
     #[test]
     fn test_journey_event() {
-        let event = JourneyEvent::new("zone_entry", 1736012345678)
+        let event = JourneyEvent::new(JourneyEventType::ZoneEntry, 1736012345678)
             .with_zone("POS_1")
             .with_extra("dwell=7500");
 
-        assert_eq!(event.t, "zone_entry");
+        assert_eq!(event.t, JourneyEventType::ZoneEntry);
         assert_eq!(event.z, Some("POS_1".to_string()));
         assert_eq!(event.ts, 1736012345678);
         assert_eq!(event.extra, Some("dwell=7500".to_string()));
@@ -287,10 +324,10 @@ mod tests {
         journey.gate_cmd_at = Some(1736012345678);
         journey.gate_opened_at = Some(1736012345890);
 
-        journey.add_event(JourneyEvent::new("entry_cross", 1736012340000));
-        journey.add_event(JourneyEvent::new("zone_entry", 1736012341000).with_zone("POS_1"));
+        journey.add_event(JourneyEvent::new(JourneyEventType::EntryCross, 1736012340000));
+        journey.add_event(JourneyEvent::new(JourneyEventType::ZoneEntry, 1736012341000).with_zone("POS_1"));
         journey.add_event(
-            JourneyEvent::new("zone_exit", 1736012348500)
+            JourneyEvent::new(JourneyEventType::ZoneExit, 1736012348500)
                 .with_zone("POS_1")
                 .with_extra("dwell=7500"),
         );

@@ -81,7 +81,7 @@ impl Egress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::journey::{Journey, JourneyEvent, JourneyOutcome};
+    use crate::domain::journey::{Journey, JourneyEvent, JourneyEventType, JourneyOutcome};
     use crate::domain::types::TrackId;
     use std::fs;
     use tempfile::tempdir;
@@ -104,7 +104,7 @@ mod tests {
         journey.authorized = true;
         journey.total_dwell_ms = 7500;
         journey.crossed_entry = true;
-        journey.add_event(JourneyEvent::new("entry_cross", 1234567890));
+        journey.add_event(JourneyEvent::new(JourneyEventType::EntryCross, 1234567890));
         journey.complete(JourneyOutcome::Completed);
 
         let result = egress.write_journey(&journey);
