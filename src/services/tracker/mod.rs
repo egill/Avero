@@ -14,7 +14,7 @@ use crate::domain::journey::Journey;
 use crate::domain::types::{EventType, ParsedEvent, Person, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
-use crate::io::egress::Egress;
+use crate::io::egress::{Egress, JourneyWriter};
 use crate::io::EgressSender;
 use crate::services::acc_collector::AccCollector;
 use crate::services::door_correlator::DoorCorrelator;

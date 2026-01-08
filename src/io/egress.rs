@@ -9,6 +9,17 @@ use std::io::Write;
 use std::path::Path;
 use tracing::{debug, error, info};
 
+/// Trait for writing journeys - enables mock implementations for testing
+pub trait JourneyWriter: Send + Sync {
+    /// Write a journey, returns true if successful
+    fn write_journey(&self, journey: &Journey) -> bool;
+
+    /// Write multiple journeys, returns count of successful writes
+    fn write_journeys(&self, journeys: &[Journey]) -> usize {
+        journeys.iter().filter(|j| self.write_journey(j)).count()
+    }
+}
+
 /// Egress writer for journeys
 pub struct Egress {
     file_path: String,
@@ -22,7 +33,7 @@ impl Egress {
 
     /// Write a journey to the egress file
     /// Returns true if successful, false otherwise
-    pub fn write_journey(&self, journey: &Journey) -> bool {
+    fn write_journey_impl(&self, journey: &Journey) -> bool {
         let json = journey.to_json();
 
         match self.append_line(&json) {
@@ -66,15 +77,11 @@ impl Egress {
         Ok(())
     }
 
-    /// Write multiple journeys
-    pub fn write_journeys(&self, journeys: &[Journey]) -> usize {
-        let mut success_count = 0;
-        for journey in journeys {
-            if self.write_journey(journey) {
-                success_count += 1;
-            }
-        }
-        success_count
+}
+
+impl JourneyWriter for Egress {
+    fn write_journey(&self, journey: &Journey) -> bool {
+        self.write_journey_impl(journey)
     }
 }
 
