@@ -134,11 +134,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prometheus_port = config.prometheus_port();
     if prometheus_port > 0 {
         let prom_metrics = metrics.clone();
+        let prom_site_id = config.site_id().to_string();
         let prom_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
             if let Err(e) = gateway_poc::io::prometheus::start_metrics_server(
                 prometheus_port,
                 prom_metrics,
+                prom_site_id,
                 prom_shutdown,
             )
             .await
