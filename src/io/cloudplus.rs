@@ -545,11 +545,8 @@ impl CloudPlusClient {
 
             match result {
                 Ok(Ok(_)) => {
-                    let hex: String = msg
-                        .iter()
-                        .map(|b| format!("{:02X}", b))
-                        .collect::<Vec<_>>()
-                        .join(" ");
+                    let hex: String =
+                        msg.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ");
                     debug!(len = msg.len(), hex = %hex, "cloudplus_frame_sent");
                 }
                 Ok(Err(e)) => {

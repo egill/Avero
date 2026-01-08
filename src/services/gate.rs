@@ -88,14 +88,7 @@ impl GateController {
             None
         };
 
-        Self {
-            mode: config.gate_mode().clone(),
-            url,
-            username,
-            password,
-            http_client,
-            tcp_client,
-        }
+        Self { mode: config.gate_mode().clone(), url, username, password, http_client, tcp_client }
     }
 
     /// Get the TCP client for running in main

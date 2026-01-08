@@ -76,7 +76,6 @@ impl Egress {
 
         Ok(())
     }
-
 }
 
 impl JourneyWriter for Egress {

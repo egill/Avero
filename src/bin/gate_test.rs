@@ -427,9 +427,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 3: Triple opens
     println!("\n\n▶ PHASE 3: Triple opens");
-    let r = investigator
-        .run_test("Triple Open (1s intervals)", &[1000, 1000])
-        .await?;
+    let r = investigator.run_test("Triple Open (1s intervals)", &[1000, 1000]).await?;
     results.push(("Triple Open 1s".to_string(), r));
 
     if !args.fast {
@@ -438,9 +436,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 4: Quad opens
     println!("\n\n▶ PHASE 4: Quad opens");
-    let r = investigator
-        .run_test("Quad Open (1s intervals)", &[1000, 1000, 1000])
-        .await?;
+    let r = investigator.run_test("Quad Open (1s intervals)", &[1000, 1000, 1000]).await?;
     results.push(("Quad Open 1s".to_string(), r));
 
     if !args.fast {
@@ -449,32 +445,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 5: Rapid fire
     println!("\n\n▶ PHASE 5: Rapid fire (5 opens, 500ms apart)");
-    let r = investigator
-        .run_test("Rapid Fire x5", &[500, 500, 500, 500])
-        .await?;
+    let r = investigator.run_test("Rapid Fire x5", &[500, 500, 500, 500]).await?;
     results.push(("Rapid x5".to_string(), r));
 
     // Print summary
     println!("\n\n╔══════════════════════════════════════════════════════════╗");
     println!("║                      SUMMARY                              ║");
     println!("╚══════════════════════════════════════════════════════════╝\n");
-    println!(
-        "{:<30} {:>6} {:>10} {:>12}",
-        "Test", "Cmds", "Cmd→Open", "Open Duration"
-    );
+    println!("{:<30} {:>6} {:>10} {:>12}", "Test", "Cmds", "Cmd→Open", "Open Duration");
     println!("{}", "-".repeat(60));
 
-    let baseline_open_duration = results.first()
-        .and_then(|(_, r)| r.open_duration_ms)
-        .unwrap_or(0);
+    let baseline_open_duration = results.first().and_then(|(_, r)| r.open_duration_ms).unwrap_or(0);
 
     for (name, r) in &results {
         let cmd_open = r.cmd_to_open_ms.map(|ms| format!("{}ms", ms)).unwrap_or("-".to_string());
-        let open_dur = r.open_duration_ms.map(|ms| {
-            let delta = ms as i64 - baseline_open_duration as i64;
-            let sign = if delta >= 0 { "+" } else { "" };
-            format!("{:.1}s ({}{}ms)", ms as f64 / 1000.0, sign, delta)
-        }).unwrap_or("-".to_string());
+        let open_dur = r
+            .open_duration_ms
+            .map(|ms| {
+                let delta = ms as i64 - baseline_open_duration as i64;
+                let sign = if delta >= 0 { "+" } else { "" };
+                format!("{:.1}s ({}{}ms)", ms as f64 / 1000.0, sign, delta)
+            })
+            .unwrap_or("-".to_string());
         let open_dur = r
             .open_duration_ms
             .map(|ms| {
@@ -484,10 +476,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
             .unwrap_or("-".to_string());
 
-        println!(
-            "{:<30} {:>6} {:>10} {:>12}",
-            name, r.total_open_cmds, cmd_open, open_dur
-        );
+        println!("{:<30} {:>6} {:>10} {:>12}", name, r.total_open_cmds, cmd_open, open_dur);
     }
 
     println!("\n\n╔══════════════════════════════════════════════════════════╗");
@@ -495,15 +484,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╚══════════════════════════════════════════════════════════╝\n");
 
     // Analyze patterns
-    let durations: Vec<u64> = results.iter()
-        .filter_map(|(_, r)| r.open_duration_ms)
-        .collect();
+    let durations: Vec<u64> = results.iter().filter_map(|(_, r)| r.open_duration_ms).collect();
 
     if durations.len() >= 2 {
         let baseline = durations[0];
-        let extended: Vec<_> = durations[1..].iter()
-            .filter(|&&d| d > baseline + 500)
-            .collect();
+        let extended: Vec<_> = durations[1..].iter().filter(|&&d| d > baseline + 500).collect();
 
         if extended.is_empty() {
             println!("FINDING: Additional OPEN commands do NOT extend the open duration.");
@@ -512,10 +497,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let avg_extension =
                 extended.iter().map(|&&d| d - baseline).sum::<u64>() / extended.len() as u64;
             println!("FINDING: Additional OPEN commands DO extend the open duration.");
-            println!(
-                "         Average extension: ~{}ms per additional command",
-                avg_extension
-            );
+            println!("         Average extension: ~{}ms per additional command", avg_extension);
         }
     }
 

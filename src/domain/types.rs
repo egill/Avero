@@ -242,17 +242,8 @@ mod tests {
 
     #[test]
     fn test_event_type_from_str() {
-        assert_eq!(
-            "ZONE_ENTRY".parse::<EventType>().unwrap(),
-            EventType::ZoneEntry
-        );
-        assert_eq!(
-            "TRACK_DELETE".parse::<EventType>().unwrap(),
-            EventType::TrackDelete
-        );
-        assert!(matches!(
-            "UNKNOWN_TYPE".parse::<EventType>().unwrap(),
-            EventType::Unknown(_)
-        ));
+        assert_eq!("ZONE_ENTRY".parse::<EventType>().unwrap(), EventType::ZoneEntry);
+        assert_eq!("TRACK_DELETE".parse::<EventType>().unwrap(), EventType::TrackDelete);
+        assert!(matches!("UNKNOWN_TYPE".parse::<EventType>().unwrap(), EventType::Unknown(_)));
     }
 }

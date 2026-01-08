@@ -106,7 +106,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mqtt_tx = event_tx.clone();
     let mqtt_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
-        if let Err(e) = gateway_poc::io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_shutdown).await {
+        if let Err(e) =
+            gateway_poc::io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_shutdown).await
+        {
             tracing::error!(error = %e, "MQTT client error");
         }
     });
@@ -130,9 +132,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let prom_metrics = metrics.clone();
         let prom_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                gateway_poc::io::prometheus::start_metrics_server(prometheus_port, prom_metrics, prom_shutdown)
-                    .await
+            if let Err(e) = gateway_poc::io::prometheus::start_metrics_server(
+                prometheus_port,
+                prom_metrics,
+                prom_shutdown,
+            )
+            .await
             {
                 tracing::error!(error = %e, "Prometheus metrics server error");
             }

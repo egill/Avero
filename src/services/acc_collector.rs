@@ -152,10 +152,8 @@ impl AccCollector {
         }
         // No group exists - start new group
         debug!(track_id = %track_id, pos = %pos_zone, "acc_pos_entry_new_group");
-        self.pos_groups.insert(
-            pos_zone.to_string(),
-            PosGroup::new(track_id, self.min_dwell_for_acc),
-        );
+        self.pos_groups
+            .insert(pos_zone.to_string(), PosGroup::new(track_id, self.min_dwell_for_acc));
     }
 
     /// Record that a track exited a POS zone
@@ -184,10 +182,7 @@ impl AccCollector {
         let exits = self.recent_exits.entry(pos_zone.to_string()).or_default();
         exits.push(RecentExit {
             track_id,
-            group_members: group_members
-                .into_iter()
-                .filter(|&id| id != track_id)
-                .collect(),
+            group_members: group_members.into_iter().filter(|&id| id != track_id).collect(),
             exited_at: Instant::now(),
             dwell_ms,
         });
@@ -325,10 +320,9 @@ impl AccCollector {
                         }
                         journey_manager.add_event(
                             tid,
-                            JourneyEvent::new(JourneyEventType::Acc, ts).with_zone(pos).with_extra(&format!(
-                                "kiosk={kiosk_str},group={}",
-                                all_members.len()
-                            )),
+                            JourneyEvent::new(JourneyEventType::Acc, ts).with_zone(pos).with_extra(
+                                &format!("kiosk={kiosk_str},group={}", all_members.len()),
+                            ),
                         );
                     }
 

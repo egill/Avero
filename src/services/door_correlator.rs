@@ -132,7 +132,8 @@ impl DoorCorrelator {
             // Add event to journey
             journey_manager.add_event(
                 track_id,
-                JourneyEvent::new(JourneyEventType::GateOpen, now_ms).with_extra(&format!("delta_ms={delta_ms}")),
+                JourneyEvent::new(JourneyEventType::GateOpen, now_ms)
+                    .with_extra(&format!("delta_ms={delta_ms}")),
             );
 
             return Some(track_id);

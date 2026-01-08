@@ -113,11 +113,7 @@ impl Stitcher {
         for (i, pending) in self.pending.iter().enumerate() {
             // Time check - use extended time for POS zones
             let age_ms = now.duration_since(pending.deleted_at).as_millis() as u64;
-            let max_time = if pending
-                .last_zone
-                .as_ref()
-                .is_some_and(|z| z.starts_with("POS_"))
-            {
+            let max_time = if pending.last_zone.as_ref().is_some_and(|z| z.starts_with("POS_")) {
                 MAX_TIME_POS_ZONE_MS
             } else {
                 MAX_TIME_MS
@@ -141,11 +137,7 @@ impl Stitcher {
             let distance_cm = (dx * dx + dy * dy).sqrt() * 100.0;
 
             let same_zone = current_zone.is_some() && pending.last_zone.as_deref() == current_zone;
-            let max_distance = if same_zone {
-                MAX_DISTANCE_SAME_ZONE_CM
-            } else {
-                MAX_DISTANCE_CM
-            };
+            let max_distance = if same_zone { MAX_DISTANCE_SAME_ZONE_CM } else { MAX_DISTANCE_CM };
 
             if distance_cm > max_distance {
                 continue;

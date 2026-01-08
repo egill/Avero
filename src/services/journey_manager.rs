@@ -95,9 +95,9 @@ impl JourneyManager {
             let old_jid = journey.jid.clone();
 
             // Add stitch event
-            journey.add_event(JourneyEvent::new(JourneyEventType::Stitch, epoch_ms()).with_extra(&format!(
-                "from={old_track_id},time_ms={time_ms},dist_cm={distance_cm}"
-            )));
+            journey.add_event(JourneyEvent::new(JourneyEventType::Stitch, epoch_ms()).with_extra(
+                &format!("from={old_track_id},time_ms={time_ms},dist_cm={distance_cm}"),
+            ));
 
             // Add new track ID to history
             journey.add_track_id(new_track_id);
@@ -274,7 +274,10 @@ mod tests {
         let mut manager = JourneyManager::new();
         manager.new_journey(TrackId(100));
 
-        manager.add_event(TrackId(100), JourneyEvent::new(JourneyEventType::ZoneEntry, 1000).with_zone("POS_1"));
+        manager.add_event(
+            TrackId(100),
+            JourneyEvent::new(JourneyEventType::ZoneEntry, 1000).with_zone("POS_1"),
+        );
 
         let journey = manager.get(TrackId(100)).unwrap();
         assert_eq!(journey.events.len(), 1);

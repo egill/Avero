@@ -107,27 +107,20 @@ impl Rs485Monitor {
     /// Parse response frame and extract door status
     fn parse_response(&self, data: &[u8]) -> Option<DoorStatus> {
         if data.len() != RESPONSE_FRAME_LEN {
-            warn!(
-                len = data.len(),
-                expected = RESPONSE_FRAME_LEN,
-                "rs485_invalid_response_length"
-            );
+            warn!(len = data.len(), expected = RESPONSE_FRAME_LEN, "rs485_invalid_response_length");
             return None;
         }
 
         if data[0] != START_BYTE_RESPONSE {
-            warn!(
-                byte = data[0],
-                expected = START_BYTE_RESPONSE,
-                "rs485_invalid_start_byte"
-            );
+            warn!(byte = data[0], expected = START_BYTE_RESPONSE, "rs485_invalid_start_byte");
             return None;
         }
 
         // Validate checksum: sum all bytes (including checksum), add 1, should be 0
         let sum: u8 = data.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
         if sum.wrapping_add(1) != 0 {
-            let hex_dump: String = data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ");
+            let hex_dump: String =
+                data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ");
             warn!(
                 checksum_error = true,
                 sum = %sum,
@@ -214,11 +207,8 @@ impl Rs485Monitor {
                 // Drain any stale bytes before sending query to ensure clean sync
                 let mut drain_buf = [0u8; 64];
                 loop {
-                    match tokio::time::timeout(
-                        Duration::from_millis(5),
-                        p.read(&mut drain_buf),
-                    )
-                    .await
+                    match tokio::time::timeout(Duration::from_millis(5), p.read(&mut drain_buf))
+                        .await
                     {
                         Ok(Ok(0)) | Err(_) => break, // No data or timeout - buffer is clean
                         Ok(Ok(n)) => {

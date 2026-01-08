@@ -115,10 +115,10 @@ impl JourneyEvent {
 /// Complete journey for a tracked person
 #[derive(Debug, Clone)]
 pub struct Journey {
-    pub jid: String,              // UUIDv7 journey ID
-    pub pid: String,              // UUIDv7 person ID (stable across stitches)
+    pub jid: String,                  // UUIDv7 journey ID
+    pub pid: String,                  // UUIDv7 person ID (stable across stitches)
     pub tids: SmallVec<[TrackId; 4]>, // Xovis track_ids (stitch history)
-    pub parent: Option<String>,   // Previous journey's jid (for re-entry)
+    pub parent: Option<String>,       // Previous journey's jid (for re-entry)
     pub outcome: JourneyOutcome,
     pub authorized: bool,
     pub total_dwell_ms: u64,
@@ -214,10 +214,7 @@ impl Journey {
 
         // Include site_id if provided
         if let Some(site) = site_id {
-            obj.insert(
-                "site".to_string(),
-                serde_json::Value::String(site.to_string()),
-            );
+            obj.insert("site".to_string(), serde_json::Value::String(site.to_string()));
         }
 
         obj.insert("jid".to_string(), serde_json::Value::String(self.jid.clone()));
@@ -226,46 +223,25 @@ impl Journey {
         obj.insert("tids".to_string(), serde_json::json!(tids_raw));
 
         if let Some(parent) = &self.parent {
-            obj.insert(
-                "parent".to_string(),
-                serde_json::Value::String(parent.clone()),
-            );
+            obj.insert("parent".to_string(), serde_json::Value::String(parent.clone()));
         } else {
             obj.insert("parent".to_string(), serde_json::Value::Null);
         }
 
-        obj.insert(
-            "out".to_string(),
-            serde_json::Value::String(self.outcome.as_str().to_string()),
-        );
+        obj.insert("out".to_string(), serde_json::Value::String(self.outcome.as_str().to_string()));
         obj.insert("auth".to_string(), serde_json::Value::Bool(self.authorized));
-        obj.insert(
-            "dwell".to_string(),
-            serde_json::Value::Number(self.total_dwell_ms.into()),
-        );
+        obj.insert("dwell".to_string(), serde_json::Value::Number(self.total_dwell_ms.into()));
         obj.insert("acc".to_string(), serde_json::Value::Bool(self.acc_matched));
 
         if let Some(gate_cmd) = self.gate_cmd_at {
-            obj.insert(
-                "gate_cmd".to_string(),
-                serde_json::Value::Number(gate_cmd.into()),
-            );
+            obj.insert("gate_cmd".to_string(), serde_json::Value::Number(gate_cmd.into()));
         }
         if let Some(gate_open) = self.gate_opened_at {
-            obj.insert(
-                "gate_open".to_string(),
-                serde_json::Value::Number(gate_open.into()),
-            );
+            obj.insert("gate_open".to_string(), serde_json::Value::Number(gate_open.into()));
         }
-        obj.insert(
-            "gate_was_open".to_string(),
-            serde_json::Value::Bool(self.gate_was_open),
-        );
+        obj.insert("gate_was_open".to_string(), serde_json::Value::Bool(self.gate_was_open));
 
-        obj.insert(
-            "t0".to_string(),
-            serde_json::Value::Number(self.started_at.into()),
-        );
+        obj.insert("t0".to_string(), serde_json::Value::Number(self.started_at.into()));
         if let Some(ended) = self.ended_at {
             obj.insert("t1".to_string(), serde_json::Value::Number(ended.into()));
         }
@@ -340,7 +316,9 @@ mod tests {
         journey.gate_opened_at = Some(1736012345890);
 
         journey.add_event(JourneyEvent::new(JourneyEventType::EntryCross, 1736012340000));
-        journey.add_event(JourneyEvent::new(JourneyEventType::ZoneEntry, 1736012341000).with_zone("POS_1"));
+        journey.add_event(
+            JourneyEvent::new(JourneyEventType::ZoneEntry, 1736012341000).with_zone("POS_1"),
+        );
         journey.add_event(
             JourneyEvent::new(JourneyEventType::ZoneExit, 1736012348500)
                 .with_zone("POS_1")

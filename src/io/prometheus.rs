@@ -35,10 +35,7 @@ fn format_prometheus_metrics(
 
     output.push_str("# HELP gateway_events_per_sec Events processed per second\n");
     output.push_str("# TYPE gateway_events_per_sec gauge\n");
-    output.push_str(&format!(
-        "gateway_events_per_sec {:.2}\n",
-        summary.events_per_sec
-    ));
+    output.push_str(&format!("gateway_events_per_sec {:.2}\n", summary.events_per_sec));
 
     // Event latency histogram
     output.push_str("# HELP gateway_event_latency_us Event processing latency in microseconds\n");
@@ -54,10 +51,7 @@ fn format_prometheus_metrics(
     }
     // Add overflow bucket and +Inf
     cumulative += summary.lat_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_event_latency_us_bucket{{le=\"+Inf\"}} {}\n",
-        cumulative
-    ));
+    output.push_str(&format!("gateway_event_latency_us_bucket{{le=\"+Inf\"}} {}\n", cumulative));
 
     // Sum and count (approximate sum from avg * count)
     let count = summary.lat_buckets.iter().sum::<u64>();
@@ -68,32 +62,20 @@ fn format_prometheus_metrics(
     // Percentiles as gauges (easier to graph)
     output.push_str("# HELP gateway_event_latency_p50_us 50th percentile event latency\n");
     output.push_str("# TYPE gateway_event_latency_p50_us gauge\n");
-    output.push_str(&format!(
-        "gateway_event_latency_p50_us {}\n",
-        summary.lat_p50_us
-    ));
+    output.push_str(&format!("gateway_event_latency_p50_us {}\n", summary.lat_p50_us));
 
     output.push_str("# HELP gateway_event_latency_p95_us 95th percentile event latency\n");
     output.push_str("# TYPE gateway_event_latency_p95_us gauge\n");
-    output.push_str(&format!(
-        "gateway_event_latency_p95_us {}\n",
-        summary.lat_p95_us
-    ));
+    output.push_str(&format!("gateway_event_latency_p95_us {}\n", summary.lat_p95_us));
 
     output.push_str("# HELP gateway_event_latency_p99_us 99th percentile event latency\n");
     output.push_str("# TYPE gateway_event_latency_p99_us gauge\n");
-    output.push_str(&format!(
-        "gateway_event_latency_p99_us {}\n",
-        summary.lat_p99_us
-    ));
+    output.push_str(&format!("gateway_event_latency_p99_us {}\n", summary.lat_p99_us));
 
     // Gate command metrics
     output.push_str("# HELP gateway_gate_commands_total Total gate commands sent\n");
     output.push_str("# TYPE gateway_gate_commands_total counter\n");
-    output.push_str(&format!(
-        "gateway_gate_commands_total {}\n",
-        summary.gate_commands_sent
-    ));
+    output.push_str(&format!("gateway_gate_commands_total {}\n", summary.gate_commands_sent));
 
     // Gate latency histogram
     output.push_str("# HELP gateway_gate_latency_us Gate command E2E latency in microseconds\n");
@@ -108,7 +90,8 @@ fn format_prometheus_metrics(
         ));
     }
     gate_cumulative += summary.gate_lat_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!("gateway_gate_latency_us_bucket{{le=\"+Inf\"}} {}\n", gate_cumulative));
+    output
+        .push_str(&format!("gateway_gate_latency_us_bucket{{le=\"+Inf\"}} {}\n", gate_cumulative));
 
     let gate_count = summary.gate_lat_buckets.iter().sum::<u64>();
     let gate_sum = summary.gate_lat_avg_us * gate_count;
@@ -117,32 +100,20 @@ fn format_prometheus_metrics(
 
     output.push_str("# HELP gateway_gate_latency_p99_us 99th percentile gate command latency\n");
     output.push_str("# TYPE gateway_gate_latency_p99_us gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_latency_p99_us {}\n",
-        summary.gate_lat_p99_us
-    ));
+    output.push_str(&format!("gateway_gate_latency_p99_us {}\n", summary.gate_lat_p99_us));
 
     output.push_str("# HELP gateway_gate_latency_max_us Maximum gate command latency\n");
     output.push_str("# TYPE gateway_gate_latency_max_us gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_latency_max_us {}\n",
-        summary.gate_lat_max_us
-    ));
+    output.push_str(&format!("gateway_gate_latency_max_us {}\n", summary.gate_lat_max_us));
 
     // Track counts
     output.push_str("# HELP gateway_active_tracks Current active tracks\n");
     output.push_str("# TYPE gateway_active_tracks gauge\n");
-    output.push_str(&format!(
-        "gateway_active_tracks {}\n",
-        summary.active_tracks
-    ));
+    output.push_str(&format!("gateway_active_tracks {}\n", summary.active_tracks));
 
     output.push_str("# HELP gateway_authorized_tracks Current authorized tracks\n");
     output.push_str("# TYPE gateway_authorized_tracks gauge\n");
-    output.push_str(&format!(
-        "gateway_authorized_tracks {}\n",
-        summary.authorized_tracks
-    ));
+    output.push_str(&format!("gateway_authorized_tracks {}\n", summary.authorized_tracks));
 
     // Gate state (0=closed, 1=moving, 2=open)
     output.push_str("# HELP gateway_gate_state Current gate state (0=closed, 1=moving, 2=open)\n");
@@ -164,34 +135,22 @@ fn format_prometheus_metrics(
     // ACC metrics
     output.push_str("# HELP gateway_acc_events_total Total ACC events received\n");
     output.push_str("# TYPE gateway_acc_events_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_events_total {}\n",
-        summary.acc_events_total
-    ));
+    output.push_str(&format!("gateway_acc_events_total {}\n", summary.acc_events_total));
 
     output.push_str("# HELP gateway_acc_matched_total ACC events matched to tracks\n");
     output.push_str("# TYPE gateway_acc_matched_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_matched_total {}\n",
-        summary.acc_matched_total
-    ));
+    output.push_str(&format!("gateway_acc_matched_total {}\n", summary.acc_matched_total));
 
     // Stitch metrics
     output.push_str("# HELP gateway_stitch_matched_total Tracks successfully stitched\n");
     output.push_str("# TYPE gateway_stitch_matched_total counter\n");
-    output.push_str(&format!(
-        "gateway_stitch_matched_total {}\n",
-        summary.stitch_matched_total
-    ));
+    output.push_str(&format!("gateway_stitch_matched_total {}\n", summary.stitch_matched_total));
 
     output.push_str(
         "# HELP gateway_stitch_expired_total Tracks truly lost (expired without stitch)\n",
     );
     output.push_str("# TYPE gateway_stitch_expired_total counter\n");
-    output.push_str(&format!(
-        "gateway_stitch_expired_total {}\n",
-        summary.stitch_expired_total
-    ));
+    output.push_str(&format!("gateway_stitch_expired_total {}\n", summary.stitch_expired_total));
 
     // Stitch distance histogram (cm)
     output.push_str("# HELP gateway_stitch_distance_cm Stitch distance in centimeters\n");
@@ -213,18 +172,13 @@ fn format_prometheus_metrics(
 
     let stitch_dist_count = summary.stitch_distance_buckets.iter().sum::<u64>();
     let stitch_dist_sum = summary.stitch_distance_avg_cm * stitch_dist_count;
-    output.push_str(&format!(
-        "gateway_stitch_distance_cm_sum {}\n",
-        stitch_dist_sum
-    ));
-    output.push_str(&format!(
-        "gateway_stitch_distance_cm_count {}\n",
-        stitch_dist_count
-    ));
+    output.push_str(&format!("gateway_stitch_distance_cm_sum {}\n", stitch_dist_sum));
+    output.push_str(&format!("gateway_stitch_distance_cm_count {}\n", stitch_dist_count));
 
     output.push_str("# HELP gateway_stitch_distance_avg_cm Average stitch distance\n");
     output.push_str("# TYPE gateway_stitch_distance_avg_cm gauge\n");
-    output.push_str(&format!("gateway_stitch_distance_avg_cm {}\n", summary.stitch_distance_avg_cm));
+    output
+        .push_str(&format!("gateway_stitch_distance_avg_cm {}\n", summary.stitch_distance_avg_cm));
 
     // Stitch time histogram (ms)
     output.push_str("# HELP gateway_stitch_time_ms Stitch time in milliseconds\n");
@@ -247,35 +201,23 @@ fn format_prometheus_metrics(
     let stitch_time_count = summary.stitch_time_buckets.iter().sum::<u64>();
     let stitch_time_sum = summary.stitch_time_avg_ms * stitch_time_count;
     output.push_str(&format!("gateway_stitch_time_ms_sum {}\n", stitch_time_sum));
-    output.push_str(&format!(
-        "gateway_stitch_time_ms_count {}\n",
-        stitch_time_count
-    ));
+    output.push_str(&format!("gateway_stitch_time_ms_count {}\n", stitch_time_count));
 
     output.push_str("# HELP gateway_stitch_time_avg_ms Average stitch time\n");
     output.push_str("# TYPE gateway_stitch_time_avg_ms gauge\n");
-    output.push_str(&format!(
-        "gateway_stitch_time_avg_ms {}\n",
-        summary.stitch_time_avg_ms
-    ));
+    output.push_str(&format!("gateway_stitch_time_avg_ms {}\n", summary.stitch_time_avg_ms));
 
     // ACC late and no_journey counters
     output.push_str(
         "# HELP gateway_acc_late_total ACC events that arrived late (after gate entry)\n",
     );
     output.push_str("# TYPE gateway_acc_late_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_late_total {}\n",
-        summary.acc_late_total
-    ));
+    output.push_str(&format!("gateway_acc_late_total {}\n", summary.acc_late_total));
 
     output
         .push_str("# HELP gateway_acc_no_journey_total ACC events matched but no journey found\n");
     output.push_str("# TYPE gateway_acc_no_journey_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_no_journey_total {}\n",
-        summary.acc_no_journey_total
-    ));
+    output.push_str(&format!("gateway_acc_no_journey_total {}\n", summary.acc_no_journey_total));
 
     output
 }

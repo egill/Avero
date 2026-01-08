@@ -27,9 +27,7 @@ pub async fn start_mqtt_client(
     }
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 100);
-    client
-        .subscribe(config.mqtt_topic(), QoS::AtMostOnce)
-        .await?;
+    client.subscribe(config.mqtt_topic(), QoS::AtMostOnce).await?;
 
     info!(topic = %config.mqtt_topic(), host = %config.mqtt_host(), port = %config.mqtt_port(), "MQTT client subscribed");
 
@@ -131,10 +129,7 @@ fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
     let mut positions: std::collections::HashMap<i64, [f64; 3]> = std::collections::HashMap::new();
     for obj in &frame.tracked_objects {
         if obj.position.len() >= 3 {
-            positions.insert(
-                obj.track_id,
-                [obj.position[0], obj.position[1], obj.position[2]],
-            );
+            positions.insert(obj.track_id, [obj.position[0], obj.position[1], obj.position[2]]);
         }
     }
 
@@ -200,10 +195,7 @@ mod tests {
         assert_eq!(events[0].event_type, EventType::ZoneEntry);
         assert_eq!(events[0].geometry_id, Some(GeometryId(1001)));
         // event_time should now be parsed from ISO 8601
-        assert!(
-            events[0].event_time > 0,
-            "event_time should be parsed from ISO timestamp"
-        );
+        assert!(events[0].event_time > 0, "event_time should be parsed from ISO timestamp");
         // Position should be extracted
         assert_eq!(events[0].position, Some([1.5, 2.0, 1.7]));
     }

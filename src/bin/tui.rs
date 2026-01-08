@@ -453,10 +453,7 @@ impl ZoneState {
                 let dwell_ms = self.live_dwell_ms();
 
                 if self.occupant_auth {
-                    ZoneStatus::Authorized {
-                        tid,
-                        _dwell_ms: dwell_ms,
-                    }
+                    ZoneStatus::Authorized { tid, _dwell_ms: dwell_ms }
                 } else if dwell_ms > POS_OVERDUE_THRESHOLD_MS {
                     ZoneStatus::Overdue { tid, dwell_ms }
                 } else if dwell_ms > POS_WARNING_THRESHOLD_MS {
@@ -676,10 +673,7 @@ impl Default for DashboardState {
         let mut state = Self {
             view_mode: ViewMode::Activity,
             pos_zones: HashMap::new(),
-            gate_zone: ZoneState {
-                name: "GATE".to_string(),
-                ..Default::default()
-            },
+            gate_zone: ZoneState { name: "GATE".to_string(), ..Default::default() },
             gate_zone_status: GateZoneStatus::Empty,
             last_gate_state: "closed".to_string(),
             track_events: VecDeque::new(),
@@ -715,10 +709,7 @@ impl Default for DashboardState {
         // Initialize 5 POS zones
         for i in 1..=5 {
             let name = format!("POS_{}", i);
-            state.pos_zones.insert(name.clone(), ZoneState {
-                name,
-                ..Default::default()
-            });
+            state.pos_zones.insert(name.clone(), ZoneState { name, ..Default::default() });
         }
 
         state
@@ -752,9 +743,7 @@ impl DashboardState {
         // Track network latency if available
         if let (Some(event_time), Some(received_time)) = (event.event_time, event.received_time) {
             if received_time > event_time {
-                self.track_processing
-                    .network_latency
-                    .add(received_time - event_time);
+                self.track_processing.network_latency.add(received_time - event_time);
             }
         }
 
@@ -964,7 +953,8 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let Some(tid) = event.tid.or(self.gate_zone.occupant_tid) {
-                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "cmd_sent".to_string() };
+                    self.gate_zone_status =
+                        GateZoneStatus::Exiting { tid, door_state: "cmd_sent".to_string() };
                 }
             }
             "moving" => {
@@ -974,7 +964,8 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let GateZoneStatus::Exiting { tid, .. } = self.gate_zone_status {
-                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "moving".to_string() };
+                    self.gate_zone_status =
+                        GateZoneStatus::Exiting { tid, door_state: "moving".to_string() };
                 }
             }
             "open" => {
@@ -985,7 +976,8 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let GateZoneStatus::Exiting { tid, .. } = self.gate_zone_status {
-                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "open".to_string() };
+                    self.gate_zone_status =
+                        GateZoneStatus::Exiting { tid, door_state: "open".to_string() };
                 }
             }
             "closed" => {
@@ -1000,10 +992,7 @@ impl DashboardState {
                 // If someone still in gate zone, update status
                 if let Some(tid) = self.gate_zone.occupant_tid {
                     self.gate_zone_status = if self.gate_zone.occupant_auth {
-                        GateZoneStatus::Authorized {
-                            tid,
-                            door_state: "closed".to_string(),
-                        }
+                        GateZoneStatus::Authorized { tid, door_state: "closed".to_string() }
                     } else {
                         GateZoneStatus::Blocked { tid }
                     };
@@ -1013,10 +1002,7 @@ impl DashboardState {
             }
             "blocked" => {
                 if let Some(tid) = event.tid {
-                    self.add_issue(
-                        IssueSeverity::Warning,
-                        format!("Unauthorized exit T{}", tid)
-                    );
+                    self.add_issue(IssueSeverity::Warning, format!("Unauthorized exit T{}", tid));
                 }
             }
             _ => {}
@@ -1061,7 +1047,9 @@ impl DashboardState {
                     if !active.is_empty() {
                         let candidates: Vec<String> = active
                             .iter()
-                            .filter(|t| t.zone.as_ref().map(|z| z.starts_with("POS")).unwrap_or(false))
+                            .filter(|t| {
+                                t.zone.as_ref().map(|z| z.starts_with("POS")).unwrap_or(false)
+                            })
                             .take(3)
                             .map(|t| format!("T{}@{}", t.tid, t.zone.as_deref().unwrap_or("?")))
                             .collect();
@@ -1117,10 +1105,7 @@ impl DashboardState {
     }
 
     fn pos_occupancy_count(&self) -> usize {
-        self.pos_zones
-            .values()
-            .filter(|z| z.occupant_tid.is_some())
-            .count()
+        self.pos_zones.values().filter(|z| z.occupant_tid.is_some()).count()
     }
 }
 
@@ -1256,8 +1241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mqtt = config.mqtt.unwrap_or_default();
             // For gate host, use tcp_addr (e.g., "10.120.48.9:8000") -> extract host part
             let gate_host = config.gate.and_then(|g| {
-                g.tcp_addr
-                    .map(|addr| addr.split(':').next().unwrap_or(&addr).to_string())
+                g.tcp_addr.map(|addr| addr.split(':').next().unwrap_or(&addr).to_string())
             });
             (
                 mqtt.host.unwrap_or_else(|| "localhost".to_string()),
@@ -1269,9 +1253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             // Positional args mode (backward compatible)
             (
-                args.get(1)
-                    .cloned()
-                    .unwrap_or_else(|| "localhost".to_string()),
+                args.get(1).cloned().unwrap_or_else(|| "localhost".to_string()),
                 args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1883),
                 args.get(3).cloned(),
                 args.get(4).cloned(),
@@ -1505,16 +1487,8 @@ fn draw_performance_view(f: &mut Frame, state: &DashboardState) {
 // ============================================================================
 
 fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
-    let status_color = if state.connected {
-        Color::Green
-    } else {
-        Color::Red
-    };
-    let status_text = if state.connected {
-        "CONNECTED"
-    } else {
-        "DISCONNECTED"
-    };
+    let status_color = if state.connected { Color::Green } else { Color::Red };
+    let status_text = if state.connected { "CONNECTED" } else { "DISCONNECTED" };
 
     let last_msg = state
         .last_message
@@ -1527,12 +1501,7 @@ fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
     };
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Gateway TUI ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Gateway TUI ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw("| "),
         Span::styled(
             format!("[{}]", view_text),
@@ -1559,7 +1528,8 @@ fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
 
 fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
     // Build zone status row: POS1-5 + GATE
-    let mut cells: Vec<Span> = vec![Span::styled("ZONES ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))];
+    let mut cells: Vec<Span> =
+        vec![Span::styled("ZONES ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))];
 
     // Sort POS zones
     let mut zones: Vec<_> = state.pos_zones.values().collect();
@@ -1568,28 +1538,43 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
     for zone in zones {
         let (icon, color, detail) = match zone.status() {
             ZoneStatus::Empty => ("○", Color::DarkGray, zone.name.replace("POS_", "P")),
-            ZoneStatus::Pending { tid, dwell_ms } => {
-                ("?", Color::Yellow, format!("{}:T{} {:.0}s", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
-            }
+            ZoneStatus::Pending { tid, dwell_ms } => (
+                "?",
+                Color::Yellow,
+                format!(
+                    "{}:T{} {:.0}s",
+                    zone.name.replace("POS_", "P"),
+                    tid,
+                    dwell_ms as f64 / 1000.0
+                ),
+            ),
             ZoneStatus::Authorized { tid, .. } => {
                 ("✓", Color::Green, format!("{}:T{}", zone.name.replace("POS_", "P"), tid))
             }
-            ZoneStatus::Waiting { tid, dwell_ms } => {
-                ("⚠", Color::Yellow, format!("{}:T{} {:.0}s!", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
-            }
-            ZoneStatus::Overdue { tid, dwell_ms } => {
-                ("✗", Color::Red, format!("{}:T{} {:.0}s!!", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
-            }
+            ZoneStatus::Waiting { tid, dwell_ms } => (
+                "⚠",
+                Color::Yellow,
+                format!(
+                    "{}:T{} {:.0}s!",
+                    zone.name.replace("POS_", "P"),
+                    tid,
+                    dwell_ms as f64 / 1000.0
+                ),
+            ),
+            ZoneStatus::Overdue { tid, dwell_ms } => (
+                "✗",
+                Color::Red,
+                format!(
+                    "{}:T{} {:.0}s!!",
+                    zone.name.replace("POS_", "P"),
+                    tid,
+                    dwell_ms as f64 / 1000.0
+                ),
+            ),
         };
 
-        cells.push(Span::styled(
-            format!("{} ", icon),
-            Style::default().fg(color),
-        ));
-        cells.push(Span::styled(
-            format!("{} ", detail),
-            Style::default().fg(color),
-        ));
+        cells.push(Span::styled(format!("{} ", icon), Style::default().fg(color)));
+        cells.push(Span::styled(format!("{} ", detail), Style::default().fg(color)));
         cells.push(Span::raw(" "));
     }
 
@@ -1605,16 +1590,11 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
         }
     };
 
-    cells.push(Span::styled(
-        format!("{} ", gate_icon),
-        Style::default().fg(gate_color),
-    ));
+    cells.push(Span::styled(format!("{} ", gate_icon), Style::default().fg(gate_color)));
     cells.push(Span::styled(gate_detail, Style::default().fg(gate_color)));
 
     let zones_para = Paragraph::new(Line::from(cells)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+        Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Blue)),
     );
 
     f.render_widget(zones_para, area);
@@ -1622,27 +1602,13 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
 
 fn draw_live_counters(f: &mut Frame, area: Rect, state: &DashboardState) {
     let counters = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "LIVE ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("LIVE ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw("│ Entries: "),
-        Span::styled(
-            format!("{}", state.counters.entries),
-            Style::default().fg(Color::Green),
-        ),
+        Span::styled(format!("{}", state.counters.entries), Style::default().fg(Color::Green)),
         Span::raw(" │ Exits: "),
-        Span::styled(
-            format!("{}", state.counters.exits),
-            Style::default().fg(Color::Yellow),
-        ),
+        Span::styled(format!("{}", state.counters.exits), Style::default().fg(Color::Yellow)),
         Span::raw(" │ Gate Opens: "),
-        Span::styled(
-            format!("{}", state.counters.gate_opens),
-            Style::default().fg(Color::Cyan),
-        ),
+        Span::styled(format!("{}", state.counters.gate_opens), Style::default().fg(Color::Cyan)),
         Span::raw(" │ POS Occ: "),
         Span::styled(
             format!("{}", state.pos_occupancy_count()),
@@ -1737,24 +1703,17 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
         &state.current_gate_flow
     };
 
-    let tid_str = flow
-        .tid
-        .map(|t| format!("T{}", t))
-        .unwrap_or("-".to_string());
+    let tid_str = flow.tid.map(|t| format!("T{}", t)).unwrap_or("-".to_string());
 
     // Build timing breakdown lines
-    let entry_to_cmd = flow.entry_to_cmd_ms()
-        .map(|ms| format!("{}ms", ms))
-        .unwrap_or("-".to_string());
-    let cmd_to_moving = flow.cmd_to_moving_ms()
-        .map(|ms| format!("{}ms", ms))
-        .unwrap_or("-".to_string());
-    let moving_to_open = flow.moving_to_open_ms()
-        .map(|ms| format!("{}ms", ms))
-        .unwrap_or("-".to_string());
-    let total = flow.total_entry_to_open_ms()
-        .map(|ms| format!("{}ms", ms))
-        .unwrap_or("-".to_string());
+    let entry_to_cmd =
+        flow.entry_to_cmd_ms().map(|ms| format!("{}ms", ms)).unwrap_or("-".to_string());
+    let cmd_to_moving =
+        flow.cmd_to_moving_ms().map(|ms| format!("{}ms", ms)).unwrap_or("-".to_string());
+    let moving_to_open =
+        flow.moving_to_open_ms().map(|ms| format!("{}ms", ms)).unwrap_or("-".to_string());
+    let total =
+        flow.total_entry_to_open_ms().map(|ms| format!("{}ms", ms)).unwrap_or("-".to_string());
 
     let timing = Paragraph::new(vec![
         Line::from(vec![
@@ -1774,7 +1733,10 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
             Span::styled(moving_to_open, Style::default().fg(Color::Green)),
         ]),
         Line::from(vec![
-            Span::styled("TOTAL: ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "TOTAL: ",
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(total, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         ]),
     ])
@@ -1810,9 +1772,7 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
         .collect();
 
     let list = List::new(events).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Magenta)),
+        Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Magenta)),
     );
 
     f.render_widget(list, chunks[1]);
@@ -1875,9 +1835,7 @@ fn draw_acc_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
         .collect();
 
     let list = List::new(events).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow)),
+        Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow)),
     );
 
     f.render_widget(list, chunks[1]);
@@ -1936,11 +1894,7 @@ fn draw_issues_panel(f: &mut Frame, area: Rect, state: &DashboardState) {
             };
 
             let age = issue.timestamp.elapsed().as_secs();
-            let age_str = if age < 60 {
-                format!("{}s", age)
-            } else {
-                format!("{}m", age / 60)
-            };
+            let age_str = if age < 60 { format!("{}s", age) } else { format!("{}m", age / 60) };
 
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", icon), Style::default().fg(color)),
@@ -2054,29 +2008,19 @@ fn draw_latency_histogram(
     f.render_widget(bar_chart, chunks[0]);
 
     // Draw stats
-    let min_str = stats
-        .min
-        .map(|v| format!("{}", v))
-        .unwrap_or("-".to_string());
-    let max_str = stats
-        .max
-        .map(|v| format!("{}", v))
-        .unwrap_or("-".to_string());
-    let avg_str = stats
-        .avg()
-        .map(|v| format!("{:.0}", v))
-        .unwrap_or("-".to_string());
-    let p95_str = stats
-        .p95()
-        .map(|v| format!("{}", v))
-        .unwrap_or("-".to_string());
+    let min_str = stats.min.map(|v| format!("{}", v)).unwrap_or("-".to_string());
+    let max_str = stats.max.map(|v| format!("{}", v)).unwrap_or("-".to_string());
+    let avg_str = stats.avg().map(|v| format!("{:.0}", v)).unwrap_or("-".to_string());
+    let p95_str = stats.p95().map(|v| format!("{}", v)).unwrap_or("-".to_string());
 
     let stats_text = Paragraph::new(vec![
         Line::from(format!("min:{} max:{}", min_str, max_str)),
         Line::from(format!("avg:{} p95:{} {}", avg_str, p95_str, unit)),
         Line::from(format!("n={}", stats.count())),
     ])
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
+    .block(
+        Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)),
+    );
 
     f.render_widget(stats_text, chunks[1]);
 }
