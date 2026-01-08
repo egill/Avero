@@ -30,6 +30,9 @@ const DOOR_RIGHT_OPEN_PROPERLY: u8 = 0x02;
 const DOOR_IN_MOTION: u8 = 0x03;
 const DOOR_FIRE_SIGNAL_OPENING: u8 = 0x04;
 
+/// Maximum read attempts before giving up (prevents infinite loop)
+const MAX_READ_ATTEMPTS: usize = 50;
+
 pub struct Rs485Monitor {
     device: String,
     baud: u32,
@@ -38,6 +41,10 @@ pub struct Rs485Monitor {
     last_status: DoorStatus,
     last_poll_time: Option<Instant>,
     event_tx: Option<mpsc::Sender<ParsedEvent>>,
+    /// Persistent read buffer that accumulates bytes across reads.
+    /// RS485 responses can arrive in chunks (e.g., 16 bytes + 2 bytes),
+    /// so we need to keep partial data for the next read.
+    read_buffer: Vec<u8>,
 }
 
 impl Rs485Monitor {
@@ -50,6 +57,7 @@ impl Rs485Monitor {
             last_status: DoorStatus::Unknown,
             last_poll_time: None,
             event_tx: None,
+            read_buffer: Vec::with_capacity(64),
         }
     }
 
@@ -75,33 +83,6 @@ impl Rs485Monitor {
         frame[7] = !sum;
 
         frame
-    }
-
-    /// Find a valid frame in the buffer by searching for 0x7F start byte
-    /// This handles RS485 noise and synchronization issues
-    fn find_and_parse_frame(&self, data: &[u8]) -> Option<DoorStatus> {
-        // Search for 0x7F start byte
-        for i in 0..data.len() {
-            if data[i] == START_BYTE_RESPONSE {
-                // Check if we have enough bytes for a complete frame
-                if i + RESPONSE_FRAME_LEN <= data.len() {
-                    let frame = &data[i..i + RESPONSE_FRAME_LEN];
-                    if let Some(status) = self.parse_response(frame) {
-                        return Some(status);
-                    }
-                    // Checksum failed, continue searching
-                }
-            }
-        }
-
-        // No valid frame found - at trace level to avoid log spam under noise
-        let hex_dump: Vec<String> = data.iter().map(|b| format!("{:02X}", b)).collect();
-        tracing::trace!(
-            raw_bytes = %hex_dump.join(" "),
-            len = data.len(),
-            "rs485_no_valid_start_byte"
-        );
-        None
     }
 
     /// Parse response frame and extract door status
@@ -162,6 +143,102 @@ impl Rs485Monitor {
         Some(status)
     }
 
+    /// Synchronize read buffer to start with START_BYTE_RESPONSE (0x7F).
+    /// Discards any bytes before the start byte.
+    fn synchronize_buffer(&mut self) {
+        if self.read_buffer.is_empty() || self.read_buffer[0] == START_BYTE_RESPONSE {
+            return;
+        }
+
+        // Find the start byte
+        if let Some(start_idx) = self.read_buffer.iter().position(|&b| b == START_BYTE_RESPONSE) {
+            if start_idx > 0 {
+                tracing::debug!(discarded = start_idx, "rs485_sync_discarded_bytes");
+                self.read_buffer.drain(..start_idx);
+            }
+        } else {
+            // No start byte found, clear buffer
+            if !self.read_buffer.is_empty() {
+                tracing::debug!(discarded = self.read_buffer.len(), "rs485_sync_no_start_byte");
+                self.read_buffer.clear();
+            }
+        }
+    }
+
+    /// Read a complete frame from the serial port into the persistent buffer.
+    /// Returns the parsed DoorStatus if a valid frame is found.
+    async fn read_frame(&mut self, port: &mut tokio_serial::SerialStream) -> Option<DoorStatus> {
+        // Synchronize buffer to start byte
+        self.synchronize_buffer();
+
+        // Check if we already have a complete frame
+        if self.read_buffer.len() >= RESPONSE_FRAME_LEN {
+            return self.extract_and_parse_frame();
+        }
+
+        // Read until we have enough data
+        let mut temp_buf = [0u8; 64];
+        let mut attempts = 0;
+
+        while self.read_buffer.len() < RESPONSE_FRAME_LEN {
+            attempts += 1;
+            if attempts > MAX_READ_ATTEMPTS {
+                tracing::debug!(
+                    attempts = MAX_READ_ATTEMPTS,
+                    buffer_len = self.read_buffer.len(),
+                    "rs485_max_read_attempts"
+                );
+                return None;
+            }
+
+            match tokio::time::timeout(Duration::from_millis(50), port.read(&mut temp_buf)).await {
+                Ok(Ok(n)) if n > 0 => {
+                    self.read_buffer.extend_from_slice(&temp_buf[..n]);
+                    // Re-synchronize after new data
+                    self.synchronize_buffer();
+
+                    // Check if we now have enough
+                    if self.read_buffer.len() >= RESPONSE_FRAME_LEN {
+                        break;
+                    }
+                }
+                Ok(Ok(_)) => {
+                    // Zero bytes read, continue
+                }
+                Ok(Err(e)) if e.kind() == ErrorKind::TimedOut => {
+                    // Timeout, continue trying
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, "rs485_read_error");
+                    return None;
+                }
+                Err(_) => {
+                    // Timeout from tokio::time::timeout, continue
+                }
+            }
+        }
+
+        self.extract_and_parse_frame()
+    }
+
+    /// Extract a frame from the buffer and parse it.
+    /// Keeps any leftover bytes for the next read.
+    fn extract_and_parse_frame(&mut self) -> Option<DoorStatus> {
+        if self.read_buffer.len() < RESPONSE_FRAME_LEN {
+            return None;
+        }
+
+        // Extract the frame
+        let frame: Vec<u8> = self.read_buffer.drain(..RESPONSE_FRAME_LEN).collect();
+
+        // Log if there are leftover bytes (will be used in next read)
+        if !self.read_buffer.is_empty() {
+            tracing::trace!(leftover = self.read_buffer.len(), "rs485_frame_leftover_bytes");
+        }
+
+        self.parse_response(&frame)
+    }
+
     /// Start the RS485 polling loop
     pub async fn run(mut self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         info!(
@@ -204,64 +281,15 @@ impl Rs485Monitor {
             let poll_start = Instant::now();
 
             let status = if let Some(ref mut p) = port {
-                // Drain any stale bytes before sending query to ensure clean sync
-                let mut drain_buf = [0u8; 64];
-                loop {
-                    match tokio::time::timeout(Duration::from_millis(5), p.read(&mut drain_buf))
-                        .await
-                    {
-                        Ok(Ok(0)) | Err(_) => break, // No data or timeout - buffer is clean
-                        Ok(Ok(n)) => {
-                            tracing::debug!(bytes_drained = n, "rs485_drain_stale");
-                        }
-                        Ok(Err(_)) => break,
-                    }
-                }
-
                 // Send query command
                 let cmd = self.build_query_command();
                 if let Err(e) = p.write_all(&cmd).await {
                     warn!(error = %e, "rs485_write_error");
                     self.last_status
                 } else {
-                    // Read response with synchronization
-                    // RS485 can have noise, so we need to find the 0x7F start byte
-                    let mut raw_buf = [0u8; 64]; // Extra buffer for resync
-                    let mut total_read = 0;
-                    let read_timeout = Instant::now();
-
-                    while total_read < raw_buf.len() {
-                        if read_timeout.elapsed() > Duration::from_millis(200) {
-                            if total_read < RESPONSE_FRAME_LEN {
-                                warn!(bytes_read = total_read, "rs485_read_timeout");
-                            }
-                            break;
-                        }
-
-                        match p.read(&mut raw_buf[total_read..]).await {
-                            Ok(n) if n > 0 => {
-                                total_read += n;
-                                // Check if we have enough for a frame
-                                if total_read >= RESPONSE_FRAME_LEN {
-                                    break;
-                                }
-                            }
-                            Ok(_) => {}
-                            Err(e) if e.kind() == ErrorKind::TimedOut => {}
-                            Err(e) => {
-                                warn!(error = %e, "rs485_read_error");
-                                break;
-                            }
-                        }
-                    }
-
-                    // Try to find and parse a valid frame
-                    if total_read >= RESPONSE_FRAME_LEN {
-                        self.find_and_parse_frame(&raw_buf[..total_read])
-                            .unwrap_or(self.last_status)
-                    } else {
-                        self.last_status
-                    }
+                    // Read response using persistent buffer
+                    // This handles chunked responses (e.g., 16 bytes + 2 bytes)
+                    self.read_frame(p).await.unwrap_or(self.last_status)
                 }
             } else {
                 DoorStatus::Unknown

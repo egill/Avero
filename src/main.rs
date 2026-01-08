@@ -42,7 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_target(false)
         .init();
 
-    info!("gateway-poc starting");
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        git_hash = option_env!("GIT_HASH").unwrap_or("unknown"),
+        "gateway_poc_starting"
+    );
 
     // Parse command line arguments using clap
     let args = Args::parse();
