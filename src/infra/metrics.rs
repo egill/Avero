@@ -43,6 +43,26 @@ fn stitch_dist_bucket_index(dist_cm: u64) -> usize {
     10 // overflow bucket (>5120cm)
 }
 
+/// Swap all buckets to zero and return their values
+#[inline]
+fn swap_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
+    let mut result = [0u64; NUM_BUCKETS];
+    for (i, bucket) in buckets.iter().enumerate() {
+        result[i] = bucket.swap(0, Ordering::Relaxed);
+    }
+    result
+}
+
+/// Load all bucket values without resetting
+#[inline]
+fn load_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
+    let mut result = [0u64; NUM_BUCKETS];
+    for (i, bucket) in buckets.iter().enumerate() {
+        result[i] = bucket.load(Ordering::Relaxed);
+    }
+    result
+}
+
 /// Compute percentile from histogram buckets
 /// Returns the upper bound of the bucket containing the percentile
 fn percentile_from_buckets(buckets: &[u64; NUM_BUCKETS], percentile: f64) -> u64 {
@@ -409,10 +429,7 @@ impl Metrics {
         let max_latency = self.latency_max_us.swap(0, Ordering::Relaxed);
 
         // Swap histogram buckets and collect values
-        let mut lat_buckets = [0u64; NUM_BUCKETS];
-        for (i, bucket) in self.latency_buckets.iter().enumerate() {
-            lat_buckets[i] = bucket.swap(0, Ordering::Relaxed);
-        }
+        let lat_buckets = swap_buckets(&self.latency_buckets);
 
         // Swap gate latency counters
         let gate_count = self.gate_commands_since_report.swap(0, Ordering::Relaxed);
@@ -420,10 +437,7 @@ impl Metrics {
         let gate_max_latency = self.gate_latency_max_us.swap(0, Ordering::Relaxed);
 
         // Swap gate histogram buckets
-        let mut gate_lat_buckets = [0u64; NUM_BUCKETS];
-        for (i, bucket) in self.gate_latency_buckets.iter().enumerate() {
-            gate_lat_buckets[i] = bucket.swap(0, Ordering::Relaxed);
-        }
+        let gate_lat_buckets = swap_buckets(&self.gate_latency_buckets);
 
         // Get monotonic counters (don't reset)
         let events_total = self.events_total.load(Ordering::Relaxed);
@@ -468,19 +482,13 @@ impl Metrics {
         let acc_no_journey_total = self.acc_no_journey_total.load(Ordering::Relaxed);
 
         // Get stitch histogram buckets (don't reset - cumulative)
-        let mut stitch_distance_buckets = [0u64; NUM_BUCKETS];
-        for (i, bucket) in self.stitch_distance_buckets.iter().enumerate() {
-            stitch_distance_buckets[i] = bucket.load(Ordering::Relaxed);
-        }
+        let stitch_distance_buckets = load_buckets(&self.stitch_distance_buckets);
         let stitch_distance_sum = self.stitch_distance_sum.load(Ordering::Relaxed);
         let stitch_distance_count: u64 = stitch_distance_buckets.iter().sum();
         let stitch_distance_avg_cm =
             if stitch_distance_count > 0 { stitch_distance_sum / stitch_distance_count } else { 0 };
 
-        let mut stitch_time_buckets = [0u64; NUM_BUCKETS];
-        for (i, bucket) in self.stitch_time_buckets.iter().enumerate() {
-            stitch_time_buckets[i] = bucket.load(Ordering::Relaxed);
-        }
+        let stitch_time_buckets = load_buckets(&self.stitch_time_buckets);
         let stitch_time_sum = self.stitch_time_sum.load(Ordering::Relaxed);
         let stitch_time_count: u64 = stitch_time_buckets.iter().sum();
         let stitch_time_avg_ms =
