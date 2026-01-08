@@ -294,16 +294,16 @@ async fn handle_request(
                 .status(StatusCode::OK)
                 .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
                 .body(Full::new(Bytes::from(body)))
-                .unwrap())
+                .expect("static response should not fail"))
         }
         (&Method::GET, "/health") => Ok(Response::builder()
             .status(StatusCode::OK)
             .body(Full::new(Bytes::from("ok")))
-            .unwrap()),
+            .expect("static response should not fail")),
         _ => Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Full::new(Bytes::from("Not Found")))
-            .unwrap()),
+            .expect("static response should not fail")),
     }
 }
 
