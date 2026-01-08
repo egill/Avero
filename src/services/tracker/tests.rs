@@ -1,7 +1,7 @@
 //! Tests for the Tracker module
 
 use super::*;
-use crate::domain::types::EventType;
+use crate::domain::types::{EventType, GeometryId, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
 use crate::services::gate::GateController;
@@ -21,30 +21,67 @@ fn create_test_tracker_with_config(config: Config) -> Tracker {
     Tracker::new(config, gate, metrics, None)
 }
 
-/// Create a test event with basic fields
-fn create_event(event_type: EventType, track_id: i64, geometry_id: Option<i32>) -> ParsedEvent {
-    ParsedEvent {
-        event_type,
-        track_id,
-        geometry_id,
-        direction: None,
-        event_time: 1767617600000,
-        received_at: Instant::now(),
-        position: None,
+/// Builder for creating test ParsedEvent instances
+struct ParsedEventBuilder {
+    event_type: EventType,
+    track_id: i64,
+    geometry_id: Option<i32>,
+    position: Option<[f64; 3]>,
+}
+
+impl ParsedEventBuilder {
+    fn new(event_type: EventType) -> Self {
+        Self {
+            event_type,
+            track_id: 0,
+            geometry_id: None,
+            position: None,
+        }
+    }
+
+    fn with_track_id(mut self, track_id: i64) -> Self {
+        self.track_id = track_id;
+        self
+    }
+
+    fn with_geometry_id(mut self, geometry_id: i32) -> Self {
+        self.geometry_id = Some(geometry_id);
+        self
+    }
+
+    fn with_position(mut self, position: [f64; 3]) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    fn build(self) -> ParsedEvent {
+        ParsedEvent {
+            event_type: self.event_type,
+            track_id: TrackId(self.track_id),
+            geometry_id: self.geometry_id.map(GeometryId),
+            direction: None,
+            event_time: 1767617600000,
+            received_at: Instant::now(),
+            position: self.position,
+        }
     }
 }
 
-/// Create a test event with position data
-fn create_event_with_pos(event_type: EventType, track_id: i64, position: [f64; 3]) -> ParsedEvent {
-    ParsedEvent {
-        event_type,
-        track_id,
-        geometry_id: None,
-        direction: None,
-        event_time: 1767617600000,
-        received_at: Instant::now(),
-        position: Some(position),
+/// Create a test event with basic fields (legacy helper, delegates to builder)
+fn create_event(event_type: EventType, track_id: i64, geometry_id: Option<i32>) -> ParsedEvent {
+    let mut builder = ParsedEventBuilder::new(event_type).with_track_id(track_id);
+    if let Some(gid) = geometry_id {
+        builder = builder.with_geometry_id(gid);
     }
+    builder.build()
+}
+
+/// Create a test event with position data (legacy helper, delegates to builder)
+fn create_event_with_pos(event_type: EventType, track_id: i64, position: [f64; 3]) -> ParsedEvent {
+    ParsedEventBuilder::new(event_type)
+        .with_track_id(track_id)
+        .with_position(position)
+        .build()
 }
 
 #[tokio::test]
@@ -55,7 +92,7 @@ async fn test_track_create() {
     tracker.process_event(event).await;
 
     assert_eq!(tracker.active_tracks(), 1);
-    assert!(tracker.persons.contains_key(&100));
+    assert!(tracker.persons.contains_key(&TrackId(100)));
 }
 
 #[tokio::test]
@@ -95,7 +132,7 @@ async fn test_dwell_accumulation() {
         .process_event(create_event(EventType::ZoneExit, 100, Some(1001)))
         .await;
 
-    let person = tracker.persons.get(&100).unwrap();
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
     assert!(person.accumulated_dwell_ms >= 100);
     // Not authorized yet (need 7000ms)
     assert!(!person.authorized);
@@ -122,7 +159,7 @@ async fn test_dwell_threshold_without_acc() {
         .process_event(create_event(EventType::ZoneExit, 100, Some(1001)))
         .await;
 
-    let person = tracker.persons.get(&100).unwrap();
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
     // Dwell is accumulated but person is NOT authorized (no ACC match)
     assert!(person.accumulated_dwell_ms >= 50);
     assert!(!person.authorized);
@@ -149,7 +186,7 @@ async fn test_accumulated_dwell_across_zones() {
         .process_event(create_event(EventType::ZoneExit, 100, Some(1001)))
         .await;
 
-    let person = tracker.persons.get(&100).unwrap();
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
     assert!(!person.authorized);
     assert!(person.accumulated_dwell_ms >= 50);
 
@@ -162,7 +199,7 @@ async fn test_accumulated_dwell_across_zones() {
         .process_event(create_event(EventType::ZoneExit, 100, Some(1002)))
         .await;
 
-    let person = tracker.persons.get(&100).unwrap();
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
     // Dwell accumulated but still not authorized (no ACC match)
     assert!(person.accumulated_dwell_ms >= 100);
     assert!(!person.authorized);
@@ -205,45 +242,27 @@ async fn test_stitch_transfers_state() {
     let mut tracker = create_test_tracker();
 
     // Create track with position
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
 
     // Manually authorize (simulating ACC match) and set dwell
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
     }
 
-    let dwell = tracker.persons.get(&100).unwrap().accumulated_dwell_ms;
+    let dwell = tracker.persons.get(&TrackId(100)).unwrap().accumulated_dwell_ms;
 
     // Delete track (goes to stitch pending)
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70])).await;
     assert_eq!(tracker.active_tracks(), 0);
 
     // New track nearby within stitch criteria
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            200,
-            [1.05, 1.0, 1.71],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71])).await;
     assert_eq!(tracker.active_tracks(), 1);
 
     // New track should have inherited state
-    let new_person = tracker.persons.get(&200).unwrap();
+    let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(new_person.authorized);
     assert!(new_person.accumulated_dwell_ms >= dwell);
 }
@@ -253,43 +272,25 @@ async fn test_stitch_fails_too_late() {
     let mut tracker = create_test_tracker();
 
     // Create and authorize track
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
     }
 
     // Delete track
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70])).await;
     assert_eq!(tracker.active_tracks(), 0);
 
     // Wait beyond stitch window (4.5s)
     tokio::time::sleep(tokio::time::Duration::from_millis(4600)).await;
 
     // New track nearby - should NOT stitch (too late)
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            200,
-            [1.05, 1.0, 1.71],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71])).await;
 
     // New track should be fresh (no inherited state)
-    let new_person = tracker.persons.get(&200).unwrap();
+    let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(!new_person.authorized);
     assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
@@ -299,39 +300,21 @@ async fn test_stitch_fails_too_far() {
     let mut tracker = create_test_tracker();
 
     // Create and authorize track
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
     }
 
     // Delete track
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70])).await;
 
     // New track 3m away - should NOT stitch (too far)
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            200,
-            [4.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [4.0, 1.0, 1.70])).await;
 
     // New track should be fresh
-    let new_person = tracker.persons.get(&200).unwrap();
+    let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(!new_person.authorized);
     assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
@@ -341,26 +324,14 @@ async fn test_no_stitch_without_new_track() {
     let mut tracker = create_test_tracker();
 
     // Create and authorize track
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
     }
 
     // Delete track
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70])).await;
     assert_eq!(tracker.active_tracks(), 0);
 
     // No new track created - person stays in stitch pending until expired
@@ -373,42 +344,24 @@ async fn test_absolutely_no_stitch() {
     let mut tracker = create_test_tracker();
 
     // Create authorized track with accumulated dwell
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [0.0, 0.0, 1.50],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [0.0, 0.0, 1.50])).await;
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
         person.accumulated_dwell_ms = 99999;
     }
 
     // Delete track
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [0.0, 0.0, 1.50],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [0.0, 0.0, 1.50])).await;
     assert_eq!(tracker.active_tracks(), 0);
 
     // New track at opposite corner, completely different height
     // Distance: 14m away (1414cm >> 180cm limit)
     // Height: 50cm different (>> 10cm limit)
-    tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            999,
-            [10.0, 10.0, 2.00],
-        ))
-        .await;
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 999, [10.0, 10.0, 2.00])).await;
 
     // New track should be completely fresh - NO state transferred
-    let new_person = tracker.persons.get(&999).unwrap();
+    let new_person = tracker.persons.get(&TrackId(999)).unwrap();
     assert!(!new_person.authorized);
     assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
@@ -417,9 +370,7 @@ async fn test_absolutely_no_stitch() {
 async fn test_gate_opens_when_acc_after_gate_entry() {
     let mut ip_to_pos = HashMap::new();
     ip_to_pos.insert("127.0.0.1".to_string(), "POS_1".to_string());
-    let config = Config::default()
-        .with_min_dwell_ms(50)
-        .with_acc_ip_to_pos(ip_to_pos);
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(ip_to_pos);
     let mut tracker = create_test_tracker_with_config(config);
 
     tracker
@@ -438,40 +389,23 @@ async fn test_gate_opens_when_acc_after_gate_entry() {
         .await;
 
     tracker
-        .process_event(create_event(
-            EventType::AccEvent("127.0.0.1".to_string()),
-            0,
-            None,
-        ))
+        .process_event(create_event(EventType::AccEvent("127.0.0.1".to_string()), 0, None))
         .await;
 
-    let summary = tracker
-        .metrics
-        .report(tracker.active_tracks(), tracker.authorized_tracks());
+    let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
     assert_eq!(summary.gate_commands_sent, 1);
-    assert!(tracker
-        .journey_manager
-        .get(100)
-        .unwrap()
-        .gate_cmd_at
-        .is_some());
+    assert!(tracker.journey_manager.get(TrackId(100)).unwrap().gate_cmd_at.is_some());
 }
 
 #[tokio::test]
 async fn test_acc_authorization_survives_pending_and_stitch() {
     let mut ip_to_pos = HashMap::new();
     ip_to_pos.insert("127.0.0.1".to_string(), "POS_1".to_string());
-    let config = Config::default()
-        .with_min_dwell_ms(50)
-        .with_acc_ip_to_pos(ip_to_pos);
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(ip_to_pos);
     let mut tracker = create_test_tracker_with_config(config);
 
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+        .process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70]))
         .await;
     tracker
         .process_event(create_event(EventType::ZoneEntry, 100, Some(1001)))
@@ -482,41 +416,22 @@ async fn test_acc_authorization_survives_pending_and_stitch() {
         .await;
 
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+        .process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]))
         .await;
 
     tracker
-        .process_event(create_event(
-            EventType::AccEvent("127.0.0.1".to_string()),
-            0,
-            None,
-        ))
+        .process_event(create_event(EventType::AccEvent("127.0.0.1".to_string()), 0, None))
         .await;
 
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            200,
-            [1.05, 1.0, 1.71],
-        ))
+        .process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71]))
         .await;
 
     tracker
         .process_event(create_event(EventType::ZoneEntry, 200, Some(1007)))
         .await;
 
-    let summary = tracker
-        .metrics
-        .report(tracker.active_tracks(), tracker.authorized_tracks());
+    let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
     assert_eq!(summary.gate_commands_sent, 1);
-    assert!(tracker
-        .journey_manager
-        .get(200)
-        .unwrap()
-        .gate_cmd_at
-        .is_some());
+    assert!(tracker.journey_manager.get(TrackId(200)).unwrap().gate_cmd_at.is_some());
 }

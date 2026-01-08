@@ -210,12 +210,7 @@ impl GateInvestigator {
     fn record_status_change(&mut self, new_status: DoorStatus) -> bool {
         if new_status != self.last_status {
             let t = self.elapsed_ms();
-            println!(
-                "[{:>6}ms] DOOR: {} -> {}",
-                t,
-                self.last_status.as_str(),
-                new_status.as_str()
-            );
+            println!("[{:>6}ms] DOOR: {} -> {}", t, self.last_status.as_str(), new_status.as_str());
             self.events.push(StateEvent {
                 time_ms: t,
                 event: new_status.as_str().to_string(),
@@ -404,12 +399,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to CloudPlus
     investigator.connect_tcp(&args.tcp).await?;
 
-    let mut results: Vec<(&str, TestResult)> = Vec::new();
+    let mut results: Vec<(String, TestResult)> = Vec::new();
 
     // Test 1: Baseline - single open command
     println!("\n\n▶ PHASE 1: Baseline (single open command)");
     let r = investigator.run_test("Single Open (baseline)", &[]).await?;
-    results.push(("Single Open", r));
+    results.push(("Single Open".to_string(), r));
 
     if !args.fast {
         println!("\n  ⏳ Waiting 5s before next test...");
@@ -422,7 +417,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for interval in [500, 1000, 2000, 3000] {
         let name = format!("Double Open ({}ms interval)", interval);
         let r = investigator.run_test(&name, &[interval]).await?;
-        results.push((Box::leak(name.into_boxed_str()), r));
+        results.push((name, r));
 
         if !args.fast {
             println!("\n  ⏳ Waiting 5s before next test...");
@@ -435,7 +430,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r = investigator
         .run_test("Triple Open (1s intervals)", &[1000, 1000])
         .await?;
-    results.push(("Triple Open 1s", r));
+    results.push(("Triple Open 1s".to_string(), r));
 
     if !args.fast {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -446,7 +441,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r = investigator
         .run_test("Quad Open (1s intervals)", &[1000, 1000, 1000])
         .await?;
-    results.push(("Quad Open 1s", r));
+    results.push(("Quad Open 1s".to_string(), r));
 
     if !args.fast {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -457,7 +452,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r = investigator
         .run_test("Rapid Fire x5", &[500, 500, 500, 500])
         .await?;
-    results.push(("Rapid x5", r));
+    results.push(("Rapid x5".to_string(), r));
 
     // Print summary
     println!("\n\n╔══════════════════════════════════════════════════════════╗");
@@ -469,16 +464,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("{}", "-".repeat(60));
 
-    let baseline_open_duration = results
-        .first()
+    let baseline_open_duration = results.first()
         .and_then(|(_, r)| r.open_duration_ms)
         .unwrap_or(0);
 
     for (name, r) in &results {
-        let cmd_open = r
-            .cmd_to_open_ms
-            .map(|ms| format!("{}ms", ms))
-            .unwrap_or("-".to_string());
+        let cmd_open = r.cmd_to_open_ms.map(|ms| format!("{}ms", ms)).unwrap_or("-".to_string());
+        let open_dur = r.open_duration_ms.map(|ms| {
+            let delta = ms as i64 - baseline_open_duration as i64;
+            let sign = if delta >= 0 { "+" } else { "" };
+            format!("{:.1}s ({}{}ms)", ms as f64 / 1000.0, sign, delta)
+        }).unwrap_or("-".to_string());
         let open_dur = r
             .open_duration_ms
             .map(|ms| {
@@ -499,15 +495,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╚══════════════════════════════════════════════════════════╝\n");
 
     // Analyze patterns
-    let durations: Vec<u64> = results
-        .iter()
+    let durations: Vec<u64> = results.iter()
         .filter_map(|(_, r)| r.open_duration_ms)
         .collect();
 
     if durations.len() >= 2 {
         let baseline = durations[0];
-        let extended: Vec<_> = durations[1..]
-            .iter()
+        let extended: Vec<_> = durations[1..].iter()
             .filter(|&&d| d > baseline + 500)
             .collect();
 

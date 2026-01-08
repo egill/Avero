@@ -1,7 +1,29 @@
 //! Shared types for the gateway PoC
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Instant;
+
+/// Newtype wrapper for track IDs to provide type safety
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(transparent)]
+pub struct TrackId(pub i64);
+
+impl std::fmt::Display for TrackId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Newtype wrapper for geometry IDs to provide type safety
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(transparent)]
+pub struct GeometryId(pub i32);
+
+impl std::fmt::Display for GeometryId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// Xovis message structure for parsing
 #[derive(Debug, Deserialize)]
@@ -75,7 +97,9 @@ where
         where
             E: de::Error,
         {
-            Ok(TimestampValue::EpochMs(value as u64))
+            // Use TryFrom to safely convert i64 to u64, defaulting to 0 for negative values
+            let epoch_ms = u64::try_from(value).unwrap_or(0);
+            Ok(TimestampValue::EpochMs(epoch_ms))
         }
     }
 
@@ -111,8 +135,8 @@ pub struct EventAttributes {
 #[allow(dead_code)]
 pub struct ParsedEvent {
     pub event_type: EventType,
-    pub track_id: i64,
-    pub geometry_id: Option<i32>,
+    pub track_id: TrackId,
+    pub geometry_id: Option<GeometryId>,
     pub direction: Option<String>,
     pub event_time: u64,
     pub received_at: Instant,
@@ -170,8 +194,8 @@ impl EventType {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Person {
-    pub track_id: i64,
-    pub current_zone: Option<i32>,
+    pub track_id: TrackId,
+    pub current_zone: Option<GeometryId>,
     pub zone_entered_at: Option<Instant>,
     pub accumulated_dwell_ms: u64,
     pub authorized: bool,
@@ -179,7 +203,8 @@ pub struct Person {
 }
 
 impl Person {
-    pub fn new(track_id: i64) -> Self {
+    #[inline]
+    pub fn new(track_id: TrackId) -> Self {
         Self {
             track_id,
             current_zone: None,

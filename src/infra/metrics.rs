@@ -7,6 +7,7 @@
 //! NOTE: All atomics use Relaxed ordering intentionally—these are statistical
 //! counters only. Do NOT use these atomics for coordination or logic decisions.
 
+use rustc_hash::FxHashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tracing::info;
@@ -20,26 +21,36 @@ const NUM_BUCKETS: usize = 11;
 /// Buckets: ≤10, ≤20, ≤40, ≤80, ≤160, ≤320, ≤640, ≤1280, ≤2560, ≤5120, >5120 cm
 const STITCH_DIST_BOUNDS: [u64; 10] = [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120];
 
-/// Compute bucket index for a latency value
+/// Compute bucket index for a latency value using binary search
 #[inline]
 fn bucket_index(latency_us: u64) -> usize {
-    for (i, &bound) in BUCKET_BOUNDS.iter().enumerate() {
-        if latency_us <= bound {
-            return i;
-        }
-    }
-    10 // overflow bucket (>51200µs)
+    BUCKET_BOUNDS.partition_point(|&bound| bound < latency_us)
 }
 
-/// Compute bucket index for stitch distance (cm)
+/// Compute bucket index for stitch distance (cm) using binary search
 #[inline]
 fn stitch_dist_bucket_index(dist_cm: u64) -> usize {
-    for (i, &bound) in STITCH_DIST_BOUNDS.iter().enumerate() {
-        if dist_cm <= bound {
-            return i;
-        }
+    STITCH_DIST_BOUNDS.partition_point(|&bound| bound < dist_cm)
+}
+
+/// Swap all buckets to zero and return their values
+#[inline]
+fn swap_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
+    let mut result = [0u64; NUM_BUCKETS];
+    for (i, bucket) in buckets.iter().enumerate() {
+        result[i] = bucket.swap(0, Ordering::Relaxed);
     }
-    10 // overflow bucket (>5120cm)
+    result
+}
+
+/// Load all bucket values without resetting
+#[inline]
+fn load_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
+    let mut result = [0u64; NUM_BUCKETS];
+    for (i, bucket) in buckets.iter().enumerate() {
+        result[i] = bucket.load(Ordering::Relaxed);
+    }
+    result
 }
 
 /// Compute percentile from histogram buckets
@@ -54,9 +65,8 @@ fn percentile_from_buckets(buckets: &[u64; NUM_BUCKETS], percentile: f64) -> u64
     let mut cumulative = 0u64;
 
     // Upper bounds for each bucket (last bucket uses 2x the previous bound)
-    const BUCKET_UPPER_BOUNDS: [u64; NUM_BUCKETS] = [
-        100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400,
-    ];
+    const BUCKET_UPPER_BOUNDS: [u64; NUM_BUCKETS] =
+        [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400];
 
     for (i, &count) in buckets.iter().enumerate() {
         cumulative += count;
@@ -131,6 +141,8 @@ pub struct Metrics {
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
     /// Zone IDs for POS zones (set once at init)
     pos_zone_ids: parking_lot::Mutex<Vec<i32>>,
+    /// Pre-computed zone ID to index mapping (for O(1) lookup without mutex)
+    zone_id_to_index: parking_lot::RwLock<FxHashMap<i32, usize>>,
     /// Last report time (only accessed from reporter, not atomic)
     last_report_time: parking_lot::Mutex<Instant>,
 }
@@ -162,21 +174,32 @@ impl Metrics {
             acc_no_journey_total: AtomicU64::new(0),
             pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
             pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
+            zone_id_to_index: parking_lot::RwLock::new(FxHashMap::default()),
             last_report_time: parking_lot::Mutex::new(Instant::now()),
         }
     }
 
     /// Set the POS zone IDs (call once at initialization)
     pub fn set_pos_zones(&self, zone_ids: &[i32]) {
+        // Update the zone list (for reporting)
         let mut zones = self.pos_zone_ids.lock();
         zones.clear();
         zones.extend(zone_ids.iter().take(MAX_POS_ZONES));
+
+        // Pre-compute the zone ID to index mapping for O(1) lookup
+        let mut index_map = self.zone_id_to_index.write();
+        index_map.clear();
+        for (idx, &zone_id) in zone_ids.iter().take(MAX_POS_ZONES).enumerate() {
+            index_map.insert(zone_id, idx);
+        }
     }
 
     /// Get the index for a zone ID, or None if not a POS zone
+    /// Uses pre-computed O(1) lookup via FxHashMap (no mutex on hot path)
+    #[inline]
     fn zone_index(&self, zone_id: i32) -> Option<usize> {
-        let zones = self.pos_zone_ids.lock();
-        zones.iter().position(|&id| id == zone_id)
+        let index_map = self.zone_id_to_index.read();
+        index_map.get(&zone_id).copied()
     }
 
     /// Record a person entering a POS zone
@@ -396,10 +419,7 @@ impl Metrics {
         let max_latency = self.latency_max_us.swap(0, Ordering::Relaxed);
 
         // Swap histogram buckets and collect values
-        let mut lat_buckets = [0u64; NUM_BUCKETS];
-        for (i, bucket) in self.latency_buckets.iter().enumerate() {
-            lat_buckets[i] = bucket.swap(0, Ordering::Relaxed);
-        }
+        let lat_buckets = swap_buckets(&self.latency_buckets);
 
         // Swap gate latency counters
         let gate_count = self.gate_commands_since_report.swap(0, Ordering::Relaxed);
@@ -407,10 +427,7 @@ impl Metrics {
         let gate_max_latency = self.gate_latency_max_us.swap(0, Ordering::Relaxed);
 
         // Swap gate histogram buckets
-        let mut gate_lat_buckets = [0u64; NUM_BUCKETS];
-        for (i, bucket) in self.gate_latency_buckets.iter().enumerate() {
-            gate_lat_buckets[i] = bucket.swap(0, Ordering::Relaxed);
-        }
+        let gate_lat_buckets = swap_buckets(&self.gate_latency_buckets);
 
         // Get monotonic counters (don't reset)
         let events_total = self.events_total.load(Ordering::Relaxed);
@@ -431,11 +448,7 @@ impl Metrics {
             0.0
         };
 
-        let avg_latency = if events_count > 0 {
-            latency_sum / events_count
-        } else {
-            0
-        };
+        let avg_latency = if events_count > 0 { latency_sum / events_count } else { 0 };
 
         // Compute percentiles from histogram
         let lat_p50 = percentile_from_buckets(&lat_buckets, 0.50);
@@ -443,11 +456,7 @@ impl Metrics {
         let lat_p99 = percentile_from_buckets(&lat_buckets, 0.99);
 
         // Gate latency metrics
-        let gate_avg_latency = if gate_count > 0 {
-            gate_latency_sum / gate_count
-        } else {
-            0
-        };
+        let gate_avg_latency = if gate_count > 0 { gate_latency_sum / gate_count } else { 0 };
         let gate_lat_p99 = percentile_from_buckets(&gate_lat_buckets, 0.99);
 
         // Get current gate state and exits (don't reset)
@@ -463,29 +472,17 @@ impl Metrics {
         let acc_no_journey_total = self.acc_no_journey_total.load(Ordering::Relaxed);
 
         // Get stitch histogram buckets (don't reset - cumulative)
-        let mut stitch_distance_buckets = [0u64; NUM_BUCKETS];
-        for (i, bucket) in self.stitch_distance_buckets.iter().enumerate() {
-            stitch_distance_buckets[i] = bucket.load(Ordering::Relaxed);
-        }
+        let stitch_distance_buckets = load_buckets(&self.stitch_distance_buckets);
         let stitch_distance_sum = self.stitch_distance_sum.load(Ordering::Relaxed);
         let stitch_distance_count: u64 = stitch_distance_buckets.iter().sum();
-        let stitch_distance_avg_cm = if stitch_distance_count > 0 {
-            stitch_distance_sum / stitch_distance_count
-        } else {
-            0
-        };
+        let stitch_distance_avg_cm =
+            if stitch_distance_count > 0 { stitch_distance_sum / stitch_distance_count } else { 0 };
 
-        let mut stitch_time_buckets = [0u64; NUM_BUCKETS];
-        for (i, bucket) in self.stitch_time_buckets.iter().enumerate() {
-            stitch_time_buckets[i] = bucket.load(Ordering::Relaxed);
-        }
+        let stitch_time_buckets = load_buckets(&self.stitch_time_buckets);
         let stitch_time_sum = self.stitch_time_sum.load(Ordering::Relaxed);
         let stitch_time_count: u64 = stitch_time_buckets.iter().sum();
-        let stitch_time_avg_ms = if stitch_time_count > 0 {
-            stitch_time_sum / stitch_time_count
-        } else {
-            0
-        };
+        let stitch_time_avg_ms =
+            if stitch_time_count > 0 { stitch_time_sum / stitch_time_count } else { 0 };
 
         MetricsSummary {
             events_total,

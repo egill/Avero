@@ -4,7 +4,7 @@
 //! - Extended grace time for POS zones (people linger at checkout)
 //! - POS zone memory: matching preference for tracks lost in same zone
 
-use crate::domain::types::Person;
+use crate::domain::types::{Person, TrackId};
 use crate::infra::metrics::Metrics;
 use std::sync::Arc;
 use std::time::Instant;
@@ -37,7 +37,7 @@ struct PendingTrack {
 /// Debug info about a pending track (for ACC debugging)
 #[derive(Debug, Clone)]
 pub struct PendingTrackInfo {
-    pub track_id: i64,
+    pub track_id: TrackId,
     pub last_zone: Option<String>,
     pub dwell_ms: u64,
     pub authorized: bool,
@@ -50,21 +50,21 @@ pub struct Stitcher {
     metrics: Option<Arc<Metrics>>,
 }
 
+impl Default for Stitcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Stitcher {
     #[allow(dead_code)]
     pub fn new() -> Self {
-        Self {
-            pending: Vec::new(),
-            metrics: None,
-        }
+        Self { pending: Vec::new(), metrics: None }
     }
 
     /// Create a stitcher with metrics recording
     pub fn with_metrics(metrics: Arc<Metrics>) -> Self {
-        Self {
-            pending: Vec::new(),
-            metrics: Some(metrics),
-        }
+        Self { pending: Vec::new(), metrics: Some(metrics) }
     }
 
     /// Add a deleted track as pending for potential stitching
@@ -82,12 +82,7 @@ impl Stitcher {
             "pending_stitch_added"
         );
 
-        self.pending.push(PendingTrack {
-            person,
-            deleted_at: Instant::now(),
-            position,
-            last_zone,
-        });
+        self.pending.push(PendingTrack { person, deleted_at: Instant::now(), position, last_zone });
     }
 
     /// Try to find and remove a stitch candidate for a new track at given position
@@ -185,11 +180,7 @@ impl Stitcher {
                 last_zone = ?pending.last_zone,
                 "stitch_match_found"
             );
-            StitchMatch {
-                person: pending.person,
-                time_ms,
-                distance_cm: distance_cm as u32,
-            }
+            StitchMatch { person: pending.person, time_ms, distance_cm: distance_cm as u32 }
         })
     }
 
@@ -257,13 +248,13 @@ impl Stitcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::Person;
+    use crate::domain::types::{Person, TrackId};
 
     #[test]
     fn test_stitch_within_criteria() {
         let mut stitcher = Stitcher::new();
 
-        let mut person = Person::new(100);
+        let mut person = Person::new(TrackId(100));
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
 
@@ -275,7 +266,7 @@ mod tests {
 
         assert!(result.is_some());
         let stitch = result.unwrap();
-        assert_eq!(stitch.person.track_id, 100);
+        assert_eq!(stitch.person.track_id, TrackId(100));
         assert!(stitch.person.authorized);
         assert_eq!(stitch.person.accumulated_dwell_ms, 5000);
         assert_eq!(stitch.distance_cm, 50);
@@ -286,7 +277,7 @@ mod tests {
     fn test_stitch_too_far() {
         let mut stitcher = Stitcher::new();
 
-        let person = Person::new(100);
+        let person = Person::new(TrackId(100));
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), None);
 
         // New track at [4.0, 1.0, 1.70] - 300cm away, too far
@@ -300,7 +291,7 @@ mod tests {
     fn test_stitch_height_mismatch() {
         let mut stitcher = Stitcher::new();
 
-        let person = Person::new(100);
+        let person = Person::new(TrackId(100));
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), None);
 
         // New track same location but 20cm taller
@@ -313,7 +304,7 @@ mod tests {
     fn test_no_position_no_match() {
         let mut stitcher = Stitcher::new();
 
-        let person = Person::new(100);
+        let person = Person::new(TrackId(100));
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), None);
 
         // New track without position
@@ -327,7 +318,7 @@ mod tests {
         let mut stitcher = Stitcher::new();
 
         // Pending track without position (rare but possible)
-        let person = Person::new(100);
+        let person = Person::new(TrackId(100));
         stitcher.add_pending(person, None, None);
 
         // New track with position - can't match pending without position
@@ -342,11 +333,11 @@ mod tests {
         let mut stitcher = Stitcher::new();
 
         // Add two pending tracks
-        let mut person1 = Person::new(100);
+        let mut person1 = Person::new(TrackId(100));
         person1.authorized = false;
         stitcher.add_pending(person1, Some([1.0, 1.0, 1.70]), None);
 
-        let mut person2 = Person::new(200);
+        let mut person2 = Person::new(TrackId(200));
         person2.authorized = true;
         stitcher.add_pending(person2, Some([1.2, 1.0, 1.70]), None); // Closer
 
@@ -355,7 +346,7 @@ mod tests {
 
         assert!(result.is_some());
         let stitch = result.unwrap();
-        assert_eq!(stitch.person.track_id, 200); // Closer match
+        assert_eq!(stitch.person.track_id, TrackId(200)); // Closer match
         assert!(stitch.person.authorized);
         assert_eq!(stitch.distance_cm, 10); // 10cm from person2
         assert_eq!(stitcher.pending_count(), 1); // person1 still pending
@@ -365,7 +356,7 @@ mod tests {
     fn test_absolutely_no_stitch() {
         let mut stitcher = Stitcher::new();
 
-        let mut person = Person::new(100);
+        let mut person = Person::new(TrackId(100));
         person.authorized = true;
         person.accumulated_dwell_ms = 99999;
 
@@ -386,14 +377,14 @@ mod tests {
     fn test_get_pending_info() {
         let mut stitcher = Stitcher::new();
 
-        let mut person = Person::new(100);
+        let mut person = Person::new(TrackId(100));
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
 
         let info = stitcher.get_pending_info();
         assert_eq!(info.len(), 1);
-        assert_eq!(info[0].track_id, 100);
+        assert_eq!(info[0].track_id, TrackId(100));
         assert_eq!(info[0].last_zone, Some("POS_1".to_string()));
         assert_eq!(info[0].dwell_ms, 5000);
         assert!(info[0].authorized);

@@ -1,6 +1,8 @@
 //! Journey data model for tracking customer paths through the store
 
+use crate::domain::types::TrackId;
 use serde::Serialize;
+use smallvec::{smallvec, SmallVec};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -10,11 +12,9 @@ pub fn new_uuid_v7() -> String {
 }
 
 /// Get current epoch milliseconds
+#[inline]
 pub fn epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
 /// Journey outcome
@@ -26,6 +26,7 @@ pub enum JourneyOutcome {
 }
 
 impl JourneyOutcome {
+    #[inline]
     pub fn as_str(&self) -> &str {
         match self {
             JourneyOutcome::InProgress => "in_progress",
@@ -35,23 +36,55 @@ impl JourneyOutcome {
     }
 }
 
+/// Event types that can occur in a journey
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JourneyEventType {
+    TrackCreate,
+    ZoneEntry,
+    ZoneExit,
+    EntryCross,
+    ExitCross,
+    ApproachCross,
+    LineCross,
+    Pending,
+    Stitch,
+    GateCmd,
+    GateOpen,
+    Acc,
+}
+
+impl JourneyEventType {
+    /// Convert to string representation for JSON serialization
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JourneyEventType::TrackCreate => "track_create",
+            JourneyEventType::ZoneEntry => "zone_entry",
+            JourneyEventType::ZoneExit => "zone_exit",
+            JourneyEventType::EntryCross => "entry_cross",
+            JourneyEventType::ExitCross => "exit_cross",
+            JourneyEventType::ApproachCross => "approach_cross",
+            JourneyEventType::LineCross => "line_cross",
+            JourneyEventType::Pending => "pending",
+            JourneyEventType::Stitch => "stitch",
+            JourneyEventType::GateCmd => "gate_cmd",
+            JourneyEventType::GateOpen => "gate_open",
+            JourneyEventType::Acc => "acc",
+        }
+    }
+}
+
 /// A single event in a journey
 #[derive(Debug, Clone)]
 pub struct JourneyEvent {
-    pub t: String,             // event type
+    pub t: JourneyEventType,   // event type
     pub z: Option<String>,     // zone or line name
     pub ts: u64,               // epoch ms
     pub extra: Option<String>, // additional data
 }
 
 impl JourneyEvent {
-    pub fn new(event_type: &str, ts: u64) -> Self {
-        Self {
-            t: event_type.to_string(),
-            z: None,
-            ts,
-            extra: None,
-        }
+    pub fn new(event_type: JourneyEventType, ts: u64) -> Self {
+        Self { t: event_type, z: None, ts, extra: None }
     }
 
     pub fn with_zone(mut self, zone: &str) -> Self {
@@ -67,7 +100,7 @@ impl JourneyEvent {
     /// Convert to JSON value for short-key format
     fn to_json_value(&self) -> serde_json::Value {
         let mut obj = serde_json::Map::new();
-        obj.insert("t".to_string(), serde_json::Value::String(self.t.clone()));
+        obj.insert("t".to_string(), serde_json::Value::String(self.t.as_str().to_string()));
         if let Some(z) = &self.z {
             obj.insert("z".to_string(), serde_json::Value::String(z.clone()));
         }
@@ -82,10 +115,10 @@ impl JourneyEvent {
 /// Complete journey for a tracked person
 #[derive(Debug, Clone)]
 pub struct Journey {
-    pub jid: String,            // UUIDv7 journey ID
-    pub pid: String,            // UUIDv7 person ID (stable across stitches)
-    pub tids: Vec<i64>,         // Xovis track_ids (stitch history)
-    pub parent: Option<String>, // Previous journey's jid (for re-entry)
+    pub jid: String,              // UUIDv7 journey ID
+    pub pid: String,              // UUIDv7 person ID (stable across stitches)
+    pub tids: SmallVec<[TrackId; 4]>, // Xovis track_ids (stitch history)
+    pub parent: Option<String>,   // Previous journey's jid (for re-entry)
     pub outcome: JourneyOutcome,
     pub authorized: bool,
     pub total_dwell_ms: u64,
@@ -100,13 +133,27 @@ pub struct Journey {
 }
 
 impl Journey {
-    /// Create a new journey for a track
-    pub fn new(track_id: i64) -> Self {
+    /// Create a new journey for a track.
+    ///
+    /// Initializes a journey with a unique ID (UUIDv7), person ID,
+    /// and the initial track ID. The journey starts in `InProgress` state.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gateway_poc::domain::journey::Journey;
+    /// use gateway_poc::domain::types::TrackId;
+    ///
+    /// let journey = Journey::new(TrackId(100));
+    /// assert_eq!(journey.current_track_id(), TrackId(100));
+    /// assert!(!journey.authorized);
+    /// ```
+    pub fn new(track_id: TrackId) -> Self {
         let now = epoch_ms();
         Self {
             jid: new_uuid_v7(),
             pid: new_uuid_v7(),
-            tids: vec![track_id],
+            tids: smallvec![track_id],
             parent: None,
             outcome: JourneyOutcome::InProgress,
             authorized: false,
@@ -123,7 +170,7 @@ impl Journey {
     }
 
     /// Create a new journey that continues from a previous one (re-entry)
-    pub fn new_with_parent(track_id: i64, parent_jid: &str, parent_pid: &str) -> Self {
+    pub fn new_with_parent(track_id: TrackId, parent_jid: &str, parent_pid: &str) -> Self {
         let mut journey = Self::new(track_id);
         journey.parent = Some(parent_jid.to_string());
         journey.pid = parent_pid.to_string();
@@ -131,7 +178,7 @@ impl Journey {
     }
 
     /// Add a track ID when stitching
-    pub fn add_track_id(&mut self, track_id: i64) {
+    pub fn add_track_id(&mut self, track_id: TrackId) {
         self.tids.push(track_id);
     }
 
@@ -147,8 +194,8 @@ impl Journey {
     }
 
     /// Get the current/last track ID
-    pub fn current_track_id(&self) -> i64 {
-        *self.tids.last().unwrap_or(&0)
+    pub fn current_track_id(&self) -> TrackId {
+        *self.tids.last().unwrap_or(&TrackId(0))
     }
 
     /// Convert to short-key JSON string (without site)
@@ -173,15 +220,10 @@ impl Journey {
             );
         }
 
-        obj.insert(
-            "jid".to_string(),
-            serde_json::Value::String(self.jid.clone()),
-        );
-        obj.insert(
-            "pid".to_string(),
-            serde_json::Value::String(self.pid.clone()),
-        );
-        obj.insert("tids".to_string(), serde_json::json!(self.tids));
+        obj.insert("jid".to_string(), serde_json::Value::String(self.jid.clone()));
+        obj.insert("pid".to_string(), serde_json::Value::String(self.pid.clone()));
+        let tids_raw: Vec<i64> = self.tids.iter().map(|t| t.0).collect();
+        obj.insert("tids".to_string(), serde_json::json!(tids_raw));
 
         if let Some(parent) = &self.parent {
             obj.insert(
@@ -242,11 +284,11 @@ mod tests {
 
     #[test]
     fn test_new_journey() {
-        let journey = Journey::new(100);
+        let journey = Journey::new(TrackId(100));
 
         assert!(!journey.jid.is_empty());
         assert!(!journey.pid.is_empty());
-        assert_eq!(journey.tids, vec![100]);
+        assert_eq!(journey.tids.as_slice(), &[TrackId(100)]);
         assert!(journey.parent.is_none());
         assert_eq!(journey.outcome, JourneyOutcome::InProgress);
         assert!(!journey.authorized);
@@ -258,30 +300,30 @@ mod tests {
 
     #[test]
     fn test_journey_with_parent() {
-        let journey = Journey::new_with_parent(200, "parent-jid-123", "pid-456");
+        let journey = Journey::new_with_parent(TrackId(200), "parent-jid-123", "pid-456");
 
-        assert_eq!(journey.tids, vec![200]);
+        assert_eq!(journey.tids.as_slice(), &[TrackId(200)]);
         assert_eq!(journey.parent, Some("parent-jid-123".to_string()));
         assert_eq!(journey.pid, "pid-456");
     }
 
     #[test]
     fn test_add_track_id() {
-        let mut journey = Journey::new(100);
-        journey.add_track_id(200);
-        journey.add_track_id(300);
+        let mut journey = Journey::new(TrackId(100));
+        journey.add_track_id(TrackId(200));
+        journey.add_track_id(TrackId(300));
 
-        assert_eq!(journey.tids, vec![100, 200, 300]);
-        assert_eq!(journey.current_track_id(), 300);
+        assert_eq!(journey.tids.as_slice(), &[TrackId(100), TrackId(200), TrackId(300)]);
+        assert_eq!(journey.current_track_id(), TrackId(300));
     }
 
     #[test]
     fn test_journey_event() {
-        let event = JourneyEvent::new("zone_entry", 1736012345678)
+        let event = JourneyEvent::new(JourneyEventType::ZoneEntry, 1736012345678)
             .with_zone("POS_1")
             .with_extra("dwell=7500");
 
-        assert_eq!(event.t, "zone_entry");
+        assert_eq!(event.t, JourneyEventType::ZoneEntry);
         assert_eq!(event.z, Some("POS_1".to_string()));
         assert_eq!(event.ts, 1736012345678);
         assert_eq!(event.extra, Some("dwell=7500".to_string()));
@@ -289,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_journey_to_json() {
-        let mut journey = Journey::new(100);
+        let mut journey = Journey::new(TrackId(100));
         journey.authorized = true;
         journey.total_dwell_ms = 7500;
         journey.acc_matched = true;
@@ -297,10 +339,10 @@ mod tests {
         journey.gate_cmd_at = Some(1736012345678);
         journey.gate_opened_at = Some(1736012345890);
 
-        journey.add_event(JourneyEvent::new("entry_cross", 1736012340000));
-        journey.add_event(JourneyEvent::new("zone_entry", 1736012341000).with_zone("POS_1"));
+        journey.add_event(JourneyEvent::new(JourneyEventType::EntryCross, 1736012340000));
+        journey.add_event(JourneyEvent::new(JourneyEventType::ZoneEntry, 1736012341000).with_zone("POS_1"));
         journey.add_event(
-            JourneyEvent::new("zone_exit", 1736012348500)
+            JourneyEvent::new(JourneyEventType::ZoneExit, 1736012348500)
                 .with_zone("POS_1")
                 .with_extra("dwell=7500"),
         );

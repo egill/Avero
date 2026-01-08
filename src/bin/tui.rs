@@ -549,24 +549,23 @@ impl ManualGateTest {
 
     fn on_moving(&mut self) {
         if self.active && self.moving_at.is_none() {
-            self.moving_at = Some(Instant::now());
+            let now = Instant::now();
+            self.moving_at = Some(now);
             if let Some(cmd) = self.cmd_sent {
-                self.last_cmd_to_moving =
-                    Some(self.moving_at.unwrap().duration_since(cmd).as_millis() as u64);
+                self.last_cmd_to_moving = Some(now.duration_since(cmd).as_millis() as u64);
             }
         }
     }
 
     fn on_open(&mut self) {
         if self.active && self.open_at.is_none() {
-            self.open_at = Some(Instant::now());
+            let now = Instant::now();
+            self.open_at = Some(now);
             if let Some(moving) = self.moving_at {
-                self.last_moving_to_open =
-                    Some(self.open_at.unwrap().duration_since(moving).as_millis() as u64);
+                self.last_moving_to_open = Some(now.duration_since(moving).as_millis() as u64);
             }
             if let Some(cmd) = self.cmd_sent {
-                self.last_total =
-                    Some(self.open_at.unwrap().duration_since(cmd).as_millis() as u64);
+                self.last_total = Some(now.duration_since(cmd).as_millis() as u64);
             }
             self.active = false;
         }
@@ -716,13 +715,10 @@ impl Default for DashboardState {
         // Initialize 5 POS zones
         for i in 1..=5 {
             let name = format!("POS_{}", i);
-            state.pos_zones.insert(
-                name.clone(),
-                ZoneState {
-                    name,
-                    ..Default::default()
-                },
-            );
+            state.pos_zones.insert(name.clone(), ZoneState {
+                name,
+                ..Default::default()
+            });
         }
 
         state
@@ -744,11 +740,7 @@ impl DashboardState {
     }
 
     fn add_issue(&mut self, severity: IssueSeverity, message: String) {
-        self.issues.push_front(Issue {
-            timestamp: Instant::now(),
-            severity,
-            message,
-        });
+        self.issues.push_front(Issue { timestamp: Instant::now(), severity, message });
         if self.issues.len() > MAX_ISSUES {
             self.issues.pop_back();
         }
@@ -972,10 +964,7 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let Some(tid) = event.tid.or(self.gate_zone.occupant_tid) {
-                    self.gate_zone_status = GateZoneStatus::Exiting {
-                        tid,
-                        door_state: "cmd_sent".to_string(),
-                    };
+                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "cmd_sent".to_string() };
                 }
             }
             "moving" => {
@@ -985,10 +974,7 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let GateZoneStatus::Exiting { tid, .. } = self.gate_zone_status {
-                    self.gate_zone_status = GateZoneStatus::Exiting {
-                        tid,
-                        door_state: "moving".to_string(),
-                    };
+                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "moving".to_string() };
                 }
             }
             "open" => {
@@ -999,10 +985,7 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let GateZoneStatus::Exiting { tid, .. } = self.gate_zone_status {
-                    self.gate_zone_status = GateZoneStatus::Exiting {
-                        tid,
-                        door_state: "open".to_string(),
-                    };
+                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "open".to_string() };
                 }
             }
             "closed" => {
@@ -1032,7 +1015,7 @@ impl DashboardState {
                 if let Some(tid) = event.tid {
                     self.add_issue(
                         IssueSeverity::Warning,
-                        format!("Unauthorized exit T{}", tid),
+                        format!("Unauthorized exit T{}", tid)
                     );
                 }
             }
@@ -1078,12 +1061,7 @@ impl DashboardState {
                     if !active.is_empty() {
                         let candidates: Vec<String> = active
                             .iter()
-                            .filter(|t| {
-                                t.zone
-                                    .as_ref()
-                                    .map(|z| z.starts_with("POS"))
-                                    .unwrap_or(false)
-                            })
+                            .filter(|t| t.zone.as_ref().map(|z| z.starts_with("POS")).unwrap_or(false))
                             .take(3)
                             .map(|t| format!("T{}@{}", t.tid, t.zone.as_deref().unwrap_or("?")))
                             .collect();
@@ -1221,9 +1199,7 @@ fn load_config(path: &str) -> Option<TuiConfig> {
         _mode: g.get("mode").and_then(|v| v.as_str().map(String::from)),
         tcp_addr: g.get("tcp_addr").and_then(|v| v.as_str().map(String::from)),
         _http_url: g.get("http_url").and_then(|v| v.as_str().map(String::from)),
-        _timeout_ms: g
-            .get("timeout_ms")
-            .and_then(|v| v.as_integer().map(|t| t as u64)),
+        _timeout_ms: g.get("timeout_ms").and_then(|v| v.as_integer().map(|t| t as u64)),
     });
 
     Some(TuiConfig { mqtt, gate })
@@ -1325,11 +1301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     mqtt_handle.abort();
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     result
@@ -1564,9 +1536,7 @@ fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
         Span::raw("| "),
         Span::styled(
             format!("[{}]", view_text),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         ),
         Span::raw(" | "),
         Span::styled(status_text, Style::default().fg(status_color)),
@@ -1589,12 +1559,7 @@ fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
 
 fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
     // Build zone status row: POS1-5 + GATE
-    let mut cells: Vec<Span> = vec![Span::styled(
-        "ZONES ",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    )];
+    let mut cells: Vec<Span> = vec![Span::styled("ZONES ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))];
 
     // Sort POS zones
     let mut zones: Vec<_> = state.pos_zones.values().collect();
@@ -1603,41 +1568,18 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
     for zone in zones {
         let (icon, color, detail) = match zone.status() {
             ZoneStatus::Empty => ("○", Color::DarkGray, zone.name.replace("POS_", "P")),
-            ZoneStatus::Pending { tid, dwell_ms } => (
-                "?",
-                Color::Yellow,
-                format!(
-                    "{}:T{} {:.0}s",
-                    zone.name.replace("POS_", "P"),
-                    tid,
-                    dwell_ms as f64 / 1000.0
-                ),
-            ),
-            ZoneStatus::Authorized { tid, .. } => (
-                "✓",
-                Color::Green,
-                format!("{}:T{}", zone.name.replace("POS_", "P"), tid),
-            ),
-            ZoneStatus::Waiting { tid, dwell_ms } => (
-                "⚠",
-                Color::Yellow,
-                format!(
-                    "{}:T{} {:.0}s!",
-                    zone.name.replace("POS_", "P"),
-                    tid,
-                    dwell_ms as f64 / 1000.0
-                ),
-            ),
-            ZoneStatus::Overdue { tid, dwell_ms } => (
-                "✗",
-                Color::Red,
-                format!(
-                    "{}:T{} {:.0}s!!",
-                    zone.name.replace("POS_", "P"),
-                    tid,
-                    dwell_ms as f64 / 1000.0
-                ),
-            ),
+            ZoneStatus::Pending { tid, dwell_ms } => {
+                ("?", Color::Yellow, format!("{}:T{} {:.0}s", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
+            }
+            ZoneStatus::Authorized { tid, .. } => {
+                ("✓", Color::Green, format!("{}:T{}", zone.name.replace("POS_", "P"), tid))
+            }
+            ZoneStatus::Waiting { tid, dwell_ms } => {
+                ("⚠", Color::Yellow, format!("{}:T{} {:.0}s!", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
+            }
+            ZoneStatus::Overdue { tid, dwell_ms } => {
+                ("✗", Color::Red, format!("{}:T{} {:.0}s!!", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
+            }
         };
 
         cells.push(Span::styled(
@@ -1755,11 +1697,7 @@ fn draw_track_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
                 Span::raw(format!(" T{:<4} ", e.tid)),
                 Span::styled(
                     auth_icon,
-                    Style::default().fg(if e.auth {
-                        Color::Green
-                    } else {
-                        Color::DarkGray
-                    }),
+                    Style::default().fg(if e.auth { Color::Green } else { Color::DarkGray }),
                 ),
                 Span::raw(format!(" {:.1}s", e.dwell_ms as f64 / 1000.0)),
             ]))
@@ -1805,20 +1743,16 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
         .unwrap_or("-".to_string());
 
     // Build timing breakdown lines
-    let entry_to_cmd = flow
-        .entry_to_cmd_ms()
+    let entry_to_cmd = flow.entry_to_cmd_ms()
         .map(|ms| format!("{}ms", ms))
         .unwrap_or("-".to_string());
-    let cmd_to_moving = flow
-        .cmd_to_moving_ms()
+    let cmd_to_moving = flow.cmd_to_moving_ms()
         .map(|ms| format!("{}ms", ms))
         .unwrap_or("-".to_string());
-    let moving_to_open = flow
-        .moving_to_open_ms()
+    let moving_to_open = flow.moving_to_open_ms()
         .map(|ms| format!("{}ms", ms))
         .unwrap_or("-".to_string());
-    let total = flow
-        .total_entry_to_open_ms()
+    let total = flow.total_entry_to_open_ms()
         .map(|ms| format!("{}ms", ms))
         .unwrap_or("-".to_string());
 
@@ -1840,18 +1774,8 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
             Span::styled(moving_to_open, Style::default().fg(Color::Green)),
         ]),
         Line::from(vec![
-            Span::styled(
-                "TOTAL: ",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                total,
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("TOTAL: ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(total, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         ]),
     ])
     .block(
@@ -1974,10 +1898,7 @@ fn draw_stitch_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
             let extra = match e.t.as_str() {
                 "stitch" => {
                     let prev = e.prev_tid.map(|p| format!("←T{}", p)).unwrap_or_default();
-                    let dist = e
-                        .stitch_dist_cm
-                        .map(|d| format!(" {}cm", d))
-                        .unwrap_or_default();
+                    let dist = e.stitch_dist_cm.map(|d| format!(" {}cm", d)).unwrap_or_default();
                     format!("{}{}", prev, dist)
                 }
                 "lost" | "pending" => {
@@ -2023,10 +1944,7 @@ fn draw_issues_panel(f: &mut Frame, area: Rect, state: &DashboardState) {
 
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", icon), Style::default().fg(color)),
-                Span::styled(
-                    format!("{:>4} ", age_str),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("{:>4} ", age_str), Style::default().fg(Color::DarkGray)),
                 Span::styled(&issue.message, Style::default().fg(color)),
             ]))
         })
@@ -2158,11 +2076,7 @@ fn draw_latency_histogram(
         Line::from(format!("avg:{} p95:{} {}", avg_str, p95_str, unit)),
         Line::from(format!("n={}", stats.count())),
     ])
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
+    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
 
     f.render_widget(stats_text, chunks[1]);
 }
@@ -2320,11 +2234,8 @@ fn draw_bottom_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
     let session_dur = state.throughput.session_duration();
     let hours = session_dur.as_secs() / 3600;
     let mins = (session_dur.as_secs() % 3600) / 60;
-    let session_str = if hours > 0 {
-        format!("{}h {}m", hours, mins)
-    } else {
-        format!("{}m", mins)
-    };
+    let session_str =
+        if hours > 0 { format!("{}h {}m", hours, mins) } else { format!("{}m", mins) };
 
     // Manual test results
     let manual_test_str = if state.manual_test.last_total.is_some() {
@@ -2355,10 +2266,6 @@ fn draw_bottom_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
             "Session: {}  Total: {} events",
             session_str, state.throughput.total_events
         )),
-        Line::from(vec![Span::styled(
-            manual_test_str,
-            Style::default().fg(Color::Yellow),
-        )]),
     ])
     .block(
         Block::default()

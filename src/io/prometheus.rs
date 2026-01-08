@@ -108,10 +108,7 @@ fn format_prometheus_metrics(
         ));
     }
     gate_cumulative += summary.gate_lat_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_gate_latency_us_bucket{{le=\"+Inf\"}} {}\n",
-        gate_cumulative
-    ));
+    output.push_str(&format!("gateway_gate_latency_us_bucket{{le=\"+Inf\"}} {}\n", gate_cumulative));
 
     let gate_count = summary.gate_lat_buckets.iter().sum::<u64>();
     let gate_sum = summary.gate_lat_avg_us * gate_count;
@@ -161,10 +158,7 @@ fn format_prometheus_metrics(
     output.push_str("# HELP gateway_pos_occupancy Number of people in each POS zone\n");
     output.push_str("# TYPE gateway_pos_occupancy gauge\n");
     for (zone_id, count) in metrics.pos_occupancy() {
-        output.push_str(&format!(
-            "gateway_pos_occupancy{{zone_id=\"{}\"}} {}\n",
-            zone_id, count
-        ));
+        output.push_str(&format!("gateway_pos_occupancy{{zone_id=\"{}\"}} {}\n", zone_id, count));
     }
 
     // ACC metrics
@@ -230,10 +224,7 @@ fn format_prometheus_metrics(
 
     output.push_str("# HELP gateway_stitch_distance_avg_cm Average stitch distance\n");
     output.push_str("# TYPE gateway_stitch_distance_avg_cm gauge\n");
-    output.push_str(&format!(
-        "gateway_stitch_distance_avg_cm {}\n",
-        summary.stitch_distance_avg_cm
-    ));
+    output.push_str(&format!("gateway_stitch_distance_avg_cm {}\n", summary.stitch_distance_avg_cm));
 
     // Stitch time histogram (ms)
     output.push_str("# HELP gateway_stitch_time_ms Stitch time in milliseconds\n");
@@ -303,16 +294,16 @@ async fn handle_request(
                 .status(StatusCode::OK)
                 .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
                 .body(Full::new(Bytes::from(body)))
-                .unwrap())
+                .expect("static response should not fail"))
         }
         (&Method::GET, "/health") => Ok(Response::builder()
             .status(StatusCode::OK)
             .body(Full::new(Bytes::from("ok")))
-            .unwrap()),
+            .expect("static response should not fail")),
         _ => Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Full::new(Bytes::from("Not Found")))
-            .unwrap()),
+            .expect("static response should not fail")),
     }
 }
 

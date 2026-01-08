@@ -1,0 +1,11 @@
+# Rustfmt configuration for gateway-poc
+# Documentation: https://rust-lang.github.io/rustfmt/
+
+# Maximum line width
+max_width = 100
+
+# Use small heuristics for formatting decisions
+use_small_heuristics = "Max"
+
+# Edition for parsing (matches rust-toolchain.toml)
+edition = "2021"

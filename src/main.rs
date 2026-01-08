@@ -9,16 +9,21 @@
 //! - `services/` - Business logic (Tracker, JourneyManager, Gate)
 //! - `infra/` - Infrastructure (Config, Metrics, Broker)
 
-mod domain;
-mod infra;
-mod io;
-mod services;
+use clap::Parser;
+use gateway_poc::infra::{Config, GateMode, Metrics};
 
-use infra::{Config, GateMode, Metrics};
-use io::{
+/// Gateway PoC - Automated retail gate control system
+#[derive(Parser, Debug)]
+#[command(name = "gateway-poc", version, about)]
+struct Args {
+    /// Path to TOML configuration file
+    #[arg(short, long, default_value = "config/dev.toml")]
+    config: String,
+}
+use gateway_poc::io::{
     create_egress_channel, start_acc_listener, AccListenerConfig, MqttPublisher, Rs485Monitor,
 };
-use services::GateController;
+use gateway_poc::services::GateController;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tracing::info;
@@ -39,12 +44,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("gateway-poc starting");
 
+    // Parse command line arguments using clap
+    let args = Args::parse();
+
     // Load configuration from TOML file (needed for broker config)
-    let args: Vec<String> = std::env::args().collect();
-    let config = Config::load(&args);
+    let config = Config::load_from_path(&args.config);
 
     // Start embedded MQTT broker with config
-    infra::broker::start_embedded_broker(&config);
+    gateway_poc::infra::broker::start_embedded_broker(&config);
 
     // Log configuration
     let gate_mode_str = match config.gate_mode() {
@@ -99,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mqtt_tx = event_tx.clone();
     let mqtt_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
-        if let Err(e) = io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_shutdown).await {
+        if let Err(e) = gateway_poc::io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_shutdown).await {
             tracing::error!(error = %e, "MQTT client error");
         }
     });
@@ -124,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let prom_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                io::prometheus::start_metrics_server(prometheus_port, prom_metrics, prom_shutdown)
+                gateway_poc::io::prometheus::start_metrics_server(prometheus_port, prom_metrics, prom_shutdown)
                     .await
             {
                 tracing::error!(error = %e, "Prometheus metrics server error");
@@ -176,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Start tracker (main event processing loop)
-    let mut tracker = services::Tracker::new(config, gate, metrics, egress_sender);
+    let mut tracker = gateway_poc::services::Tracker::new(config, gate, metrics, egress_sender);
     info!("tracker_started");
 
     // Handle shutdown on Ctrl+C

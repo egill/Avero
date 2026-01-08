@@ -3,6 +3,10 @@ name = "gateway-poc"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "gateway_poc"
+path = "src/lib.rs"
+
 [[bin]]
 name = "gateway-poc"
 path = "src/main.rs"
@@ -36,6 +40,9 @@ uuid = { version = "1", features = ["v7"] }
 bytes = "1"
 parking_lot = "0.12"
 rustc-hash = "2"
+anyhow = "1"
+smallvec = "1"
+async-trait = "0.1"
 # TUI dependencies
 ratatui = "0.29"
 crossterm = "0.28"
@@ -44,5 +51,6 @@ crossterm = "0.28"
 tempfile = "3.24.0"
 
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
+panic = "abort"

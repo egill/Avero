@@ -5,6 +5,8 @@
 //! 2. CONFIG_FILE environment variable
 //! 3. Default: config/dev.toml
 
+use crate::domain::types::GeometryId;
+use anyhow::Context;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -106,9 +108,7 @@ pub struct EgressConfig {
 
 impl Default for EgressConfig {
     fn default() -> Self {
-        Self {
-            file: default_egress_file(),
-        }
+        Self { file: default_egress_file() }
     }
 }
 
@@ -194,10 +194,7 @@ fn default_broker_port() -> u16 {
 
 impl Default for BrokerConfig {
     fn default() -> Self {
-        Self {
-            bind_address: default_broker_bind_address(),
-            port: default_broker_port(),
-        }
+        Self { bind_address: default_broker_bind_address(), port: default_broker_port() }
     }
 }
 
@@ -335,6 +332,8 @@ impl Config {
     }
 
     /// Determine config file path from args or environment
+    /// Used by tests; prefer clap-parsed arguments for main
+    #[allow(dead_code)]
     pub fn resolve_config_path(args: &[String]) -> String {
         // Check for --config argument
         for (i, arg) in args.iter().enumerate() {
@@ -357,14 +356,32 @@ impl Config {
         "config/dev.toml".to_string()
     }
 
-    /// Load configuration from a TOML file
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+    /// Load configuration from a TOML file.
+    ///
+    /// Parses a TOML configuration file and returns a `Config` instance.
+    /// Returns an error if the file cannot be read or parsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `anyhow::Error` if:
+    /// - The file does not exist or cannot be read
+    /// - The TOML content is invalid or missing required sections
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use gateway_poc::infra::Config;
+    ///
+    /// let config = Config::from_file("config/dev.toml").expect("Failed to load config");
+    /// assert_eq!(config.mqtt_port(), 1883);
+    /// ```
+    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read config file {}: {}", path.display(), e))?;
+            .with_context(|| format!("Failed to read config file {}", path.display()))?;
 
         let toml_config: TomlConfig = toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse config file {}: {}", path.display(), e))?;
+            .with_context(|| format!("Failed to parse config file {}", path.display()))?;
 
         // Convert zone names from string keys to i32 keys
         let mut zone_names = HashMap::new();
@@ -418,11 +435,9 @@ impl Config {
         })
     }
 
-    /// Load configuration - tries TOML file first, falls back to defaults
-    pub fn load(args: &[String]) -> Self {
-        let config_path = Self::resolve_config_path(args);
-
-        match Self::from_file(&config_path) {
+    /// Load configuration from a specific path - tries TOML file first, falls back to defaults
+    pub fn load_from_path(config_path: &str) -> Self {
+        match Self::from_file(config_path) {
             Ok(config) => config,
             Err(e) => {
                 eprintln!("Warning: {}. Using defaults.", e);
@@ -431,17 +446,52 @@ impl Config {
         }
     }
 
-    /// Check if a geometry_id is a POS zone
+    /// Load configuration - tries TOML file first, falls back to defaults
+    /// Used by tests; prefer load_from_path with clap-parsed arguments for main
+    #[allow(dead_code)]
+    pub fn load(args: &[String]) -> Self {
+        let config_path = Self::resolve_config_path(args);
+        Self::load_from_path(&config_path)
+    }
+
+    /// Check if a geometry_id is a POS zone.
+    ///
+    /// Returns true if the geometry ID is in the list of POS zones
+    /// configured for dwell time tracking.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gateway_poc::infra::Config;
+    ///
+    /// let config = Config::default();
+    /// assert!(config.is_pos_zone(1001));  // Default POS zone
+    /// assert!(!config.is_pos_zone(9999)); // Not a POS zone
+    /// ```
     pub fn is_pos_zone(&self, geometry_id: i32) -> bool {
         self.pos_zones.contains(&geometry_id)
     }
 
-    /// Get zone name from geometry_id
-    pub fn zone_name(&self, geometry_id: i32) -> String {
+    /// Get zone name from geometry_id.
+    ///
+    /// Returns the configured name for the zone, or a default
+    /// "ZONE_{id}" format if not configured.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gateway_poc::infra::Config;
+    /// use gateway_poc::domain::types::GeometryId;
+    ///
+    /// let config = Config::default();
+    /// assert_eq!(config.zone_name(GeometryId(1001)), "POS_1");
+    /// assert_eq!(config.zone_name(GeometryId(9999)), "ZONE_9999");
+    /// ```
+    pub fn zone_name(&self, geometry_id: GeometryId) -> String {
         self.zone_names
-            .get(&geometry_id)
+            .get(&geometry_id.0)
             .cloned()
-            .unwrap_or_else(|| format!("ZONE_{}", geometry_id))
+            .unwrap_or_else(|| format!("ZONE_{}", geometry_id.0))
     }
 
     // Getters for all config fields
@@ -501,8 +551,8 @@ impl Config {
         &self.pos_zones
     }
 
-    pub fn gate_zone(&self) -> i32 {
-        self.gate_zone
+    pub fn gate_zone(&self) -> GeometryId {
+        GeometryId(self.gate_zone)
     }
 
     pub fn exit_line(&self) -> i32 {
@@ -623,7 +673,7 @@ mod tests {
         assert_eq!(config.min_dwell_ms(), 7000);
         assert_eq!(config.metrics_interval_secs(), 10);
         assert_eq!(config.pos_zones(), &[1001, 1002, 1003, 1004, 1005]);
-        assert_eq!(config.gate_zone(), 1007);
+        assert_eq!(config.gate_zone(), GeometryId(1007));
     }
 
     #[test]
@@ -638,10 +688,10 @@ mod tests {
     #[test]
     fn test_zone_name() {
         let config = Config::default();
-        assert_eq!(config.zone_name(1001), "POS_1");
-        assert_eq!(config.zone_name(1007), "GATE_1");
-        assert_eq!(config.zone_name(1006), "EXIT_1");
-        assert_eq!(config.zone_name(9999), "ZONE_9999");
+        assert_eq!(config.zone_name(GeometryId(1001)), "POS_1");
+        assert_eq!(config.zone_name(GeometryId(1007)), "GATE_1");
+        assert_eq!(config.zone_name(GeometryId(1006)), "EXIT_1");
+        assert_eq!(config.zone_name(GeometryId(9999)), "ZONE_9999");
     }
 
     #[test]
@@ -662,10 +712,8 @@ mod tests {
 
     #[test]
     fn test_resolve_config_path_from_arg_equals() {
-        let args: Vec<String> = vec![
-            "gateway-poc".to_string(),
-            "--config=config/grandi.toml".to_string(),
-        ];
+        let args: Vec<String> =
+            vec!["gateway-poc".to_string(), "--config=config/grandi.toml".to_string()];
         assert_eq!(Config::resolve_config_path(&args), "config/grandi.toml");
     }
 

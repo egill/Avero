@@ -38,9 +38,7 @@ pub struct ReentryDetector {
 
 impl ReentryDetector {
     pub fn new() -> Self {
-        Self {
-            recent_exits: Vec::new(),
-        }
+        Self { recent_exits: Vec::new() }
     }
 
     /// Record a journey exit for potential re-entry matching
@@ -107,10 +105,7 @@ impl ReentryDetector {
                 "reentry_matched"
             );
 
-            return Some(ReentryMatch {
-                parent_jid: exit.jid,
-                parent_pid: exit.pid,
-            });
+            return Some(ReentryMatch { parent_jid: exit.jid, parent_pid: exit.pid });
         }
 
         debug!(height = %h, "reentry_no_match");

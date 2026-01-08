@@ -9,6 +9,17 @@ use std::io::Write;
 use std::path::Path;
 use tracing::{debug, error, info};
 
+/// Trait for writing journeys - enables mock implementations for testing
+pub trait JourneyWriter: Send + Sync {
+    /// Write a journey, returns true if successful
+    fn write_journey(&self, journey: &Journey) -> bool;
+
+    /// Write multiple journeys, returns count of successful writes
+    fn write_journeys(&self, journeys: &[Journey]) -> usize {
+        journeys.iter().filter(|j| self.write_journey(j)).count()
+    }
+}
+
 /// Egress writer for journeys
 pub struct Egress {
     file_path: String,
@@ -17,14 +28,12 @@ pub struct Egress {
 impl Egress {
     pub fn new(file_path: &str) -> Self {
         info!(file_path = %file_path, "egress_initialized");
-        Self {
-            file_path: file_path.to_string(),
-        }
+        Self { file_path: file_path.to_string() }
     }
 
     /// Write a journey to the egress file
     /// Returns true if successful, false otherwise
-    pub fn write_journey(&self, journey: &Journey) -> bool {
+    fn write_journey_impl(&self, journey: &Journey) -> bool {
         let json = journey.to_json();
 
         match self.append_line(&json) {
@@ -68,22 +77,19 @@ impl Egress {
         Ok(())
     }
 
-    /// Write multiple journeys
-    pub fn write_journeys(&self, journeys: &[Journey]) -> usize {
-        let mut success_count = 0;
-        for journey in journeys {
-            if self.write_journey(journey) {
-                success_count += 1;
-            }
-        }
-        success_count
+}
+
+impl JourneyWriter for Egress {
+    fn write_journey(&self, journey: &Journey) -> bool {
+        self.write_journey_impl(journey)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::journey::{Journey, JourneyEvent, JourneyOutcome};
+    use crate::domain::journey::{Journey, JourneyEvent, JourneyEventType, JourneyOutcome};
+    use crate::domain::types::TrackId;
     use std::fs;
     use tempfile::tempdir;
 
@@ -101,11 +107,11 @@ mod tests {
 
         let egress = Egress::new(file_str);
 
-        let mut journey = Journey::new(100);
+        let mut journey = Journey::new(TrackId(100));
         journey.authorized = true;
         journey.total_dwell_ms = 7500;
         journey.crossed_entry = true;
-        journey.add_event(JourneyEvent::new("entry_cross", 1234567890));
+        journey.add_event(JourneyEvent::new(JourneyEventType::EntryCross, 1234567890));
         journey.complete(JourneyOutcome::Completed);
 
         let result = egress.write_journey(&journey);
@@ -133,13 +139,13 @@ mod tests {
         let egress = Egress::new(file_str);
 
         // Write first journey
-        let mut journey1 = Journey::new(100);
+        let mut journey1 = Journey::new(TrackId(100));
         journey1.crossed_entry = true;
         journey1.complete(JourneyOutcome::Completed);
         egress.write_journey(&journey1);
 
         // Write second journey
-        let mut journey2 = Journey::new(200);
+        let mut journey2 = Journey::new(TrackId(200));
         journey2.crossed_entry = true;
         journey2.complete(JourneyOutcome::Abandoned);
         egress.write_journey(&journey2);
@@ -165,7 +171,7 @@ mod tests {
 
         let journeys: Vec<Journey> = (0..5)
             .map(|i| {
-                let mut j = Journey::new(100 + i);
+                let mut j = Journey::new(TrackId(100 + i));
                 j.crossed_entry = true;
                 j.complete(JourneyOutcome::Completed);
                 j
@@ -188,7 +194,7 @@ mod tests {
 
         let egress = Egress::new(file_str);
 
-        let mut journey = Journey::new(100);
+        let mut journey = Journey::new(TrackId(100));
         journey.crossed_entry = true;
         journey.complete(JourneyOutcome::Completed);
 
@@ -208,7 +214,7 @@ mod tests {
 
         let egress = Egress::new(file_str);
 
-        let mut journey = Journey::new(100);
+        let mut journey = Journey::new(TrackId(100));
         journey.crossed_entry = true;
         journey.complete(JourneyOutcome::Completed);
         egress.write_journey(&journey);

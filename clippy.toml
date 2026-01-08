@@ -1,0 +1,14 @@
+# Clippy configuration for gateway-poc
+# https://doc.rust-lang.org/clippy/lint_configuration.html
+
+# Allow up to 8 function arguments (cloudplus.rs has functions with 8 args)
+too-many-arguments-threshold = 8
+
+# Set a reasonable cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Allow larger types to be passed by value
+trivial-copy-size-limit = 16
+
+# Set a reasonable type complexity threshold
+type-complexity-threshold = 300
