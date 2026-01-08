@@ -156,3 +156,157 @@ Primary tests are in `src/services/tracker/tests.rs`. Test helpers:
 - `create_event()` - Test event builder
 
 All tests use `#[tokio::test]` for async testing.
+
+## Code Quality Requirements
+
+**Before committing, always run:**
+```bash
+cargo fmt --check      # Verify formatting
+cargo clippy -- -D warnings   # Lint with warnings as errors
+cargo test             # Run all tests
+```
+
+## Rust Coding Guidelines
+
+### Avoid Common Pitfalls
+
+| Don't | Do | Why |
+|-------|-----|-----|
+| `.unwrap()` on Mutex locks | Use `parking_lot::Mutex` (no poisoning) | Panics on poisoned lock |
+| `Option<&String>` return type | Return `Option<&str>` | Unnecessary indirection |
+| `.is_none()` then `.unwrap()` | Use `if let Some(val) = x` | Fragile pattern |
+| Custom `from_str` method | Implement `std::str::FromStr` trait | Idiomatic Rust |
+| `vec.remove(idx)` when order doesn't matter | Use `vec.swap_remove(idx)` | O(1) vs O(n) |
+| `Vec::new()` when size is known | Use `Vec::with_capacity(n)` | Avoids reallocations |
+| `HashMap<i64, T>` for integer keys | Use `FxHashMap` from `rustc-hash` | Faster hashing |
+| Casting type to itself (`x as u64` when x is u64) | Remove the cast | Unnecessary |
+
+### Performance Patterns
+
+- **Pre-allocate collections**: Use `Vec::with_capacity()` when typical size is known
+- **Use `#[cold]` on error paths**: Helps optimizer focus on hot path
+- **Use `#[inline]` on small cross-crate functions**: Especially getters and epoch_ms-style helpers
+- **Use `.copied()` for iterators of Copy types**: `iter().copied()` instead of `iter().cloned()`
+- **Avoid holding locks across await points**: Can cause deadlocks in async code
+
+### Type System Best Practices
+
+- **Add `#[derive(Copy)]` to small fieldless enums**: Eliminates unnecessary `.clone()` calls
+- **Consider newtype pattern for IDs**: `struct TrackId(i64)` prevents accidentally mixing ID types
+- **Use enums over strings for fixed value sets**: Compile-time validation instead of runtime
+- **Add size assertions for key types**:
+  ```rust
+  const _: () = assert!(std::mem::size_of::<EventType>() <= 32);
+  ```
+
+### Clippy Lints to Watch
+
+These are common issues flagged by clippy in this codebase:
+- `declare_interior_mutable_const`: Use `static` for `AtomicU64`, not `const`
+- `too_many_arguments`: Functions should have ≤7 arguments
+- `unnecessary_get_then_check`: Use `!map.contains_key()` directly
+- `if_same_then_else`: Don't duplicate if/else blocks
+
+### Safety Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| `Box::leak()` for static strings | Use owned `String` instead |
+| Multiple locks in different orders | Consolidate into single state struct |
+| `value as u64` for i64→u64 | Use `TryFrom` to handle negatives |
+| Silent config fallback to defaults | Validate config and fail loudly on errors |
+| HTTP Response builder `.unwrap()` | Use `.expect("static response")` |
+
+### Dependencies Available
+
+These are already in `Cargo.toml` - use them:
+- `parking_lot` - Better Mutex (no poisoning, no `.unwrap()` needed)
+- `rustc-hash` - Fast `FxHashMap` for integer keys
+- `clap` - CLI argument parsing (derive macro)
+- `anyhow` - Error handling with context
+- `smallvec` - Stack-allocated small vectors
+
+## Testing Guidelines
+
+### Test Philosophy
+
+Write tests for **business logic correctness**, not code coverage metrics:
+- Time boundary tests at critical authorization thresholds
+- State machine transitions for door/journey lifecycle
+- Error handling for network/protocol failures
+- Config validation to prevent production misconfigurations
+
+**Avoid**:
+- Testing trivial getters/setters
+- Duplicating existing integration coverage
+- Tests that just exercise code without verifying business behavior
+
+### Critical Time Boundaries to Test
+
+These thresholds determine customer authorization - always test boundary conditions:
+
+| Boundary | Module | Value | Test Pattern |
+|----------|--------|-------|--------------|
+| ACC group window | acc_collector | 10,000ms | 9,999ms (pass) vs 10,001ms (fail) |
+| ACC recent exit | acc_collector | 1,500ms | 1,499ms (pass) vs 1,501ms (fail) |
+| Stitch grace time (base) | stitcher | 4,500ms | 4,499ms (pass) vs 4,501ms (fail) |
+| Stitch grace time (POS) | stitcher | 8,000ms | 7,999ms (pass) vs 8,001ms (fail) |
+| Stitch distance (base) | stitcher | 180cm | 179cm (pass) vs 181cm (fail) |
+| Stitch distance (same zone) | stitcher | 300cm | 299cm (pass) vs 301cm (fail) |
+| Height tolerance | stitcher/reentry | 10cm | 9.9cm (pass) vs 10.1cm (fail) |
+| Door correlation | door_correlator | 5,000ms | 4,999ms (pass) vs 5,001ms (fail) |
+| Re-entry window | reentry_detector | 30,000ms | 29,999ms (pass) vs 30,001ms (fail) |
+
+### Key Scenarios to Test
+
+These are common production scenarios that need test coverage:
+
+1. **Gate Blocked**: Unauthorized customer enters gate zone → logs "blocked" event, no gate open
+2. **Chain Stitching**: Track A→B→C through multiple sensor gaps → all track IDs preserved
+3. **GROUP Bit Filtering**: Xovis group tracks (track_id with 0x80000000 bit) → skipped
+4. **Re-entry Flow**: Customer exits and re-enters → new journey has parent reference
+5. **ACC Group Authorization**: Multiple customers at POS → all group members authorized
+6. **Door State Cycle**: Closed→Moving→Open→Moving→Closed → flow track preserved then cleared
+
+### Test Patterns
+
+```rust
+// Boundary test pattern
+#[tokio::test]
+async fn test_stitch_grace_time_boundary() {
+    let mut stitcher = Stitcher::new();
+
+    // Just within threshold - should match
+    let within = create_pending_track(now_ms - 4499);
+    assert!(stitcher.find_match(...).is_some());
+
+    // Just outside threshold - should NOT match
+    let outside = create_pending_track(now_ms - 4501);
+    assert!(stitcher.find_match(...).is_none());
+}
+
+// State machine test pattern
+#[tokio::test]
+async fn test_door_state_cycle() {
+    let mut correlator = DoorCorrelator::new();
+    correlator.record_gate_cmd(track_id, now);
+
+    // Verify state preserved through cycle
+    correlator.process_door_state(DoorStatus::Moving, now + 100);
+    assert!(correlator.current_flow_track_id().is_some());
+
+    correlator.process_door_state(DoorStatus::Open, now + 200);
+    assert!(correlator.current_flow_track_id().is_some());
+
+    correlator.process_door_state(DoorStatus::Closed, now + 1000);
+    assert!(correlator.current_flow_track_id().is_none()); // Cleared on close
+}
+```
+
+### Protocol/IO Testing
+
+For modules accepting external input (MQTT, RS485, ACC, CloudPlus):
+- Test malformed input returns graceful error, not panic
+- Test partial data handling (waits for more vs rejects)
+- Test checksum/validation failures are detected
+- Test boundary values (empty, max length, invalid UTF-8)

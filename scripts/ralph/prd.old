@@ -13,7 +13,7 @@
       "instructions": "Create file at project root. This ensures consistent Rust version across all developers and deployment targets (RPi5).",
       "priority": 1,
       "estimatedMinutes": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -28,7 +28,7 @@
       "instructions": "Run 'cargo clippy' to see 33 warnings. Key fixes: (1) metrics.rs:172 - change const ZERO to static, (2) acc_collector.rs:321 - use !contains_key(), (3) stitcher.rs:153 - fix duplicate if/else, (4) handlers.rs:41,69 - remove unnecessary u64 casts. Run 'cargo clippy --fix' for auto-fixable ones first.",
       "priority": 1,
       "estimatedMinutes": 30,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -44,7 +44,7 @@
       "instructions": "Search: grep -n 'std::sync::Mutex' src/. In metrics.rs, replace Mutex imports and remove .unwrap() on .lock() calls. parking_lot::Mutex::lock() returns the guard directly.",
       "priority": 1,
       "estimatedMinutes": 15,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -60,7 +60,7 @@
       "instructions": "The Metrics struct only contains AtomicU64 and Mutex<T> which are automatically Send+Sync. Try removing lines 641-642 and verify it compiles. If it doesn't compile, investigate which field is not Send+Sync.",
       "priority": 1,
       "estimatedMinutes": 10,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -75,7 +75,7 @@
       "instructions": "Search: grep -rn 'HashMap<i64' src/. Key locations: tracker/mod.rs (persons), journey_manager.rs (active, pid_by_track). Import with 'use rustc_hash::FxHashMap;'. FxHashMap is faster for integer keys, drop-in replacement.",
       "priority": 2,
       "estimatedMinutes": 15,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -90,7 +90,7 @@
       "instructions": "Search: grep -rn '\\.remove(idx)' src/. Locations: door_correlator.rs:108, stitcher.rs:163, journey_manager.rs:80, acc_collector.rs:340,427. swap_remove is O(1) vs O(n). Only use if element order doesn't matter (check each case).",
       "priority": 2,
       "estimatedMinutes": 20,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -105,7 +105,7 @@
       "instructions": "Search: grep -rn 'Vec::new()' src/. Focus on mqtt.rs parse_xovis_message and journey.rs Journey::new(). Typical frame has 0-10 events, typical journey has 5-15 events.",
       "priority": 2,
       "estimatedMinutes": 10,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -120,7 +120,7 @@
       "instructions": "In domain/journey.rs:21-28, JourneyOutcome is a small fieldless enum. Add Copy to derives. Then search for .clone() on JourneyOutcome and remove them.",
       "priority": 2,
       "estimatedMinutes": 10,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -135,7 +135,7 @@
       "instructions": "In domain/types.rs:136-147, EventType has 'pub fn from_str(s: &str) -> Self'. Convert to 'impl FromStr for EventType { type Err = (); fn from_str(s: &str) -> Result<Self, Self::Err> }'. Return Ok(EventType::Unknown(s.to_string())) for unknown values.",
       "priority": 3,
       "estimatedMinutes": 15,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -149,7 +149,7 @@
       "instructions": "Search: grep -rn 'error!' src/. Add #[cold] attribute to functions that only handle errors. This hints to compiler to optimize hot path. Example: functions that only log errors and return early.",
       "priority": 3,
       "estimatedMinutes": 15,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
@@ -670,6 +670,224 @@
       "estimatedMinutes": 5,
       "passes": false,
       "notes": ""
+    },
+    {
+      "id": "US-045",
+      "title": "Add ACC Collector time boundary tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test GROUP_WINDOW_MS (10s): 9.99s grouped vs 10.01s separate",
+        "Test RECENT_EXIT_WINDOW (1.5s): 1.499s match vs 1.501s no match",
+        "Test POS empty condition blocks matching when occupied",
+        "Test newest exit selection when multiple recent exits exist",
+        "Test group member authorization propagates to all members",
+        "All tests pass"
+      ],
+      "instructions": "In services/acc_collector.rs tests, add boundary tests for GROUP_WINDOW_MS=10000 and recent exit window=1500ms. These are critical authorization timing boundaries. Use precise timestamps to test boundary behavior. Test that when ACC fires, all group members get authorized, not just the one with sufficient dwell.",
+      "priority": 1,
+      "estimatedMinutes": 45,
+      "passes": false,
+      "notes": "Critical: These time boundaries determine whether customers get authorized"
+    },
+    {
+      "id": "US-046",
+      "title": "Add Stitcher time and distance boundary tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test base grace time: 4.499s (pass) vs 4.501s (fail)",
+        "Test POS zone grace time: 7.999s (pass) vs 8.001s (fail)",
+        "Test base distance: 179cm (pass) vs 181cm (fail)",
+        "Test same-zone distance: 299cm (pass) vs 301cm (fail)",
+        "Test height tolerance: 9.9cm (pass) vs 10.1cm (fail)",
+        "Test same-zone preference over closer non-zone match",
+        "All tests pass"
+      ],
+      "instructions": "In services/stitcher.rs tests, add boundary tests for GRACE_TIME_MS=4500, POS_GRACE_TIME_MS=8000, MAX_DISTANCE_CM=180, SAME_ZONE_DISTANCE_CM=300, HEIGHT_TOLERANCE_CM=10. These determine track identity continuity. Verify POS zones get extended time window.",
+      "priority": 1,
+      "estimatedMinutes": 40,
+      "passes": false,
+      "notes": "Critical: Stitching determines if customer identity is preserved across sensor gaps"
+    },
+    {
+      "id": "US-047",
+      "title": "Add Door Correlator boundary tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test correlation window: 4999ms (correlates) vs 5001ms (no correlation)",
+        "Test full door cycle: Closed → Moving → Open → Moving → Closed",
+        "Test Unknown door status handling",
+        "Test multiple rapid gate commands queued correctly",
+        "Test door re-opening within correlation window",
+        "All tests pass"
+      ],
+      "instructions": "In services/door_correlator.rs tests, add boundary test for CORRELATION_WINDOW_MS=5000. Add state machine tests for full door cycles. Test that flow track is preserved across the cycle and cleared on close.",
+      "priority": 1,
+      "estimatedMinutes": 35,
+      "passes": false,
+      "notes": "Critical: Door correlation matches gate commands to actual door opens for metrics"
+    },
+    {
+      "id": "US-048",
+      "title": "Add Re-entry Detection tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test time window: 29.99s (match) vs 30.01s (no match)",
+        "Test height tolerance: 9.9cm (match) vs 10.1cm (no match)",
+        "Test cleanup timing at 60s",
+        "Test best height match selection",
+        "Test graceful skip when person has no position data",
+        "All tests pass"
+      ],
+      "instructions": "In services/reentry_detector.rs tests, add boundary tests for MATCH_WINDOW_MS=30000 and HEIGHT_TOLERANCE_CM=10. Re-entry detection links repeat customer visits. Test that when height is missing, the exit is silently skipped.",
+      "priority": 1,
+      "estimatedMinutes": 30,
+      "passes": false,
+      "notes": "Re-entry detection links customer journeys across store exits/re-entries"
+    },
+    {
+      "id": "US-049",
+      "title": "Add Tracker edge case tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test gate zone entry when unauthorized (should log 'blocked' event)",
+        "Test gate zone entry when gate already opened (should skip command)",
+        "Test Xovis GROUP bit filtering (track_id with 0x80000000 bit should be skipped)",
+        "Test re-entry flow: exit → re-enter → journey has parent reference",
+        "Test chain stitching: A→B→C track progression preserves state",
+        "All tests pass"
+      ],
+      "instructions": "In services/tracker/tests.rs, add tests for: (1) unauthorized customer entering gate zone logs event but doesn't open gate, (2) GROUP bit tracks are filtered out, (3) re-entry detection creates journey with parent, (4) chain stitching A→B→C works. These are real-world scenarios currently untested.",
+      "priority": 1,
+      "estimatedMinutes": 50,
+      "passes": false,
+      "notes": "Critical: Gate blocked scenario is common in production - unauthorized customers at gate"
+    },
+    {
+      "id": "US-050",
+      "title": "Add ACC Listener unit tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test valid ACC message parsing: 'ACC receipt123' extracts receipt_id",
+        "Test malformed line (no space after ACC) is logged and ignored",
+        "Test empty receipt_id 'ACC ' is warned but handled",
+        "Test unknown format (not starting with ACC) is logged",
+        "Test peer IP is correctly extracted from connection",
+        "All tests pass"
+      ],
+      "instructions": "Create tests in io/acc_listener.rs. Currently has ZERO tests. Focus on parse_acc_line logic (extract from handle_acc_connection if needed). Test that malformed inputs are handled gracefully without panics. This module accepts untrusted network input.",
+      "priority": 1,
+      "estimatedMinutes": 35,
+      "passes": false,
+      "notes": "Zero test coverage. Accepts network input from payment terminals."
+    },
+    {
+      "id": "US-051",
+      "title": "Add Egress Channel and MQTT Egress tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test create_egress_channel returns working sender/receiver pair",
+        "Test site_id is correctly injected into payloads",
+        "Test try_send drops silently when channel is full (no panic)",
+        "Test JourneyPayload serialization includes all required fields",
+        "Test MQTT QoS levels: journeys use QoS 1, events use QoS 0",
+        "All tests pass"
+      ],
+      "instructions": "Create tests in io/egress_channel.rs and io/mqtt_egress.rs. Both have ZERO tests. Test channel semantics (bounded, try_send behavior). Verify site_id injection. For MQTT egress, verify correct QoS assignment by topic type.",
+      "priority": 1,
+      "estimatedMinutes": 40,
+      "passes": false,
+      "notes": "Zero test coverage. Egress channel is the data pipeline to cloud."
+    },
+    {
+      "id": "US-052",
+      "title": "Add protocol error handling tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test MQTT malformed JSON returns empty events (no panic)",
+        "Test MQTT missing timestamp defaults to 0 (not current time)",
+        "Test RS485 checksum mismatch is detected and frame rejected",
+        "Test RS485 partial frame handling (waits for more data)",
+        "Test CloudPlus data length > MAX_DATA_LEN marks frame invalid",
+        "Test CloudPlus missing ETX marks frame invalid",
+        "All tests pass"
+      ],
+      "instructions": "Add tests to io/mqtt.rs, io/rs485.rs, io/cloudplus.rs for error paths. Focus on malformed input handling - these are production failure modes. Test that invalid protocol data doesn't cause panics or incorrect state.",
+      "priority": 1,
+      "estimatedMinutes": 45,
+      "passes": false,
+      "notes": "Protocol errors happen in production. Verify graceful degradation."
+    },
+    {
+      "id": "US-053",
+      "title": "Add Config validation tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test missing config file falls back to defaults (with warning log)",
+        "Test invalid TOML syntax returns error, not silent fallback",
+        "Test empty pos_zones array is detected as invalid",
+        "Test zone ID conflicts (gate_zone == pos_zone) are detected",
+        "Test port 0 is detected as invalid for prometheus/acc/broker",
+        "Test min_dwell_ms = 0 is detected as invalid",
+        "All tests pass"
+      ],
+      "instructions": "In infra/config.rs tests, add validation tests. Currently Config::load() silently falls back to defaults on ANY error - this masks production misconfigurations. Consider adding a Config::validate() method that can be tested independently.",
+      "priority": 1,
+      "estimatedMinutes": 40,
+      "passes": false,
+      "notes": "Critical: Silent config fallback has caused production issues"
+    },
+    {
+      "id": "US-054",
+      "title": "Add Broker startup tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test invalid bind address (e.g., '999.999.999.999') logs error and returns",
+        "Test port 0 behavior is documented (binds to ephemeral port)",
+        "Test valid address parses correctly",
+        "All tests pass"
+      ],
+      "instructions": "In infra/broker.rs, add basic tests. Currently has ZERO tests. The broker startup has a 100ms arbitrary sleep that doesn't guarantee readiness. At minimum, test that address parsing works and invalid addresses are handled gracefully.",
+      "priority": 1,
+      "estimatedMinutes": 25,
+      "passes": false,
+      "notes": "Zero test coverage. Broker failure prevents all MQTT communication."
+    },
+    {
+      "id": "US-055",
+      "title": "Add Domain type parsing tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test TimestampValue::IsoString parsing with various formats",
+        "Test TimestampValue::EpochMs with valid and edge case values",
+        "Test TimestampValue::None (default) handling",
+        "Test epoch_ms() returns current time in milliseconds",
+        "Test EventType::as_str() round-trips with from_str",
+        "Test ParsedEvent creation with all field combinations",
+        "All tests pass"
+      ],
+      "instructions": "In domain/types.rs tests, add tests for TimestampValue deserialization (currently untested), epoch_ms() function, and EventType round-trip. These are foundational types used throughout the system.",
+      "priority": 1,
+      "estimatedMinutes": 35,
+      "passes": false,
+      "notes": "Domain types are used everywhere. Parsing errors cascade to all modules."
+    },
+    {
+      "id": "US-056",
+      "title": "Add Journey Manager state tests",
+      "category": "testing",
+      "acceptanceCriteria": [
+        "Test chain stitching A→B→C: all track IDs in tids, state preserved",
+        "Test stitch from pending resets outcome to InProgress",
+        "Test stitch from pending clears ended_at",
+        "Test tick with multiple journeys ready at same time",
+        "Test pid_by_track consistency after stitch operations",
+        "All tests pass"
+      ],
+      "instructions": "In services/journey_manager.rs tests, add tests for multi-hop stitching and state consistency. Chain stitching (A→B→C) is common when sensor loses track multiple times. Verify all track IDs are preserved and state is correctly transferred.",
+      "priority": 1,
+      "estimatedMinutes": 35,
+      "passes": false,
+      "notes": "Chain stitching is common in production - sensor loses track multiple times"
     }
   ]
 }

@@ -3,673 +3,264 @@
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add rust-toolchain.toml to pin Rust version",
-      "category": "tooling",
+      "title": "Add ACC Collector time boundary tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Create rust-toolchain.toml with channel = 'stable'",
-        "cargo build succeeds",
-        "Document in CLAUDE.md"
+        "Test GROUP_WINDOW_MS (10s): 9.99s grouped vs 10.01s separate",
+        "Test RECENT_EXIT_WINDOW (1.5s): 1.499s match vs 1.501s no match",
+        "Test POS empty condition blocks matching when occupied",
+        "Test newest exit selection when multiple recent exits exist",
+        "Test group member authorization propagates to all members",
+        "All tests pass"
       ],
-      "instructions": "Create file at project root. This ensures consistent Rust version across all developers and deployment targets (RPi5).",
+      "instructions": "In services/acc_collector.rs tests, add boundary tests for GROUP_WINDOW_MS=10000 and recent exit window=1500ms. These are critical authorization timing boundaries. Use precise timestamps to test boundary behavior. Test that when ACC fires, all group members get authorized, not just the one with sufficient dwell.",
       "priority": 1,
-      "estimatedMinutes": 5,
+      "estimatedMinutes": 45,
       "passes": false,
-      "notes": ""
+      "notes": "Critical: These time boundaries determine whether customers get authorized"
     },
     {
       "id": "US-002",
-      "title": "Fix all clippy warnings",
-      "category": "safety",
+      "title": "Add Stitcher time and distance boundary tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "cargo clippy -- -D warnings passes with no errors",
-        "All tests still pass",
-        "No new #[allow(clippy::...)] suppressions added"
+        "Test base grace time: 4.499s (pass) vs 4.501s (fail)",
+        "Test POS zone grace time: 7.999s (pass) vs 8.001s (fail)",
+        "Test base distance: 179cm (pass) vs 181cm (fail)",
+        "Test same-zone distance: 299cm (pass) vs 301cm (fail)",
+        "Test height tolerance: 9.9cm (pass) vs 10.1cm (fail)",
+        "Test same-zone preference over closer non-zone match",
+        "All tests pass"
       ],
-      "instructions": "Run 'cargo clippy' to see 33 warnings. Key fixes: (1) metrics.rs:172 - change const ZERO to static, (2) acc_collector.rs:321 - use !contains_key(), (3) stitcher.rs:153 - fix duplicate if/else, (4) handlers.rs:41,69 - remove unnecessary u64 casts. Run 'cargo clippy --fix' for auto-fixable ones first.",
+      "instructions": "In services/stitcher.rs tests, add boundary tests for GRACE_TIME_MS=4500, POS_GRACE_TIME_MS=8000, MAX_DISTANCE_CM=180, SAME_ZONE_DISTANCE_CM=300, HEIGHT_TOLERANCE_CM=10. These determine track identity continuity. Verify POS zones get extended time window.",
       "priority": 1,
-      "estimatedMinutes": 30,
+      "estimatedMinutes": 40,
       "passes": false,
-      "notes": ""
+      "notes": "Critical: Stitching determines if customer identity is preserved across sensor gaps"
     },
     {
       "id": "US-003",
-      "title": "Replace std::sync::Mutex with parking_lot::Mutex in metrics",
-      "category": "safety",
+      "title": "Add Door Correlator boundary tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Add parking_lot = '0.12' to Cargo.toml",
-        "Replace std::sync::Mutex with parking_lot::Mutex in metrics.rs",
-        "Remove .unwrap() calls on lock() - parking_lot doesn't poison",
+        "Test correlation window: 4999ms (correlates) vs 5001ms (no correlation)",
+        "Test full door cycle: Closed → Moving → Open → Moving → Closed",
+        "Test Unknown door status handling",
+        "Test multiple rapid gate commands queued correctly",
+        "Test door re-opening within correlation window",
         "All tests pass"
       ],
-      "instructions": "Search: grep -n 'std::sync::Mutex' src/. In metrics.rs, replace Mutex imports and remove .unwrap() on .lock() calls. parking_lot::Mutex::lock() returns the guard directly.",
+      "instructions": "In services/door_correlator.rs tests, add boundary test for CORRELATION_WINDOW_MS=5000. Add state machine tests for full door cycles. Test that flow track is preserved across the cycle and cleared on close.",
       "priority": 1,
-      "estimatedMinutes": 15,
+      "estimatedMinutes": 35,
       "passes": false,
-      "notes": ""
+      "notes": "Critical: Door correlation matches gate commands to actual door opens for metrics"
     },
     {
       "id": "US-004",
-      "title": "Remove unnecessary unsafe impl Send+Sync from Metrics",
-      "category": "safety",
+      "title": "Add Re-entry Detection tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Remove 'unsafe impl Send for Metrics {}' from metrics.rs:641-642",
-        "Remove 'unsafe impl Sync for Metrics {}'",
-        "Code compiles without the unsafe impls",
+        "Test time window: 29.99s (match) vs 30.01s (no match)",
+        "Test height tolerance: 9.9cm (match) vs 10.1cm (no match)",
+        "Test cleanup timing at 60s",
+        "Test best height match selection",
+        "Test graceful skip when person has no position data",
         "All tests pass"
       ],
-      "instructions": "The Metrics struct only contains AtomicU64 and Mutex<T> which are automatically Send+Sync. Try removing lines 641-642 and verify it compiles. If it doesn't compile, investigate which field is not Send+Sync.",
+      "instructions": "In services/reentry_detector.rs tests, add boundary tests for MATCH_WINDOW_MS=30000 and HEIGHT_TOLERANCE_CM=10. Re-entry detection links repeat customer visits. Test that when height is missing, the exit is silently skipped.",
       "priority": 1,
-      "estimatedMinutes": 10,
+      "estimatedMinutes": 30,
       "passes": false,
-      "notes": ""
+      "notes": "Re-entry detection links customer journeys across store exits/re-entries"
     },
     {
       "id": "US-005",
-      "title": "Add rustc-hash and replace integer-keyed HashMaps with FxHashMap",
-      "category": "performance",
+      "title": "Add Tracker edge case tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Add rustc-hash = '2' to Cargo.toml",
-        "Replace HashMap<i64, _> with FxHashMap<i64, _> in tracker/mod.rs, journey_manager.rs",
+        "Test gate zone entry when unauthorized (should log 'blocked' event)",
+        "Test gate zone entry when gate already opened (should skip command)",
+        "Test Xovis GROUP bit filtering (track_id with 0x80000000 bit should be skipped)",
+        "Test re-entry flow: exit → re-enter → journey has parent reference",
+        "Test chain stitching: A→B→C track progression preserves state",
         "All tests pass"
       ],
-      "instructions": "Search: grep -rn 'HashMap<i64' src/. Key locations: tracker/mod.rs (persons), journey_manager.rs (active, pid_by_track). Import with 'use rustc_hash::FxHashMap;'. FxHashMap is faster for integer keys, drop-in replacement.",
-      "priority": 2,
-      "estimatedMinutes": 15,
+      "instructions": "In services/tracker/tests.rs, add tests for: (1) unauthorized customer entering gate zone logs event but doesn't open gate, (2) GROUP bit tracks are filtered out, (3) re-entry detection creates journey with parent, (4) chain stitching A→B→C works. These are real-world scenarios currently untested.",
+      "priority": 1,
+      "estimatedMinutes": 50,
       "passes": false,
-      "notes": ""
+      "notes": "Critical: Gate blocked scenario is common in production - unauthorized customers at gate"
     },
     {
       "id": "US-006",
-      "title": "Replace Vec::remove with swap_remove where order doesn't matter",
-      "category": "performance",
+      "title": "Add ACC Listener unit tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Replace .remove(idx) with .swap_remove(idx) in identified locations",
-        "Verify order preservation is not required for each case",
+        "Test valid ACC message parsing: 'ACC receipt123' extracts receipt_id",
+        "Test malformed line (no space after ACC) is logged and ignored",
+        "Test empty receipt_id 'ACC ' is warned but handled",
+        "Test unknown format (not starting with ACC) is logged",
+        "Test peer IP is correctly extracted from connection",
         "All tests pass"
       ],
-      "instructions": "Search: grep -rn '\\.remove(idx)' src/. Locations: door_correlator.rs:108, stitcher.rs:163, journey_manager.rs:80, acc_collector.rs:340,427. swap_remove is O(1) vs O(n). Only use if element order doesn't matter (check each case).",
-      "priority": 2,
-      "estimatedMinutes": 20,
+      "instructions": "Create tests in io/acc_listener.rs. Currently has ZERO tests. Focus on parse_acc_line logic (extract from handle_acc_connection if needed). Test that malformed inputs are handled gracefully without panics. This module accepts untrusted network input.",
+      "priority": 1,
+      "estimatedMinutes": 35,
       "passes": false,
-      "notes": ""
+      "notes": "Zero test coverage. Accepts network input from payment terminals."
     },
     {
       "id": "US-007",
-      "title": "Add Vec::with_capacity to hot-path allocations",
-      "category": "performance",
+      "title": "Add Egress Channel and MQTT Egress tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Add with_capacity(8) to parse_xovis_message Vec<ParsedEvent> in mqtt.rs",
-        "Add with_capacity(16) to Journey::new() events Vec",
+        "Test create_egress_channel returns working sender/receiver pair",
+        "Test site_id is correctly injected into payloads",
+        "Test try_send drops silently when channel is full (no panic)",
+        "Test JourneyPayload serialization includes all required fields",
+        "Test MQTT QoS levels: journeys use QoS 1, events use QoS 0",
         "All tests pass"
       ],
-      "instructions": "Search: grep -rn 'Vec::new()' src/. Focus on mqtt.rs parse_xovis_message and journey.rs Journey::new(). Typical frame has 0-10 events, typical journey has 5-15 events.",
-      "priority": 2,
-      "estimatedMinutes": 10,
+      "instructions": "Create tests in io/egress_channel.rs and io/mqtt_egress.rs. Both have ZERO tests. Test channel semantics (bounded, try_send behavior). Verify site_id injection. For MQTT egress, verify correct QoS assignment by topic type.",
+      "priority": 1,
+      "estimatedMinutes": 40,
       "passes": false,
-      "notes": ""
+      "notes": "Zero test coverage. Egress channel is the data pipeline to cloud."
     },
     {
       "id": "US-008",
-      "title": "Add Copy derive to JourneyOutcome enum",
-      "category": "performance",
+      "title": "Add protocol error handling tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Add Copy to #[derive(...)] for JourneyOutcome in journey.rs",
-        "Remove any .clone() calls on JourneyOutcome values",
+        "Test MQTT malformed JSON returns empty events (no panic)",
+        "Test MQTT missing timestamp defaults to 0 (not current time)",
+        "Test RS485 checksum mismatch is detected and frame rejected",
+        "Test RS485 partial frame handling (waits for more data)",
+        "Test CloudPlus data length > MAX_DATA_LEN marks frame invalid",
+        "Test CloudPlus missing ETX marks frame invalid",
         "All tests pass"
       ],
-      "instructions": "In domain/journey.rs:21-28, JourneyOutcome is a small fieldless enum. Add Copy to derives. Then search for .clone() on JourneyOutcome and remove them.",
-      "priority": 2,
-      "estimatedMinutes": 10,
+      "instructions": "Add tests to io/mqtt.rs, io/rs485.rs, io/cloudplus.rs for error paths. Focus on malformed input handling - these are production failure modes. Test that invalid protocol data doesn't cause panics or incorrect state.",
+      "priority": 1,
+      "estimatedMinutes": 45,
       "passes": false,
-      "notes": ""
+      "notes": "Protocol errors happen in production. Verify graceful degradation."
     },
     {
       "id": "US-009",
-      "title": "Implement FromStr trait for EventType",
-      "category": "code-quality",
+      "title": "Add Config validation tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Implement std::str::FromStr for EventType instead of inherent from_str method",
-        "Update all call sites to use .parse() or FromStr::from_str",
+        "Test missing config file falls back to defaults (with warning log)",
+        "Test invalid TOML syntax returns error, not silent fallback",
+        "Test empty pos_zones array is detected as invalid",
+        "Test zone ID conflicts (gate_zone == pos_zone) are detected",
+        "Test port 0 is detected as invalid for prometheus/acc/broker",
+        "Test min_dwell_ms = 0 is detected as invalid",
         "All tests pass"
       ],
-      "instructions": "In domain/types.rs:136-147, EventType has 'pub fn from_str(s: &str) -> Self'. Convert to 'impl FromStr for EventType { type Err = (); fn from_str(s: &str) -> Result<Self, Self::Err> }'. Return Ok(EventType::Unknown(s.to_string())) for unknown values.",
-      "priority": 3,
-      "estimatedMinutes": 15,
+      "instructions": "In infra/config.rs tests, add validation tests. Currently Config::load() silently falls back to defaults on ANY error - this masks production misconfigurations. Consider adding a Config::validate() method that can be tested independently.",
+      "priority": 1,
+      "estimatedMinutes": 40,
       "passes": false,
-      "notes": ""
+      "notes": "Critical: Silent config fallback has caused production issues"
     },
     {
       "id": "US-010",
-      "title": "Add #[cold] attribute to error handling paths",
-      "category": "performance",
+      "title": "Add Broker startup tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Add #[cold] to error logging/handling functions in gate.rs, cloudplus.rs",
+        "Test invalid bind address (e.g., '999.999.999.999') logs error and returns",
+        "Test port 0 behavior is documented (binds to ephemeral port)",
+        "Test valid address parses correctly",
         "All tests pass"
       ],
-      "instructions": "Search: grep -rn 'error!' src/. Add #[cold] attribute to functions that only handle errors. This hints to compiler to optimize hot path. Example: functions that only log errors and return early.",
-      "priority": 3,
-      "estimatedMinutes": 15,
+      "instructions": "In infra/broker.rs, add basic tests. Currently has ZERO tests. The broker startup has a 100ms arbitrary sleep that doesn't guarantee readiness. At minimum, test that address parsing works and invalid addresses are handled gracefully.",
+      "priority": 1,
+      "estimatedMinutes": 25,
       "passes": false,
-      "notes": ""
+      "notes": "Zero test coverage. Broker failure prevents all MQTT communication."
     },
     {
       "id": "US-011",
-      "title": "Add clippy.toml configuration",
-      "category": "tooling",
+      "title": "Add Domain type parsing tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Create clippy.toml at project root",
-        "Configure too_many_arguments threshold if needed",
-        "Document in CLAUDE.md"
+        "Test TimestampValue::IsoString parsing with various formats",
+        "Test TimestampValue::EpochMs with valid and edge case values",
+        "Test TimestampValue::None (default) handling",
+        "Test epoch_ms() returns current time in milliseconds",
+        "Test EventType::as_str() round-trips with from_str",
+        "Test ParsedEvent creation with all field combinations",
+        "All tests pass"
       ],
-      "instructions": "Create clippy.toml with sensible defaults. Consider: too-many-arguments-threshold = 8 (cloudplus.rs:378 has 8 args). Can also enable additional lints like clippy::pedantic selectively.",
-      "priority": 3,
-      "estimatedMinutes": 10,
+      "instructions": "In domain/types.rs tests, add tests for TimestampValue deserialization (currently untested), epoch_ms() function, and EventType round-trip. These are foundational types used throughout the system.",
+      "priority": 1,
+      "estimatedMinutes": 35,
       "passes": false,
-      "notes": ""
+      "notes": "Domain types are used everywhere. Parsing errors cascade to all modules."
     },
     {
       "id": "US-012",
-      "title": "Add rustfmt.toml configuration",
-      "category": "tooling",
+      "title": "Add Journey Manager state tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Create rustfmt.toml at project root",
-        "Run cargo fmt and commit any formatting changes",
-        "Document in CLAUDE.md"
+        "Test chain stitching A→B→C: all track IDs in tids, state preserved",
+        "Test stitch from pending resets outcome to InProgress",
+        "Test stitch from pending clears ended_at",
+        "Test tick with multiple journeys ready at same time",
+        "Test pid_by_track consistency after stitch operations",
+        "All tests pass"
       ],
-      "instructions": "Create rustfmt.toml with project preferences. Common settings: max_width = 100, use_small_heuristics = 'Max'. Run 'cargo fmt' after creating.",
-      "priority": 3,
-      "estimatedMinutes": 10,
+      "instructions": "In services/journey_manager.rs tests, add tests for multi-hop stitching and state consistency. Chain stitching (A→B→C) is common when sensor loses track multiple times. Verify all track IDs are preserved and state is correctly transferred.",
+      "priority": 1,
+      "estimatedMinutes": 35,
       "passes": false,
-      "notes": ""
+      "notes": "Chain stitching is common in production - sensor loses track multiple times"
     },
     {
       "id": "US-013",
-      "title": "Fix Box::leak memory leak in gate_test.rs",
-      "category": "safety",
+      "title": "Add Barcode Fallback TDD tests",
+      "category": "testing",
       "acceptanceCriteria": [
-        "Replace Box::leak pattern with owned String in gate_test.rs:415",
-        "Change results Vec type from Vec<(&str, TestResult)> to Vec<(String, TestResult)>",
-        "Code compiles and test binary runs"
+        "Test BarcodeStore: store barcode with 45min TTL",
+        "Test BarcodeStore: barcode lookup returns valid/invalid/expired status",
+        "Test BarcodeStore: barcode single-use - second lookup fails",
+        "Test BarcodeStore: invalidate barcode on physical exit (EXIT line cross)",
+        "Test BarcodeStore: Xovis gate-open exit invalidates associated barcode",
+        "Test barcode scan without active Xovis track: logs warning, opens gate anyway",
+        "Test barcode scan with active track: associates barcode with journey",
+        "Test barcode statistics: generated, scanned, invalidated_by_exit counters",
+        "Test barcode TTL boundary: 44:59 (valid) vs 45:01 (expired)",
+        "All tests pass"
       ],
-      "instructions": "In bin/gate_test.rs:415, 'Box::leak(name.into_boxed_str())' leaks memory to get &'static str. Change results vector to use owned String instead.",
-      "priority": 2,
-      "estimatedMinutes": 10,
+      "instructions": "Create services/barcode_store.rs with TDD approach - write tests first. BarcodeStore should: (1) Store receipt_id from ACC events as barcodes with 45min TTL, (2) Track single-use status, (3) Provide lookup for /api/scan endpoint (TODO: implement endpoint later), (4) Invalidate on physical exit. Stats should include both running totals and time-bucketed metrics for Prometheus. API endpoint POST /api/v1/barcode/scan spec available in ~/Documents/GitHub/Avero/docs/openapi.yaml.",
+      "priority": 1,
+      "estimatedMinutes": 60,
       "passes": false,
-      "notes": ""
+      "notes": "TDD: Write tests first. Barcode invalidation happens on EXIT line cross only. If Xovis loses track briefly, barcode scan should still work."
     },
     {
       "id": "US-014",
-      "title": "Consolidate CloudPlusClient locks into single state struct",
-      "category": "safety",
-      "acceptanceCriteria": [
-        "Create CloudPlusState struct containing read_half, write_half, connected, request_mode",
-        "Replace multiple Arc<Mutex/RwLock<_>> with single Arc<Mutex<CloudPlusState>>",
-        "Eliminates potential deadlock from different lock ordering",
-        "All tests pass"
-      ],
-      "instructions": "In io/cloudplus.rs:245-255, multiple locks are acquired in different orders (lines 295-298 vs 369-371). Create a single CloudPlusState struct to hold all state, protected by one lock. This is a larger refactor.",
-      "priority": 3,
-      "estimatedMinutes": 60,
-      "passes": false,
-      "notes": "Larger refactor - consider breaking into sub-tasks if needed"
-    },
-    {
-      "id": "US-015",
-      "title": "Add anyhow crate for better error handling",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Add anyhow = '1' to Cargo.toml",
-        "Replace Result<_, String> with Result<_, anyhow::Error> in config.rs:361",
-        "Use .context() for error context where appropriate",
-        "All tests pass"
-      ],
-      "instructions": "Add anyhow to dependencies. In infra/config.rs, Config::from_file returns Result<Self, String>. Change to anyhow::Result<Self> and use .context() instead of .map_err(|e| format!(...)). Preserves original error in chain.",
-      "priority": 3,
-      "estimatedMinutes": 20,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-016",
-      "title": "Create TrackId newtype wrapper",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Create TrackId(pub i64) newtype in domain/types.rs",
-        "Add derives: Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize",
-        "Add #[repr(transparent)]",
-        "Replace i64 track_id with TrackId in Person struct",
-        "All tests pass"
-      ],
-      "instructions": "Start with Person struct only. Create 'pub struct TrackId(pub i64);' with appropriate derives. Update Person.track_id to use TrackId. This is phase 1 - don't change all 30+ locations at once.",
-      "priority": 3,
-      "estimatedMinutes": 20,
-      "passes": false,
-      "notes": "Phase 1 of newtype rollout - Person struct only"
-    },
-    {
-      "id": "US-017",
-      "title": "Expand TrackId newtype to tracker module",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Update HashMap<i64, Person> to HashMap<TrackId, Person> in tracker/mod.rs",
-        "Update all track_id parameters in tracker handlers to use TrackId",
-        "All tests pass"
-      ],
-      "instructions": "After US-016. Update tracker/mod.rs and handlers.rs to use TrackId. The compiler will guide you to all locations that need updating.",
-      "priority": 3,
-      "estimatedMinutes": 30,
-      "passes": false,
-      "notes": "Phase 2 of newtype rollout - depends on US-016"
-    },
-    {
-      "id": "US-018",
-      "title": "Expand TrackId newtype to journey_manager",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Update all track_id: i64 to track_id: TrackId in journey_manager.rs",
-        "Update HashMap keys to use TrackId",
-        "All tests pass"
-      ],
-      "instructions": "After US-017. Update services/journey_manager.rs to use TrackId throughout. Compiler errors will guide you.",
-      "priority": 3,
-      "estimatedMinutes": 20,
-      "passes": false,
-      "notes": "Phase 3 of newtype rollout - depends on US-017"
-    },
-    {
-      "id": "US-019",
-      "title": "Expand TrackId newtype to remaining modules",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Update stitcher.rs, acc_collector.rs, door_correlator.rs, gate.rs to use TrackId",
-        "Update Journey struct to use TrackId",
-        "All tests pass"
-      ],
-      "instructions": "After US-018. Final phase - update all remaining modules. Search: grep -rn 'track_id: i64' src/ to find remaining locations.",
-      "priority": 3,
-      "estimatedMinutes": 40,
-      "passes": false,
-      "notes": "Phase 4 of newtype rollout - depends on US-018"
-    },
-    {
-      "id": "US-020",
-      "title": "Create GeometryId newtype wrapper",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Create GeometryId(pub i32) newtype in domain/types.rs",
-        "Add derives: Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize",
-        "Replace i32 geometry_id with GeometryId in ParsedEvent and EventAttributes",
-        "All tests pass"
-      ],
-      "instructions": "Similar to TrackId. Create newtype, update ParsedEvent.geometry_id and EventAttributes.geometry_id. Prevents mixing geometry_id with other i32 values.",
-      "priority": 4,
-      "estimatedMinutes": 25,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-021",
-      "title": "Replace Option<&String> with Option<&str> in acc_collector",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Change pos_for_ip return type from Option<&String> to Option<&str>",
-        "Use .map(|s| s.as_str()) or .as_deref()",
-        "All tests pass"
-      ],
-      "instructions": "In services/acc_collector.rs:431, 'pub fn pos_for_ip(&self, ip: &str) -> Option<&String>' should return Option<&str>. More idiomatic Rust.",
-      "priority": 4,
-      "estimatedMinutes": 5,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-022",
-      "title": "Add TryFrom for timestamp i64 to u64 conversion",
-      "category": "safety",
-      "acceptanceCriteria": [
-        "Replace 'value as u64' with TryFrom conversion in types.rs:78",
-        "Handle negative values appropriately (return error or default)",
-        "All tests pass"
-      ],
-      "instructions": "In domain/types.rs:78, 'Ok(TimestampValue::EpochMs(value as u64))' silently wraps negative i64 to large u64. Use u64::try_from(value).map_err(...) or .unwrap_or(0) with a warning log.",
-      "priority": 4,
-      "estimatedMinutes": 10,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-023",
-      "title": "Add #[inline] to small hot-path functions",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Add #[inline] to epoch_ms() in types.rs",
-        "Add #[inline] to Person::new() if it exists",
-        "Add #[inline] to JourneyOutcome::as_str()",
-        "All tests pass"
-      ],
-      "instructions": "Search for small utility functions called frequently. epoch_ms() is called throughout for timestamps. Add #[inline] attribute above function definition.",
-      "priority": 4,
-      "estimatedMinutes": 10,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-024",
-      "title": "Add smallvec for Journey.tids",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Add smallvec = '1' to Cargo.toml",
-        "Replace Vec<i64> with SmallVec<[i64; 4]> for Journey.tids",
-        "All tests pass"
-      ],
-      "instructions": "Journey.tids rarely has >4 elements. SmallVec stores up to N elements inline without heap allocation. In domain/journey.rs, change 'tids: Vec<i64>' to 'tids: SmallVec<[i64; 4]>'. Import with 'use smallvec::SmallVec;'.",
-      "priority": 4,
-      "estimatedMinutes": 15,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-025",
-      "title": "Add smallvec for DoorCorrelator.pending_cmds",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Replace Vec<PendingGateCmd> with SmallVec<[PendingGateCmd; 2]>",
-        "All tests pass"
-      ],
-      "instructions": "After US-024 (smallvec added). In services/door_correlator.rs:29, pending_cmds typically has 0-2 elements. Change to SmallVec<[PendingGateCmd; 2]>.",
-      "priority": 4,
-      "estimatedMinutes": 10,
-      "passes": false,
-      "notes": "Depends on US-024"
-    },
-    {
-      "id": "US-026",
-      "title": "Update Cargo.toml release profile with panic=abort",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Add panic = 'abort' to [profile.release] in Cargo.toml",
-        "cargo build --release succeeds",
-        "Binary size is reduced"
-      ],
-      "instructions": "In Cargo.toml [profile.release], add 'panic = \"abort\"'. This skips unwinding overhead, appropriate for embedded RPi5 deployment. Reduces binary size.",
-      "priority": 4,
-      "estimatedMinutes": 5,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-027",
-      "title": "Add target-cpu optimization for RPi5",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Create .cargo/config.toml if not exists",
-        "Add [target.aarch64-unknown-linux-gnu] with rustflags for cortex-a76",
-        "Cross-compilation still works"
-      ],
-      "instructions": "Create .cargo/config.toml with:\n[target.aarch64-unknown-linux-gnu]\nrustflags = [\"-C\", \"target-cpu=cortex-a76\"]\n\nThis enables RPi5-specific optimizations when cross-compiling.",
-      "priority": 4,
-      "estimatedMinutes": 10,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-028",
-      "title": "Try lto = 'fat' and benchmark",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Change lto = true to lto = 'fat' in Cargo.toml",
-        "Build succeeds",
-        "Document binary size change in notes"
-      ],
-      "instructions": "In Cargo.toml [profile.release], change 'lto = true' to 'lto = \"fat\"'. Build with 'cargo build --release' and compare binary size. 'fat' LTO is more aggressive than 'thin'.",
-      "priority": 5,
-      "estimatedMinutes": 10,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-029",
-      "title": "Use clap derive macro for CLI arguments",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Create Args struct with #[derive(Parser)]",
-        "Add --config, --help, --version flags",
-        "Replace manual args parsing in main.rs",
-        "All tests pass"
-      ],
-      "instructions": "clap is already in Cargo.toml but not used. In main.rs, replace 'let args: Vec<String> = std::env::args().collect()' with clap Parser. Add struct Args with #[arg(short, long)] for config path.",
-      "priority": 4,
-      "estimatedMinutes": 20,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-030",
-      "title": "Convert JourneyEvent.t from String to enum",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Create JourneyEventType enum with variants for all event types",
-        "Replace t: String with t: JourneyEventType in JourneyEvent",
-        "Update serialization to output same JSON format",
-        "All tests pass"
-      ],
-      "instructions": "In domain/journey.rs:48, 't: String' stores event types. Create enum JourneyEventType { ZoneEntry, ZoneExit, LineCross, Stitch, Create, Delete, GateCmd, ... }. Use #[serde(rename = \"zone_entry\")] for JSON compatibility.",
-      "priority": 4,
-      "estimatedMinutes": 30,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-031",
-      "title": "Pre-compute zone index mapping in Metrics",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Store zone-to-index HashMap at Metrics initialization",
-        "Remove Mutex lock in zone_index() hot path",
-        "All tests pass"
-      ],
-      "instructions": "In infra/metrics.rs, zone_index() acquires Mutex lock on every call (lines 221-224). Pre-compute the zone ID to index mapping during init and store in a non-locked HashMap or fixed array.",
-      "priority": 4,
-      "estimatedMinutes": 25,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-032",
-      "title": "Add integration tests directory",
+      "title": "Add Journey scenario pattern tests",
       "category": "testing",
       "acceptanceCriteria": [
-        "Create tests/ directory at project root",
-        "Add at least one integration test (e.g., config loading)",
-        "cargo test runs integration tests"
-      ],
-      "instructions": "Create tests/ directory. Add tests/config_test.rs that tests Config::from_file with a test config. Integration tests can test public API without #[cfg(test)] access.",
-      "priority": 5,
-      "estimatedMinutes": 20,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-033",
-      "title": "Add doc tests to public API functions",
-      "category": "testing",
-      "acceptanceCriteria": [
-        "Add /// documentation with examples to Journey::new()",
-        "Add /// documentation with examples to Config::from_file()",
-        "Doc tests pass with cargo test"
-      ],
-      "instructions": "Add documentation comments with runnable examples:\n/// Creates a new journey.\n/// ```\n/// let j = Journey::new(123);\n/// assert_eq!(j.current_track_id(), 123);\n/// ```",
-      "priority": 5,
-      "estimatedMinutes": 20,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-034",
-      "title": "Create ParsedEventBuilder for tests",
-      "category": "testing",
-      "acceptanceCriteria": [
-        "Create ParsedEventBuilder struct with fluent API",
-        "Replace create_event() helper in tests with builder",
+        "Test paid_exit pattern: entry_cross → POS dwell → ACC → gate_cmd → exit_cross",
+        "Test unpaid_exit pattern: entry_cross → brief POS → backward entry_cross (no gate)",
+        "Test lost_unauthorized pattern: entry_cross → POS → tracking_lost (pending event)",
+        "Test multiple entry crosses: forward → backward → forward progression",
+        "Test stitched journey: pending → stitch event → continue to paid_exit",
+        "Test re-entry journey: track_create with reentry_from parent reference",
+        "Test mid-store spawn: track_create without entry_cross → normal authorization flow",
+        "Test multi-POS journey: visit POS_1, POS_3, POS_4 in sequence, dwell accumulates",
         "All tests pass"
       ],
-      "instructions": "In services/tracker/tests.rs, create_event() and create_event_with_pos() are verbose. Create ParsedEventBuilder with .with_track_id(), .with_geometry_id(), .with_position(), .build() methods.",
-      "priority": 5,
-      "estimatedMinutes": 25,
+      "instructions": "Create integration tests based on real journey patterns from TimescaleDB. Each test should replay a sequence of events and verify the expected outcome. Patterns extracted from production data: (1) paid_exit with ACC+gate, (2) unpaid_exit with backward exit, (3) lost_unauthorized with tracking_lost, (4) stitched journeys, (5) re-entry journeys. Test that journey.events matches expected sequence and outcome is correct.",
+      "priority": 1,
+      "estimatedMinutes": 75,
       "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-035",
-      "title": "Add Egress trait for testability",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Create JourneyWriter trait with write_journey method",
-        "Implement JourneyWriter for Egress",
-        "Tracker accepts Box<dyn JourneyWriter> or generic",
-        "All tests pass"
-      ],
-      "instructions": "In io/egress.rs, Egress is a concrete struct. Create trait JourneyWriter { fn write_journey(&self, j: &Journey) -> bool; }. Implement for Egress. This enables mock implementations for testing.",
-      "priority": 5,
-      "estimatedMinutes": 30,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-036",
-      "title": "Add GateController trait for testability",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Create GateCommand trait with send_open_command method",
-        "Implement GateCommand for GateController",
-        "Remove #[cfg(test)] mock_enabled pattern",
-        "All tests pass"
-      ],
-      "instructions": "In services/gate.rs, GateController uses #[cfg(test)] for mocking. Create async trait using async_trait crate. This is cleaner than cfg flags for test doubles.",
-      "priority": 5,
-      "estimatedMinutes": 35,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-037",
-      "title": "Replace fragile .is_none() + .unwrap() pattern in TUI",
-      "category": "safety",
-      "acceptanceCriteria": [
-        "Replace if x.is_none() { x = Some(...); x.unwrap() } with if let pattern",
-        "Update bin/tui.rs:540,549,552",
-        "Code compiles"
-      ],
-      "instructions": "In bin/tui.rs lines 540,549,552, pattern is: check is_none, assign, then unwrap. Use 'if let Some(val) = &self.moving_at { ... }' instead. More idiomatic and safer.",
-      "priority": 4,
-      "estimatedMinutes": 15,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-038",
-      "title": "Replace .unwrap() on HTTP Response builders with expect()",
-      "category": "safety",
-      "acceptanceCriteria": [
-        "Replace .unwrap() with .expect('static response should not fail') in prometheus.rs",
-        "Update lines 292, 298, 304",
-        "All tests pass"
-      ],
-      "instructions": "In io/prometheus.rs, Response::builder()...unwrap() should use .expect() with a message. While unlikely to fail with static content, expect() documents the assumption.",
-      "priority": 5,
-      "estimatedMinutes": 5,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-039",
-      "title": "Add Cow<'static, str> for JourneyEvent.t",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Change JourneyEvent.t from String to Cow<'static, str>",
-        "Use Cow::Borrowed for static event type strings",
-        "All tests pass"
-      ],
-      "instructions": "Alternative to US-030 (enum). In domain/journey.rs, change 't: String' to 't: Cow<'static, str>'. In with_type(), use Cow::Borrowed(\"zone_entry\") for known types. Avoids allocation for common cases.",
-      "priority": 5,
-      "estimatedMinutes": 20,
-      "passes": false,
-      "notes": "Alternative approach to US-030 - choose one or the other"
-    },
-    {
-      "id": "US-040",
-      "title": "Extract histogram bucket swap helper in Metrics",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Create swap_buckets() helper function in metrics.rs",
-        "Replace repeated bucket swapping code in report()",
-        "All tests pass"
-      ],
-      "instructions": "In infra/metrics.rs report() method (lines 469-483), the pattern of swapping histogram buckets repeats multiple times. Extract to helper: fn swap_buckets(buckets: &[AtomicU64; N]) -> [u64; N].",
-      "priority": 5,
-      "estimatedMinutes": 15,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-041",
-      "title": "Use binary search for bucket_index functions",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Replace linear search with binary search in bucket_index()",
-        "Update stitch_dist_bucket_index() and latency_ms_bucket_index()",
-        "All tests pass"
-      ],
-      "instructions": "In infra/metrics.rs lines 29-57, bucket_index functions use linear search through 10 elements. Use BUCKET_BOUNDS.binary_search() or .partition_point(). Minor optimization but cleaner code.",
-      "priority": 5,
-      "estimatedMinutes": 15,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-042",
-      "title": "Add journey_manager HashMap index for pending_egress",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Add HashMap<i64, usize> index for track_id to pending_egress position",
-        "Update on add/remove to keep index in sync",
-        "stitch_journey() uses O(1) lookup instead of linear scan",
-        "All tests pass"
-      ],
-      "instructions": "In services/journey_manager.rs:73-86, stitch_journey() does linear scan through pending_egress. Add an index HashMap to enable O(1) lookup by track_id. Keep index updated when adding/removing.",
-      "priority": 5,
-      "estimatedMinutes": 30,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-043",
-      "title": "Remove dead code warnings",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Fix or remove unused functions: has_journey, new, tick_journeys",
-        "Fix unused field: StateEvent.status in gate_test.rs",
-        "cargo build shows no dead_code warnings"
-      ],
-      "instructions": "Run 'cargo build 2>&1 | grep dead_code' to find unused items. Either remove them if truly unused, or add #[allow(dead_code)] with a comment explaining why kept.",
-      "priority": 4,
-      "estimatedMinutes": 15,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-044",
-      "title": "Fix unused imports warning",
-      "category": "code-quality",
-      "acceptanceCriteria": [
-        "Remove unused imports in domain/mod.rs:14",
-        "cargo build shows no unused_imports warnings"
-      ],
-      "instructions": "In domain/mod.rs:14, there are unused imports: JourneyEvent, JourneyOutcome, Journey, epoch_ms, new_uuid_v7. Remove them or use them.",
-      "priority": 4,
-      "estimatedMinutes": 5,
-      "passes": false,
-      "notes": ""
+      "notes": "Based on TimescaleDB analysis: 782 paid_exit, 291 lost_unauthorized, 270 unpaid_exit. Journeys have 4-138 events, most have 10-20."
     }
   ]
 }
