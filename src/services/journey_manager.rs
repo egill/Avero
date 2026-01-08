@@ -19,10 +19,8 @@ struct PendingEgress {
 pub struct JourneyManager {
     /// Active journeys by current track_id
     active: FxHashMap<TrackId, Journey>,
-    /// Journeys waiting for egress (10s delay)
-    pending_egress: Vec<PendingEgress>,
-    /// Index from track_id to pending_egress Vec position for O(1) lookup
-    pending_index: FxHashMap<TrackId, usize>,
+    /// Journeys waiting for egress (10s delay), keyed by track_id
+    pending_egress: FxHashMap<TrackId, PendingEgress>,
     /// Mapping of track_id to person_id for stitch lookups
     pid_by_track: FxHashMap<TrackId, String>,
 }
@@ -31,8 +29,7 @@ impl JourneyManager {
     pub fn new() -> Self {
         Self {
             active: FxHashMap::default(),
-            pending_egress: Vec::new(),
-            pending_index: FxHashMap::default(),
+            pending_egress: FxHashMap::default(),
             pid_by_track: FxHashMap::default(),
         }
     }
@@ -86,26 +83,12 @@ impl JourneyManager {
         time_ms: u64,
         distance_cm: u32,
     ) -> bool {
-        // First try to find in pending_egress using O(1) index lookup
-        let journey = if let Some(&idx) = self.pending_index.get(&old_track_id) {
-            // Remove from index
-            self.pending_index.remove(&old_track_id);
-
-            // Get the last element's track_id before swap_remove (if different from idx)
-            let last_idx = self.pending_egress.len() - 1;
-            if idx != last_idx {
-                // The last element will move to idx position after swap_remove
-                let last_track_id = self.pending_egress[last_idx].journey.current_track_id();
-                self.pending_index.insert(last_track_id, idx);
-            }
-
-            // Remove from pending egress
-            let pending = self.pending_egress.swap_remove(idx);
-            Some(pending.journey)
-        } else {
-            // Try active journeys
-            self.active.remove(&old_track_id)
-        };
+        // Try pending_egress first, then active journeys
+        let journey = self
+            .pending_egress
+            .remove(&old_track_id)
+            .map(|p| p.journey)
+            .or_else(|| self.active.remove(&old_track_id));
 
         if let Some(mut journey) = journey {
             let old_pid = journey.pid.clone();
@@ -163,14 +146,10 @@ impl JourneyManager {
     }
 
     pub fn get_mut_any(&mut self, track_id: TrackId) -> Option<&mut Journey> {
-        if self.active.contains_key(&track_id) {
-            return self.active.get_mut(&track_id);
+        if let Some(journey) = self.active.get_mut(&track_id) {
+            return Some(journey);
         }
-        // Use O(1) index lookup for pending_egress
-        if let Some(&idx) = self.pending_index.get(&track_id) {
-            return Some(&mut self.pending_egress[idx].journey);
-        }
-        None
+        self.pending_egress.get_mut(&track_id).map(|p| &mut p.journey)
     }
 
     /// Get immutable reference to journey for a track
@@ -179,14 +158,10 @@ impl JourneyManager {
     }
 
     pub fn get_any(&self, track_id: TrackId) -> Option<&Journey> {
-        if self.active.contains_key(&track_id) {
-            return self.active.get(&track_id);
+        if let Some(journey) = self.active.get(&track_id) {
+            return Some(journey);
         }
-        // Use O(1) index lookup for pending_egress
-        if let Some(&idx) = self.pending_index.get(&track_id) {
-            return Some(&self.pending_egress[idx].journey);
-        }
-        None
+        self.pending_egress.get(&track_id).map(|p| &p.journey)
     }
 
     /// End a journey and move to pending egress
@@ -203,10 +178,10 @@ impl JourneyManager {
             );
 
             // Add to pending egress with 10s delay
-            let idx = self.pending_egress.len();
-            self.pending_index.insert(track_id, idx);
-            self.pending_egress
-                .push(PendingEgress { journey, eligible_at: Instant::now() + EGRESS_DELAY });
+            self.pending_egress.insert(
+                track_id,
+                PendingEgress { journey, eligible_at: Instant::now() + EGRESS_DELAY },
+            );
         }
     }
 
@@ -215,13 +190,18 @@ impl JourneyManager {
     pub fn tick(&mut self) -> Vec<Journey> {
         let now = Instant::now();
         let mut ready = Vec::new();
-        let mut remaining = Vec::new();
 
-        // Clear the index - we'll rebuild it for remaining items
-        self.pending_index.clear();
+        // Collect track IDs that are eligible for processing
+        let eligible_ids: Vec<TrackId> = self
+            .pending_egress
+            .iter()
+            .filter(|(_, p)| now >= p.eligible_at)
+            .map(|(&tid, _)| tid)
+            .collect();
 
-        for pending in self.pending_egress.drain(..) {
-            if now >= pending.eligible_at {
+        // Process eligible journeys
+        for track_id in eligible_ids {
+            if let Some(pending) = self.pending_egress.remove(&track_id) {
                 // Remove from pid_by_track
                 for tid in &pending.journey.tids {
                     self.pid_by_track.remove(tid);
@@ -243,15 +223,9 @@ impl JourneyManager {
                         "journey_discarded_no_entry"
                     );
                 }
-            } else {
-                // Rebuild index for remaining items
-                let idx = remaining.len();
-                self.pending_index.insert(pending.journey.current_track_id(), idx);
-                remaining.push(pending);
             }
         }
 
-        self.pending_egress = remaining;
         ready
     }
 
@@ -384,7 +358,7 @@ mod tests {
         manager.end_journey(TrackId(100), JourneyOutcome::Abandoned);
 
         // Manually set eligible_at to past
-        if let Some(pending) = manager.pending_egress.first_mut() {
+        if let Some(pending) = manager.pending_egress.get_mut(&TrackId(100)) {
             pending.eligible_at = Instant::now() - Duration::from_secs(1);
         }
 
@@ -408,7 +382,7 @@ mod tests {
         manager.end_journey(TrackId(100), JourneyOutcome::Completed);
 
         // Manually set eligible_at to past
-        if let Some(pending) = manager.pending_egress.first_mut() {
+        if let Some(pending) = manager.pending_egress.get_mut(&TrackId(100)) {
             pending.eligible_at = Instant::now() - Duration::from_secs(1);
         }
 
