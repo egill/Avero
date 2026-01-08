@@ -1,0 +1,1 @@
+{application,gen_state_machine,[{modules,['Elixir.GenStateMachine','Elixir.GenStateMachine.Application','Elixir.GenStateMachine.Translator']},{optional_applications,[]},{applications,[kernel,stdlib,elixir,logger]},{description,"An Elixir wrapper for gen_statem."},{registered,[]},{vsn,"3.0.0"},{mod,{'Elixir.GenStateMachine.Application',[]}}]}.

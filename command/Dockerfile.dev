@@ -1,0 +1,37 @@
+# Development/Production Dockerfile for Phoenix/Elixir
+# Elixir 1.19.4, Phoenix 1.8.3
+FROM elixir:1.19.4-otp-28
+
+# Install hex + rebar
+RUN mix local.hex --force && \
+    mix local.rebar --force
+
+# Install inotify-tools for live reload and other utilities
+RUN apt-get update && \
+    apt-get install -y inotify-tools postgresql-client && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Node.js for asset compilation
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Expose Phoenix port
+EXPOSE 4000
+
+# Default to production
+ENV MIX_ENV=prod
+
+# Startup script that handles asset compilation and server start
+# Assets are compiled on first run to ensure LiveView JS matches server version
+CMD ["sh", "-c", "\
+    mix deps.get --only prod && \
+    mix deps.compile && \
+    mix assets.setup && \
+    mix assets.deploy && \
+    mix ecto.create && \
+    mix ecto.migrate && \
+    mix phx.server \
+"]

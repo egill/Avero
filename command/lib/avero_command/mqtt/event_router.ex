@@ -1,0 +1,190 @@
+defmodule AveroCommand.MQTT.EventRouter do
+  @moduledoc """
+  Routes incoming MQTT events to the appropriate handlers.
+  - Person events -> PersonSupervisor (creates/updates Person GenServer)
+  - Gate events -> GateSupervisor (creates/updates Gate GenServer)
+  - All events -> Store (persisted to TimescaleDB)
+  """
+  require Logger
+
+  alias AveroCommand.Store
+  alias AveroCommand.Entities.{PersonRegistry, GateRegistry}
+  alias AveroCommand.Scenarios.Evaluator
+  alias AveroCommand.Journeys
+
+  @doc """
+  Route an event from MQTT to the appropriate handlers.
+
+  Topic formats supported:
+  - Gateway-PoC: ["gateway", "journeys"] or ["gateway", "events"]
+  - Legacy: ["avero", "events", event_type]
+  """
+  def route_event(topic, event_data) when is_list(topic) and is_map(event_data) do
+    # Handle gateway-poc journey topic directly
+    case topic do
+      ["gateway", "journeys"] ->
+        # Journey JSON from gateway-poc - create journey directly
+        Logger.debug("EventRouter: received journey from gateway-poc")
+        Task.start(fn -> Journeys.create_from_gateway_json(event_data) end)
+        :ok
+
+      ["gateway", topic_name] ->
+        # Other gateway-poc topics (events, gate, acc, metrics)
+        event = normalize_gateway_event(topic_name, event_data)
+        Task.start(fn -> Store.insert_event(event) end)
+        :ok
+
+      _ ->
+        # Legacy avero/events format
+        route_legacy_event(topic, event_data)
+    end
+  end
+
+  # Legacy routing for old avero/events/* format
+  defp route_legacy_event(topic, event_data) do
+    event_type = extract_event_type(topic)
+    event = normalize_event(event_type, event_data)
+
+    # 1. Persist to store (async)
+    Task.start(fn -> Store.insert_event(event) end)
+
+    # 2. Route to entity handlers
+    route_to_entities(event)
+
+    # 3. Handle journey completion events
+    if event_data["type"] == "journey.completed" do
+      Task.start(fn -> Journeys.create_from_event(event) end)
+    end
+
+    # 4. Evaluate scenarios
+    if event_type == "gates" do
+      Logger.info("EventRouter: calling Evaluator for gates event type=#{event.data["type"]}")
+    end
+    Evaluator.evaluate(event)
+
+    :ok
+  end
+
+  def route_event(topic, event_data) do
+    Logger.warning("Invalid event format: topic=#{inspect(topic)}, data=#{inspect(event_data)}")
+    :error
+  end
+
+  # Extract event type from topic
+  # ["avero", "events", "zone.entry"] -> "zone.entry"
+  defp extract_event_type(["avero", "events" | rest]) do
+    Enum.join(rest, ".")
+  end
+
+  defp extract_event_type(topic) do
+    Enum.join(topic, ".")
+  end
+
+  # Normalize gateway-poc events (events, gate, acc topics)
+  # These use short keys: tid, ts, t, z, etc.
+  defp normalize_gateway_event(topic_name, data) do
+    time = case data["ts"] do
+      ts when is_integer(ts) -> DateTime.from_unix!(ts, :millisecond)
+      _ -> DateTime.utc_now()
+    end
+
+    %{
+      event_type: "gateway.#{topic_name}",
+      time: time,
+      site: data["site"] || "unknown",
+      person_id: data["tid"],  # track ID
+      gate_id: nil,
+      sensor_id: nil,
+      zone: data["z"],
+      authorized: data["auth"],
+      auth_method: nil,
+      duration_ms: data["dwell_ms"],
+      data: data
+    }
+  end
+
+  # Normalize event data into a consistent structure
+  defp normalize_event(event_type, data) do
+    # Handle compact keys from gate.status.heartbeat events
+    # Compact format: g=gate_id, s=status, d=duration_ms, c=crossing_count
+    data = expand_compact_keys(data)
+
+    %{
+      event_type: event_type,
+      time: parse_timestamp(data["timestamp"]) || DateTime.utc_now(),
+      site: data["site"] || data["site_id"] || data["gateway_id"] || "unknown",
+      person_id: data["person_id"],
+      gate_id: data["gate_id"] || data["g"],
+      sensor_id: data["sensor_id"],
+      zone: data["zone"],
+      authorized: data["authorized"],
+      auth_method: data["auth_method"],
+      duration_ms: data["duration_ms"] || data["dwell_ms"] || data["d"],
+      data: data
+    }
+  end
+
+  # Expand compact keys used in gate.status.heartbeat events
+  defp expand_compact_keys(data) when is_map(data) do
+    case data["type"] do
+      "gate.status.heartbeat" ->
+        data
+        |> Map.put_new("gate_id", data["g"])
+        |> Map.put_new("status", data["s"])
+        |> Map.put_new("duration_ms", data["d"])
+        |> Map.put_new("crossing_count", data["c"])
+
+      _ ->
+        data
+    end
+  end
+
+  defp expand_compact_keys(data), do: data
+
+  defp parse_timestamp(nil), do: nil
+
+  defp parse_timestamp(ts) when is_binary(ts) do
+    case DateTime.from_iso8601(ts) do
+      {:ok, dt, _} -> dt
+      _ -> nil
+    end
+  end
+
+  defp parse_timestamp(_), do: nil
+
+  # Route event to Person/Gate GenServers
+  defp route_to_entities(%{person_id: person_id} = event) when not is_nil(person_id) do
+    # Get or create Person GenServer
+    case PersonRegistry.get_or_create(event.site, person_id) do
+      {:ok, pid} ->
+        GenServer.cast(pid, {:event, event})
+
+      {:error, reason} ->
+        Logger.warning("Failed to route to person #{person_id}: #{inspect(reason)}")
+    end
+
+    # Also route gate events to gate GenServer
+    if event.gate_id do
+      route_to_gate(event)
+    end
+  end
+
+  defp route_to_entities(%{gate_id: gate_id} = event) when not is_nil(gate_id) do
+    route_to_gate(event)
+  end
+
+  defp route_to_entities(_event) do
+    # Event doesn't have person_id or gate_id, skip entity routing
+    :ok
+  end
+
+  defp route_to_gate(%{gate_id: gate_id, site: site} = event) do
+    case GateRegistry.get_or_create(site, gate_id) do
+      {:ok, pid} ->
+        GenServer.cast(pid, {:event, event})
+
+      {:error, reason} ->
+        Logger.warning("Failed to route to gate #{gate_id}: #{inspect(reason)}")
+    end
+  end
+end

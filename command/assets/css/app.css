@@ -1,0 +1,58 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+/* Custom styles for Avero Command Center */
+
+.phx-click-loading {
+  opacity: 0.5;
+  transition: opacity 300ms ease-in;
+}
+
+.phx-loading {
+  cursor: wait;
+}
+
+.phx-modal-open {
+  overflow: hidden;
+}
+
+.phx-modal {
+  opacity: 1 !important;
+  transition: opacity 0.25s ease-out;
+}
+
+.phx-modal-close {
+  opacity: 0;
+}
+
+.phx-hero-loading {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Incident severity colors */
+.incident-high {
+  border-left-color: #ef4444;
+}
+
+.incident-medium {
+  border-left-color: #f59e0b;
+}
+
+.incident-info {
+  border-left-color: #3b82f6;
+}
+
+/* Animations */
+@keyframes pulse-border {
+  0%, 100% {
+    border-color: #ef4444;
+  }
+  50% {
+    border-color: #fca5a5;
+  }
+}
+
+.pulse-high {
+  animation: pulse-border 2s ease-in-out infinite;
+}

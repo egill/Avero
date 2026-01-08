@@ -1,0 +1,5 @@
+# Runtime data files - don't track
+.last-check
+issues-to-review.jsonl
+issue-tasklist.jsonl
+issue-counters.json

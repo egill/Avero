@@ -1,0 +1,34 @@
+defmodule Tortoise311.Connection.Supervisor do
+  @moduledoc false
+
+  use Supervisor
+
+  alias Tortoise311.Connection.{Controller, Inflight, Receiver, Telemetry}
+
+  def start_link(opts) do
+    client_id = Keyword.fetch!(opts, :client_id)
+    Supervisor.start_link(__MODULE__, opts, name: via_name(client_id))
+  end
+
+  defp via_name(client_id) do
+    Tortoise311.Registry.via_name(__MODULE__, client_id)
+  end
+
+  @impl Supervisor
+  def init(opts) do
+    base_children = [
+      {Inflight, Keyword.take(opts, [:client_id])},
+      {Receiver, Keyword.take(opts, [:client_id])},
+      {Controller, Keyword.take(opts, [:client_id, :handler])}
+    ]
+
+    with_telemetry? = Keyword.get(opts, :enable_telemetry, true)
+
+    children =
+      if with_telemetry?,
+        do: base_children ++ [{Telemetry, Keyword.take(opts, [:client_id])}],
+        else: base_children
+
+    Supervisor.init(children, strategy: :rest_for_one)
+  end
+end
