@@ -1,7 +1,7 @@
 //! MQTT client for receiving Xovis sensor data
 
 use crate::domain::types::{
-    EventAttributes, EventType, Frame, ParsedEvent, TimestampValue, XovisMessage,
+    EventAttributes, EventType, Frame, ParsedEvent, TimestampValue, TrackId, XovisMessage,
 };
 use crate::infra::config::Config;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
@@ -154,7 +154,7 @@ fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
             let position = positions.get(&track_id).copied();
             events.push(ParsedEvent {
                 event_type,
-                track_id,
+                track_id: TrackId(track_id),
                 geometry_id: attrs.geometry_id,
                 direction: attrs.direction.clone(),
                 event_time,
@@ -195,7 +195,7 @@ mod tests {
 
         let events = parse_xovis_message(json, Instant::now());
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].track_id, 123);
+        assert_eq!(events[0].track_id, TrackId(123));
         assert_eq!(events[0].event_type, EventType::ZoneEntry);
         assert_eq!(events[0].geometry_id, Some(1001));
         // event_time should now be parsed from ISO 8601
@@ -225,7 +225,7 @@ mod tests {
 
         let events = parse_xovis_message(json, Instant::now());
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].track_id, 100);
+        assert_eq!(events[0].track_id, TrackId(100));
         assert_eq!(events[0].event_type, EventType::TrackCreate);
     }
 

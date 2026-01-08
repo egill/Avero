@@ -4,7 +4,7 @@
 //! Protocol: "ACC <receipt_id>\n"
 //! The peer IP is used to look up the POS zone via ip_to_pos config.
 
-use crate::domain::types::{EventType, ParsedEvent};
+use crate::domain::types::{EventType, ParsedEvent, TrackId};
 use std::net::SocketAddr;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -104,7 +104,7 @@ async fn handle_acc_connection(
             // The peer IP is used to look up the POS zone via ip_to_pos config
             let event = ParsedEvent {
                 event_type: EventType::AccEvent(peer_ip.clone()),
-                track_id: 0, // Not used for ACC events
+                track_id: TrackId(0), // Not used for ACC events
                 geometry_id: None,
                 direction: None,
                 event_time: 0,

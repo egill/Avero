@@ -82,6 +82,7 @@ impl Egress {
 mod tests {
     use super::*;
     use crate::domain::journey::{Journey, JourneyEvent, JourneyOutcome};
+    use crate::domain::types::TrackId;
     use std::fs;
     use tempfile::tempdir;
 
@@ -99,7 +100,7 @@ mod tests {
 
         let egress = Egress::new(file_str);
 
-        let mut journey = Journey::new(100);
+        let mut journey = Journey::new(TrackId(100));
         journey.authorized = true;
         journey.total_dwell_ms = 7500;
         journey.crossed_entry = true;
@@ -131,13 +132,13 @@ mod tests {
         let egress = Egress::new(file_str);
 
         // Write first journey
-        let mut journey1 = Journey::new(100);
+        let mut journey1 = Journey::new(TrackId(100));
         journey1.crossed_entry = true;
         journey1.complete(JourneyOutcome::Completed);
         egress.write_journey(&journey1);
 
         // Write second journey
-        let mut journey2 = Journey::new(200);
+        let mut journey2 = Journey::new(TrackId(200));
         journey2.crossed_entry = true;
         journey2.complete(JourneyOutcome::Abandoned);
         egress.write_journey(&journey2);
@@ -163,7 +164,7 @@ mod tests {
 
         let journeys: Vec<Journey> = (0..5)
             .map(|i| {
-                let mut j = Journey::new(100 + i);
+                let mut j = Journey::new(TrackId(100 + i));
                 j.crossed_entry = true;
                 j.complete(JourneyOutcome::Completed);
                 j
@@ -186,7 +187,7 @@ mod tests {
 
         let egress = Egress::new(file_str);
 
-        let mut journey = Journey::new(100);
+        let mut journey = Journey::new(TrackId(100));
         journey.crossed_entry = true;
         journey.complete(JourneyOutcome::Completed);
 
@@ -206,7 +207,7 @@ mod tests {
 
         let egress = Egress::new(file_str);
 
-        let mut journey = Journey::new(100);
+        let mut journey = Journey::new(TrackId(100));
         journey.crossed_entry = true;
         journey.complete(JourneyOutcome::Completed);
         egress.write_journey(&journey);

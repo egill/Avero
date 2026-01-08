@@ -36,7 +36,7 @@ impl JourneyManager {
 
     /// Create a new journey for a track
     pub fn new_journey(&mut self, track_id: TrackId) -> &Journey {
-        let journey = Journey::new(track_id.0);
+        let journey = Journey::new(track_id);
         let pid = journey.pid.clone();
 
         debug!(
@@ -58,7 +58,7 @@ impl JourneyManager {
         parent_jid: &str,
         parent_pid: &str,
     ) -> &Journey {
-        let journey = Journey::new_with_parent(track_id.0, parent_jid, parent_pid);
+        let journey = Journey::new_with_parent(track_id, parent_jid, parent_pid);
         let pid = journey.pid.clone();
 
         info!(
@@ -106,7 +106,7 @@ impl JourneyManager {
             )));
 
             // Add new track ID to history
-            journey.add_track_id(new_track_id.0);
+            journey.add_track_id(new_track_id);
 
             // Reset outcome to in progress (was abandoned on delete)
             journey.outcome = JourneyOutcome::InProgress;
@@ -157,7 +157,7 @@ impl JourneyManager {
         }
         self.pending_egress
             .iter_mut()
-            .find(|p| p.journey.current_track_id() == track_id.0)
+            .find(|p| p.journey.current_track_id() == track_id)
             .map(|p| &mut p.journey)
     }
 
@@ -172,7 +172,7 @@ impl JourneyManager {
         }
         self.pending_egress
             .iter()
-            .find(|p| p.journey.current_track_id() == track_id.0)
+            .find(|p| p.journey.current_track_id() == track_id)
             .map(|p| &p.journey)
     }
 
@@ -206,7 +206,7 @@ impl JourneyManager {
             if now >= pending.eligible_at {
                 // Remove from pid_by_track
                 for tid in &pending.journey.tids {
-                    self.pid_by_track.remove(&TrackId(*tid));
+                    self.pid_by_track.remove(tid);
                 }
 
                 if pending.journey.crossed_entry {
@@ -269,7 +269,7 @@ mod tests {
 
         let journey = manager.new_journey(TrackId(100));
 
-        assert_eq!(journey.tids, vec![100]);
+        assert_eq!(journey.tids, vec![TrackId(100)]);
         assert!(manager.has_journey(TrackId(100)));
         assert_eq!(manager.active_count(), 1);
     }
@@ -317,7 +317,7 @@ mod tests {
         assert!(manager.has_journey(TrackId(200)));
 
         let journey = manager.get(TrackId(200)).unwrap();
-        assert_eq!(journey.tids, vec![100, 200]);
+        assert_eq!(journey.tids, vec![TrackId(100), TrackId(200)]);
         assert!(journey.authorized);
         assert_eq!(journey.total_dwell_ms, 5000);
         assert_eq!(journey.events.len(), 1);
@@ -394,7 +394,7 @@ mod tests {
         let ready = manager.tick();
 
         assert_eq!(ready.len(), 1);
-        assert_eq!(ready[0].tids, vec![100]);
+        assert_eq!(ready[0].tids, vec![TrackId(100)]);
         assert!(ready[0].crossed_entry);
     }
 

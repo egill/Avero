@@ -6,7 +6,7 @@
 //! - Response frame: 18 bytes, starts with 0x7F
 //! - Checksum: sum all bytes, bitwise NOT
 
-use crate::domain::types::{DoorStatus, EventType, ParsedEvent};
+use crate::domain::types::{DoorStatus, EventType, ParsedEvent, TrackId};
 use crate::infra::config::Config;
 use std::io::ErrorKind;
 use std::time::{Duration, Instant};
@@ -289,7 +289,7 @@ impl Rs485Monitor {
                 if let Some(ref tx) = self.event_tx {
                     let event = ParsedEvent {
                         event_type: EventType::DoorStateChange(status),
-                        track_id: 0, // Not applicable for door events
+                        track_id: TrackId(0), // Not applicable for door events
                         geometry_id: None,
                         direction: None,
                         event_time: std::time::SystemTime::now()

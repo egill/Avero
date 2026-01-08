@@ -1,5 +1,6 @@
 //! Journey data model for tracking customer paths through the store
 
+use crate::domain::types::TrackId;
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -74,10 +75,10 @@ impl JourneyEvent {
 /// Complete journey for a tracked person
 #[derive(Debug, Clone)]
 pub struct Journey {
-    pub jid: String,            // UUIDv7 journey ID
-    pub pid: String,            // UUIDv7 person ID (stable across stitches)
-    pub tids: Vec<i64>,         // Xovis track_ids (stitch history)
-    pub parent: Option<String>, // Previous journey's jid (for re-entry)
+    pub jid: String,              // UUIDv7 journey ID
+    pub pid: String,              // UUIDv7 person ID (stable across stitches)
+    pub tids: Vec<TrackId>,       // Xovis track_ids (stitch history)
+    pub parent: Option<String>,   // Previous journey's jid (for re-entry)
     pub outcome: JourneyOutcome,
     pub authorized: bool,
     pub total_dwell_ms: u64,
@@ -93,7 +94,7 @@ pub struct Journey {
 
 impl Journey {
     /// Create a new journey for a track
-    pub fn new(track_id: i64) -> Self {
+    pub fn new(track_id: TrackId) -> Self {
         let now = epoch_ms();
         Self {
             jid: new_uuid_v7(),
@@ -115,7 +116,7 @@ impl Journey {
     }
 
     /// Create a new journey that continues from a previous one (re-entry)
-    pub fn new_with_parent(track_id: i64, parent_jid: &str, parent_pid: &str) -> Self {
+    pub fn new_with_parent(track_id: TrackId, parent_jid: &str, parent_pid: &str) -> Self {
         let mut journey = Self::new(track_id);
         journey.parent = Some(parent_jid.to_string());
         journey.pid = parent_pid.to_string();
@@ -123,7 +124,7 @@ impl Journey {
     }
 
     /// Add a track ID when stitching
-    pub fn add_track_id(&mut self, track_id: i64) {
+    pub fn add_track_id(&mut self, track_id: TrackId) {
         self.tids.push(track_id);
     }
 
@@ -139,8 +140,8 @@ impl Journey {
     }
 
     /// Get the current/last track ID
-    pub fn current_track_id(&self) -> i64 {
-        *self.tids.last().unwrap_or(&0)
+    pub fn current_track_id(&self) -> TrackId {
+        *self.tids.last().unwrap_or(&TrackId(0))
     }
 
     /// Convert to short-key JSON string (without site)
@@ -165,14 +166,8 @@ impl Journey {
             );
         }
 
-        obj.insert(
-            "jid".to_string(),
-            serde_json::Value::String(self.jid.clone()),
-        );
-        obj.insert(
-            "pid".to_string(),
-            serde_json::Value::String(self.pid.clone()),
-        );
+        obj.insert("jid".to_string(), serde_json::Value::String(self.jid.clone()));
+        obj.insert("pid".to_string(), serde_json::Value::String(self.pid.clone()));
         obj.insert("tids".to_string(), serde_json::json!(self.tids));
 
         if let Some(parent) = &self.parent {
@@ -234,11 +229,11 @@ mod tests {
 
     #[test]
     fn test_new_journey() {
-        let journey = Journey::new(100);
+        let journey = Journey::new(TrackId(100));
 
         assert!(!journey.jid.is_empty());
         assert!(!journey.pid.is_empty());
-        assert_eq!(journey.tids, vec![100]);
+        assert_eq!(journey.tids, vec![TrackId(100)]);
         assert!(journey.parent.is_none());
         assert_eq!(journey.outcome, JourneyOutcome::InProgress);
         assert!(!journey.authorized);
@@ -250,21 +245,21 @@ mod tests {
 
     #[test]
     fn test_journey_with_parent() {
-        let journey = Journey::new_with_parent(200, "parent-jid-123", "pid-456");
+        let journey = Journey::new_with_parent(TrackId(200), "parent-jid-123", "pid-456");
 
-        assert_eq!(journey.tids, vec![200]);
+        assert_eq!(journey.tids, vec![TrackId(200)]);
         assert_eq!(journey.parent, Some("parent-jid-123".to_string()));
         assert_eq!(journey.pid, "pid-456");
     }
 
     #[test]
     fn test_add_track_id() {
-        let mut journey = Journey::new(100);
-        journey.add_track_id(200);
-        journey.add_track_id(300);
+        let mut journey = Journey::new(TrackId(100));
+        journey.add_track_id(TrackId(200));
+        journey.add_track_id(TrackId(300));
 
-        assert_eq!(journey.tids, vec![100, 200, 300]);
-        assert_eq!(journey.current_track_id(), 300);
+        assert_eq!(journey.tids, vec![TrackId(100), TrackId(200), TrackId(300)]);
+        assert_eq!(journey.current_track_id(), TrackId(300));
     }
 
     #[test]
@@ -281,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_journey_to_json() {
-        let mut journey = Journey::new(100);
+        let mut journey = Journey::new(TrackId(100));
         journey.authorized = true;
         journey.total_dwell_ms = 7500;
         journey.acc_matched = true;

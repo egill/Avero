@@ -122,7 +122,7 @@ pub struct EventAttributes {
 #[allow(dead_code)]
 pub struct ParsedEvent {
     pub event_type: EventType,
-    pub track_id: i64,
+    pub track_id: TrackId,
     pub geometry_id: Option<i32>,
     pub direction: Option<String>,
     pub event_time: u64,

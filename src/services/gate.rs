@@ -1,5 +1,6 @@
 //! Gate control via HTTP or TCP (CloudPlus) commands
 
+use crate::domain::types::TrackId;
 use crate::infra::config::{Config, GateMode};
 use crate::io::cloudplus::{CloudPlusClient, CloudPlusConfig};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -9,14 +10,14 @@ use tracing::{error, info};
 
 /// Log TCP client not initialized error (cold path)
 #[cold]
-fn log_tcp_client_not_initialized(track_id: i64) {
+fn log_tcp_client_not_initialized(track_id: TrackId) {
     error!(track_id = %track_id, "gate_tcp_client_not_initialized");
 }
 
 /// Log TCP command error (cold path)
 #[cold]
 fn log_tcp_command_error(
-    track_id: i64,
+    track_id: TrackId,
     latency_us: u64,
     e: &(dyn std::error::Error + Send + Sync),
 ) {
@@ -31,13 +32,13 @@ fn log_tcp_command_error(
 
 /// Log HTTP client not initialized error (cold path)
 #[cold]
-fn log_http_client_not_initialized(track_id: i64) {
+fn log_http_client_not_initialized(track_id: TrackId) {
     error!(track_id = %track_id, "gate_http_client_not_initialized");
 }
 
 /// Log HTTP command error (cold path)
 #[cold]
-fn log_http_command_error(track_id: i64, latency_us: u64, e: &reqwest::Error) {
+fn log_http_command_error(track_id: TrackId, latency_us: u64, e: &reqwest::Error) {
     error!(
         track_id = %track_id,
         latency_us = %latency_us,
@@ -119,7 +120,7 @@ impl GateController {
 
     /// Send gate open command
     /// Returns latency in microseconds
-    pub async fn send_open_command(&self, track_id: i64) -> u64 {
+    pub async fn send_open_command(&self, track_id: TrackId) -> u64 {
         let start = Instant::now();
 
         #[cfg(test)]
@@ -140,7 +141,7 @@ impl GateController {
         }
     }
 
-    async fn send_open_tcp(&self, track_id: i64, start: Instant) -> u64 {
+    async fn send_open_tcp(&self, track_id: TrackId, start: Instant) -> u64 {
         let Some(ref client) = self.tcp_client else {
             log_tcp_client_not_initialized(track_id);
             return start.elapsed().as_micros() as u64;
@@ -166,7 +167,7 @@ impl GateController {
         }
     }
 
-    async fn send_open_http(&self, track_id: i64, start: Instant) -> u64 {
+    async fn send_open_http(&self, track_id: TrackId, start: Instant) -> u64 {
         let Some(ref client) = self.http_client else {
             log_http_client_not_initialized(track_id);
             return start.elapsed().as_micros() as u64;
@@ -209,6 +210,7 @@ impl GateController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::types::TrackId;
     use crate::infra::config::Config;
 
     #[test]
@@ -235,7 +237,7 @@ mod tests {
         let config = Config::default();
         let gate = GateController::new(config);
 
-        let latency_us = gate.send_open_command(100).await;
+        let latency_us = gate.send_open_command(TrackId(100)).await;
         // Mock should return very fast
         assert!(latency_us < 10_000); // Less than 10ms
     }
@@ -246,7 +248,7 @@ mod tests {
         let gate = GateController::new(config);
 
         for track_id in 1..=5 {
-            let latency_us = gate.send_open_command(track_id).await;
+            let latency_us = gate.send_open_command(TrackId(track_id)).await;
             assert!(latency_us < 10_000);
         }
     }

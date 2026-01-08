@@ -20,7 +20,7 @@ const GROUP_WINDOW_MS: u64 = 10000;
 /// A member of a POS group
 #[derive(Debug, Clone)]
 struct GroupMember {
-    track_id: i64,
+    track_id: TrackId,
     entered_at: Instant,
 }
 
@@ -33,7 +33,7 @@ struct PosGroup {
 }
 
 impl PosGroup {
-    fn new(track_id: i64, min_dwell_for_acc: u64) -> Self {
+    fn new(track_id: TrackId, min_dwell_for_acc: u64) -> Self {
         let now = Instant::now();
         Self {
             members: vec![GroupMember { track_id, entered_at: now }],
@@ -42,13 +42,13 @@ impl PosGroup {
         }
     }
 
-    fn add_member(&mut self, track_id: i64) {
+    fn add_member(&mut self, track_id: TrackId) {
         let now = Instant::now();
         self.members.push(GroupMember { track_id, entered_at: now });
         self.last_entry = now;
     }
 
-    fn remove_member(&mut self, track_id: i64) {
+    fn remove_member(&mut self, track_id: TrackId) {
         self.members.retain(|m| m.track_id != track_id);
     }
 
@@ -67,8 +67,8 @@ impl PosGroup {
     /// - Still in zone: session_dwell counts while accumulated hasn't updated yet
     fn members_with_sufficient_dwell(
         &self,
-        accumulated_dwells: Option<&HashMap<i64, u64>>,
-    ) -> Vec<i64> {
+        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
+    ) -> Vec<TrackId> {
         self.members
             .iter()
             .filter(|m| {
@@ -87,7 +87,7 @@ impl PosGroup {
     }
 
     /// Get all track_ids in the group
-    fn all_members(&self) -> Vec<i64> {
+    fn all_members(&self) -> Vec<TrackId> {
         self.members.iter().map(|m| m.track_id).collect()
     }
 }
@@ -95,8 +95,8 @@ impl PosGroup {
 /// Tracks recent zone exits for matching
 #[derive(Debug, Clone)]
 struct RecentExit {
-    track_id: i64,
-    group_members: Vec<i64>, // Other members who were in the same group
+    track_id: TrackId,
+    group_members: Vec<TrackId>, // Other members who were in the same group
     exited_at: Instant,
     dwell_ms: u64,
 }
@@ -127,9 +127,9 @@ impl AccCollector {
     ///
     /// IMPORTANT: We never replace an existing group that has members.
     /// This prevents losing track of people who are still at the POS zone.
-    pub fn record_pos_entry(&mut self, track_id: i64, pos_zone: &str) {
+    pub fn record_pos_entry(&mut self, track_id: TrackId, pos_zone: &str) {
         // Debug: log current state of all POS groups
-        let all_groups: Vec<(&String, Vec<i64>)> =
+        let all_groups: Vec<(&String, Vec<TrackId>)> =
             self.pos_groups.iter().map(|(k, g)| (k, g.all_members())).collect();
         debug!(
             track_id = %track_id,
@@ -159,7 +159,7 @@ impl AccCollector {
     }
 
     /// Record that a track exited a POS zone
-    pub fn record_pos_exit(&mut self, track_id: i64, pos_zone: &str, dwell_ms: u64) {
+    pub fn record_pos_exit(&mut self, track_id: TrackId, pos_zone: &str, dwell_ms: u64) {
         // Get group members before removing this track
         let group_members =
             self.pos_groups.get(pos_zone).map(|g| g.all_members()).unwrap_or_default();
@@ -173,7 +173,7 @@ impl AccCollector {
                 debug!(track_id = %track_id, pos = %pos_zone, "acc_pos_group_removed_empty");
                 self.pos_groups.remove(pos_zone);
             } else {
-                let remaining: Vec<i64> = group.all_members();
+                let remaining: Vec<TrackId> = group.all_members();
                 debug!(track_id = %track_id, pos = %pos_zone, remaining = ?remaining, "acc_pos_exit_group_remains");
             }
         } else {
@@ -200,8 +200,8 @@ impl AccCollector {
         &mut self,
         ip: &str,
         journey_manager: &mut JourneyManager,
-        accumulated_dwells: Option<&HashMap<i64, u64>>,
-    ) -> Vec<i64> {
+        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
+    ) -> Vec<TrackId> {
         let Some(pos) = self.ip_to_pos.get(ip).cloned() else {
             return vec![];
         };
@@ -216,8 +216,8 @@ impl AccCollector {
         pos: &str,
         kiosk_id: Option<&str>,
         journey_manager: &mut JourneyManager,
-        accumulated_dwells: Option<&HashMap<i64, u64>>,
-    ) -> Vec<i64> {
+        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
+    ) -> Vec<TrackId> {
         let ts = epoch_ms();
         let kiosk_str = kiosk_id.unwrap_or(pos);
 
@@ -227,7 +227,7 @@ impl AccCollector {
         if let Some(group) = self.pos_groups.get(pos) {
             let all_members = group.all_members();
             // Show both session dwell and accumulated dwell for debugging
-            let member_dwells: Vec<(i64, u64, Option<u64>)> = group
+            let member_dwells: Vec<(TrackId, u64, Option<u64>)> = group
                 .members
                 .iter()
                 .map(|m| {
@@ -266,11 +266,11 @@ impl AccCollector {
 
                 // Update journeys for all group members
                 for &track_id in &all_members {
-                    if let Some(journey) = journey_manager.get_mut_any(TrackId(track_id)) {
+                    if let Some(journey) = journey_manager.get_mut_any(track_id) {
                         journey.acc_matched = true;
                     }
                     journey_manager.add_event(
-                        TrackId(track_id),
+                        track_id,
                         JourneyEvent::new("acc", ts)
                             .with_zone(pos)
                             .with_extra(&format!("kiosk={kiosk_str},group={}", all_members.len())),
@@ -320,7 +320,7 @@ impl AccCollector {
 
                     // Update journeys for all group members
                     for &tid in &all_members {
-                        if let Some(journey) = journey_manager.get_mut_any(TrackId(tid)) {
+                        if let Some(journey) = journey_manager.get_mut_any(tid) {
                             journey.acc_matched = true;
                         }
                         journey_manager.add_event(
@@ -387,7 +387,7 @@ mod tests {
         jm.new_journey(TrackId(100));
 
         // Record entry to POS with sufficient dwell
-        collector.record_pos_entry(100, "POS_1");
+        collector.record_pos_entry(TrackId(100), "POS_1");
         std::thread::sleep(std::time::Duration::from_millis(10));
 
         // Override dwell check for test - access the group's member
@@ -400,7 +400,7 @@ mod tests {
         // Process ACC
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
-        assert_eq!(result, vec![100]);
+        assert_eq!(result, vec![TrackId(100)]);
         let journey = jm.get(TrackId(100)).unwrap();
         assert!(journey.acc_matched);
     }
@@ -413,12 +413,12 @@ mod tests {
         jm.new_journey(TrackId(100));
 
         // Record exit with sufficient dwell
-        collector.record_pos_exit(100, "POS_1", 8000);
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
 
         // Process ACC within time window
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
-        assert!(result.contains(&100));
+        assert!(result.contains(&TrackId(100)));
     }
 
     #[test]
@@ -427,7 +427,7 @@ mod tests {
         let mut jm = JourneyManager::new();
 
         jm.new_journey(TrackId(100));
-        collector.record_pos_entry(100, "POS_1");
+        collector.record_pos_entry(TrackId(100), "POS_1");
 
         // Process ACC immediately (insufficient dwell)
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
@@ -469,8 +469,8 @@ mod tests {
         jm.new_journey(TrackId(200));
 
         // Two people enter same POS (forming a group)
-        collector.record_pos_entry(100, "POS_1");
-        collector.record_pos_entry(200, "POS_1"); // joins group
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1"); // joins group
 
         // Override dwell for first member to qualify
         if let Some(group) = collector.pos_groups.get_mut("POS_1") {
@@ -483,8 +483,8 @@ mod tests {
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         assert_eq!(result.len(), 2);
-        assert!(result.contains(&100));
-        assert!(result.contains(&200));
+        assert!(result.contains(&TrackId(100)));
+        assert!(result.contains(&TrackId(200)));
     }
 
     #[test]
@@ -496,19 +496,19 @@ mod tests {
         jm.new_journey(TrackId(200));
 
         // Two people enter same POS (forming a group)
-        collector.record_pos_entry(100, "POS_1");
-        collector.record_pos_entry(200, "POS_1");
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
 
         // Both exit
-        collector.record_pos_exit(100, "POS_1", 8000); // sufficient dwell
-        collector.record_pos_exit(200, "POS_1", 5000); // insufficient dwell alone
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000); // sufficient dwell
+        collector.record_pos_exit(TrackId(200), "POS_1", 5000); // insufficient dwell alone
 
         // Process ACC - should match both since they were in a group
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         // The newest exit (200) is matched, along with group members
-        assert!(result.contains(&200));
-        assert!(result.contains(&100));
+        assert!(result.contains(&TrackId(200)));
+        assert!(result.contains(&TrackId(100)));
     }
 
     #[test]
@@ -517,7 +517,7 @@ mod tests {
         let mut jm = JourneyManager::new();
 
         jm.new_journey(TrackId(100));
-        collector.record_pos_entry(100, "POS_1");
+        collector.record_pos_entry(TrackId(100), "POS_1");
 
         // Without accumulated dwell, should not match (just entered)
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
@@ -525,9 +525,9 @@ mod tests {
 
         // With accumulated dwell >= min_dwell, should match even with recent entry
         let mut accumulated = HashMap::new();
-        accumulated.insert(100, 10000); // 10s accumulated dwell
+        accumulated.insert(TrackId(100), 10000); // 10s accumulated dwell
         let result = collector.process_acc("192.168.1.10", &mut jm, Some(&accumulated));
-        assert_eq!(result, vec![100]);
+        assert_eq!(result, vec![TrackId(100)]);
     }
 
     // ============================================================
@@ -544,7 +544,7 @@ mod tests {
         jm.new_journey(TrackId(200));
 
         // First person enters
-        collector.record_pos_entry(100, "POS_1");
+        collector.record_pos_entry(TrackId(100), "POS_1");
 
         // Simulate 9.999s elapsed (just within GROUP_WINDOW_MS=10000)
         if let Some(group) = collector.pos_groups.get_mut("POS_1") {
@@ -558,7 +558,7 @@ mod tests {
         );
 
         // Second person enters - should join group
-        collector.record_pos_entry(200, "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
 
         let group = collector.pos_groups.get("POS_1").unwrap();
         assert_eq!(group.all_members().len(), 2, "Second person should join group within 9.999s");
@@ -575,7 +575,7 @@ mod tests {
         jm.new_journey(TrackId(200));
 
         // First person enters
-        collector.record_pos_entry(100, "POS_1");
+        collector.record_pos_entry(TrackId(100), "POS_1");
 
         // Simulate 10.001s elapsed (just outside GROUP_WINDOW_MS=10000)
         if let Some(group) = collector.pos_groups.get_mut("POS_1") {
@@ -598,7 +598,7 @@ mod tests {
         jm.new_journey(TrackId(100));
 
         // Record exit with sufficient dwell
-        collector.record_pos_exit(100, "POS_1", 8000);
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
 
         // Simulate 1.499s since exit (just within MAX_TIME_SINCE_EXIT=1500)
         if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
@@ -609,7 +609,7 @@ mod tests {
 
         // Process ACC - should match
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
-        assert!(result.contains(&100), "Exit within 1.499s should match ACC");
+        assert!(result.contains(&TrackId(100)), "Exit within 1.499s should match ACC");
     }
 
     #[test]
@@ -621,7 +621,7 @@ mod tests {
         jm.new_journey(TrackId(100));
 
         // Record exit with sufficient dwell
-        collector.record_pos_exit(100, "POS_1", 8000);
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
 
         // Simulate 1.501s since exit (just outside MAX_TIME_SINCE_EXIT=1500)
         if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
@@ -645,10 +645,10 @@ mod tests {
         jm.new_journey(TrackId(200));
 
         // Track 100 exits with sufficient dwell
-        collector.record_pos_exit(100, "POS_1", 8000);
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
 
         // Track 200 enters (POS now occupied)
-        collector.record_pos_entry(200, "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
 
         // Process ACC - should NOT match recent exit because POS is occupied
         // (and 200 doesn't have sufficient dwell yet)
@@ -670,9 +670,9 @@ mod tests {
         jm.new_journey(TrackId(300));
 
         // Record multiple exits in sequence
-        collector.record_pos_exit(100, "POS_1", 8000);
-        collector.record_pos_exit(200, "POS_1", 8000);
-        collector.record_pos_exit(300, "POS_1", 8000);
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
+        collector.record_pos_exit(TrackId(200), "POS_1", 8000);
+        collector.record_pos_exit(TrackId(300), "POS_1", 8000);
 
         // Make all exits within time window but with different ages
         if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
@@ -686,7 +686,7 @@ mod tests {
 
         // Process ACC - should match newest exit (300)
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
-        assert!(result.contains(&300), "Should match newest exit (track 300)");
+        assert!(result.contains(&TrackId(300)), "Should match newest exit (track 300)");
     }
 
     #[test]
@@ -700,9 +700,9 @@ mod tests {
         jm.new_journey(TrackId(300));
 
         // Three people enter same POS (forming a group)
-        collector.record_pos_entry(100, "POS_1");
-        collector.record_pos_entry(200, "POS_1");
-        collector.record_pos_entry(300, "POS_1");
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+        collector.record_pos_entry(TrackId(300), "POS_1");
 
         // Only first member has sufficient dwell
         if let Some(group) = collector.pos_groups.get_mut("POS_1") {
@@ -715,9 +715,9 @@ mod tests {
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         assert_eq!(result.len(), 3, "All 3 group members should be matched");
-        assert!(result.contains(&100));
-        assert!(result.contains(&200));
-        assert!(result.contains(&300));
+        assert!(result.contains(&TrackId(100)));
+        assert!(result.contains(&TrackId(200)));
+        assert!(result.contains(&TrackId(300)));
 
         // Verify all journeys have acc_matched=true
         assert!(jm.get(TrackId(100)).unwrap().acc_matched, "Track 100 should have acc_matched");
@@ -730,7 +730,7 @@ mod tests {
         // Test exactly at GROUP_WINDOW_MS=10000ms boundary
         let mut collector = create_test_collector();
 
-        collector.record_pos_entry(100, "POS_1");
+        collector.record_pos_entry(TrackId(100), "POS_1");
 
         // Exactly at 10000ms - the condition is <= so this should pass
         if let Some(group) = collector.pos_groups.get_mut("POS_1") {
@@ -750,7 +750,7 @@ mod tests {
         let mut jm = JourneyManager::new();
 
         jm.new_journey(TrackId(100));
-        collector.record_pos_exit(100, "POS_1", 8000);
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
 
         // Exactly at 1500ms - the condition is <= so this should pass
         if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
@@ -760,6 +760,6 @@ mod tests {
         }
 
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
-        assert!(result.contains(&100), "Exactly 1500ms should match (uses <=)");
+        assert!(result.contains(&TrackId(100)), "Exactly 1500ms should match (uses <=)");
     }
 }

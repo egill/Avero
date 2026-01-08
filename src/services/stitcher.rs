@@ -4,7 +4,7 @@
 //! - Extended grace time for POS zones (people linger at checkout)
 //! - POS zone memory: matching preference for tracks lost in same zone
 
-use crate::domain::types::Person;
+use crate::domain::types::{Person, TrackId};
 use crate::infra::metrics::Metrics;
 use std::sync::Arc;
 use std::time::Instant;
@@ -37,7 +37,7 @@ struct PendingTrack {
 /// Debug info about a pending track (for ACC debugging)
 #[derive(Debug, Clone)]
 pub struct PendingTrackInfo {
-    pub track_id: i64,
+    pub track_id: TrackId,
     pub last_zone: Option<String>,
     pub dwell_ms: u64,
     pub authorized: bool,
@@ -229,7 +229,7 @@ impl Stitcher {
         self.pending
             .iter()
             .map(|p| PendingTrackInfo {
-                track_id: p.person.track_id.0,
+                track_id: p.person.track_id,
                 last_zone: p.last_zone.clone(),
                 dwell_ms: p.person.accumulated_dwell_ms,
                 authorized: p.person.authorized,
@@ -378,7 +378,7 @@ mod tests {
 
         let info = stitcher.get_pending_info();
         assert_eq!(info.len(), 1);
-        assert_eq!(info[0].track_id, 100);
+        assert_eq!(info[0].track_id, TrackId(100));
         assert_eq!(info[0].last_zone, Some("POS_1".to_string()));
         assert_eq!(info[0].dwell_ms, 5000);
         assert!(info[0].authorized);

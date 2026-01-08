@@ -29,7 +29,7 @@ impl Tracker {
         let track_id = event.track_id;
 
         // Skip Xovis GROUP tracks - they represent aggregates, not individual people
-        if track_id & XOVIS_GROUP_BIT != 0 {
+        if track_id.0 & XOVIS_GROUP_BIT != 0 {
             debug!(track_id = %track_id, "skipping_group_track");
             return;
         }
@@ -49,7 +49,7 @@ impl Tracker {
 
             // Stitch found! Transfer state from old track to new track
             let old_track_id = person.track_id;
-            person.track_id = TrackId(track_id);
+            person.track_id = track_id;
             person.last_position = event.position;
 
             info!(
@@ -68,7 +68,7 @@ impl Tracker {
                     site: None,
                     ts,
                     t: "stitch".to_string(),
-                    tid: track_id,
+                    tid: track_id.0,
                     prev_tid: Some(old_track_id.0),
                     auth: person.authorized,
                     dwell_ms: person.accumulated_dwell_ms,
@@ -78,14 +78,14 @@ impl Tracker {
                 });
             }
 
-            self.persons.insert(TrackId(track_id), person);
+            self.persons.insert(track_id, person);
 
             // Stitch in journey manager (handles event recording)
-            self.journey_manager.stitch_journey(old_track_id.0, track_id, time_ms, distance_cm);
+            self.journey_manager.stitch_journey(old_track_id, TrackId(track_id), time_ms, distance_cm);
 
-            if let Some(journey) = self.journey_manager.get_any(TrackId(track_id)) {
+            if let Some(journey) = self.journey_manager.get_any(track_id) {
                 if journey.authorized {
-                    if let Some(p) = self.persons.get_mut(&TrackId(track_id)) {
+                    if let Some(p) = self.persons.get_mut(&track_id) {
                         p.authorized = true;
                     }
                 }
@@ -96,20 +96,20 @@ impl Tracker {
             let reentry_match = self.reentry_detector.try_match(height);
 
             debug!(track_id = %track_id, reentry = %reentry_match.is_some(), "track_created");
-            let mut person = Person::new(TrackId(track_id));
+            let mut person = Person::new(track_id);
             person.last_position = event.position;
-            self.persons.insert(TrackId(track_id), person);
+            self.persons.insert(track_id, person);
 
             // Create journey in journey manager (with parent if re-entry)
             if let Some(reentry) = reentry_match {
                 // Re-entry detected - create journey with parent reference
                 self.journey_manager.new_journey_with_parent(
-                    TrackId(track_id),
+                    track_id,
                     &reentry.parent_jid,
                     &reentry.parent_pid,
                 );
                 self.journey_manager.add_event(
-                    TrackId(track_id),
+                    track_id,
                     JourneyEvent::new("track_create", ts)
                         .with_extra(&format!("reentry_from={}", reentry.parent_jid)),
                 );
@@ -120,7 +120,7 @@ impl Tracker {
                         site: None,
                         ts,
                         t: "reentry".to_string(),
-                        tid: track_id,
+                        tid: track_id.0,
                         prev_tid: None,
                         auth: false,
                         dwell_ms: 0,
@@ -139,7 +139,7 @@ impl Tracker {
                         site: None,
                         ts,
                         t: "create".to_string(),
-                        tid: track_id,
+                        tid: track_id.0,
                         prev_tid: None,
                         auth: false,
                         dwell_ms: 0,
@@ -160,13 +160,13 @@ impl Tracker {
         let track_id = event.track_id;
 
         // Skip Xovis GROUP tracks
-        if track_id & XOVIS_GROUP_BIT != 0 {
+        if track_id.0 & XOVIS_GROUP_BIT != 0 {
             return;
         }
 
         let ts = epoch_ms();
 
-        if let Some(mut person) = self.persons.remove(&TrackId(track_id)) {
+        if let Some(mut person) = self.persons.remove(&track_id) {
             // Update last position from event if available
             if event.position.is_some() {
                 person.last_position = event.position;
@@ -188,7 +188,7 @@ impl Tracker {
                     site: None,
                     ts,
                     t: "pending".to_string(),
-                    tid: track_id,
+                    tid: track_id.0,
                     prev_tid: None,
                     auth: person.authorized,
                     dwell_ms: person.accumulated_dwell_ms,
@@ -199,7 +199,7 @@ impl Tracker {
             }
 
             // Update journey manager state before going to pending
-            if let Some(journey) = self.journey_manager.get_mut(TrackId(track_id)) {
+            if let Some(journey) = self.journey_manager.get_mut(track_id) {
                 journey.authorized = person.authorized;
                 journey.total_dwell_ms = person.accumulated_dwell_ms;
             }
@@ -232,7 +232,7 @@ impl Tracker {
         let track_id = event.track_id;
 
         // Skip Xovis GROUP tracks
-        if track_id & XOVIS_GROUP_BIT != 0 {
+        if track_id.0 & XOVIS_GROUP_BIT != 0 {
             return;
         }
 
@@ -248,16 +248,14 @@ impl Tracker {
         );
 
         // Get or create person
-        let person = self
-            .persons
-            .entry(track_id)
-            .or_insert_with(|| Person::new(track_id));
+        let person =
+            self.persons.entry(TrackId(track_id)).or_insert_with(|| Person::new(TrackId(track_id)));
         person.current_zone = Some(geometry_id);
         let journey_authorized =
-            self.journey_manager.get_any(TrackId(track_id)).map(|j| j.authorized).unwrap_or(false);
+            self.journey_manager.get_any(track_id).map(|j| j.authorized).unwrap_or(false);
         let authorized = person.authorized || journey_authorized;
         let gate_already_opened =
-            self.journey_manager.get_any(TrackId(track_id)).and_then(|j| j.gate_cmd_at).is_some();
+            self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
 
         // Add to journey manager
         self.journey_manager
@@ -267,7 +265,7 @@ impl Tracker {
         if let Some(ref sender) = self.egress_sender {
             sender.send_zone_event(ZoneEventPayload {
                 site: None,
-                tid: track_id,
+                tid: track_id.0,
                 t: "zone_entry".to_string(),
                 z: Some(zone.clone()),
                 ts,
@@ -300,7 +298,7 @@ impl Tracker {
                         site: None,
                         ts,
                         state: "blocked".to_string(),
-                        tid: Some(track_id),
+                        tid: Some(track_id.0),
                         src: "tracker".to_string(),
                     });
                 }
@@ -315,7 +313,7 @@ impl Tracker {
         let track_id = event.track_id;
 
         // Skip Xovis GROUP tracks
-        if track_id & XOVIS_GROUP_BIT != 0 {
+        if track_id.0 & XOVIS_GROUP_BIT != 0 {
             return;
         }
 
@@ -330,7 +328,7 @@ impl Tracker {
             "zone_exit"
         );
 
-        let Some(person) = self.persons.get_mut(&TrackId(track_id)) else {
+        let Some(person) = self.persons.get_mut(&track_id) else {
             return;
         };
 
@@ -348,12 +346,12 @@ impl Tracker {
 
                 // Update journey manager
                 self.journey_manager.add_event(
-                    TrackId(track_id),
+                    track_id,
                     JourneyEvent::new("zone_exit", ts)
                         .with_zone(&zone)
                         .with_extra(&format!("dwell={dwell_ms}")),
                 );
-                if let Some(journey) = self.journey_manager.get_mut(TrackId(track_id)) {
+                if let Some(journey) = self.journey_manager.get_mut(track_id) {
                     journey.total_dwell_ms = person.accumulated_dwell_ms;
                 }
 
@@ -372,7 +370,7 @@ impl Tracker {
             }
         } else {
             self.journey_manager
-                .add_event(TrackId(track_id), JourneyEvent::new("zone_exit", ts).with_zone(&zone));
+                .add_event(track_id, JourneyEvent::new("zone_exit", ts).with_zone(&zone));
             None
         };
 
@@ -380,7 +378,7 @@ impl Tracker {
         if let Some(ref sender) = self.egress_sender {
             sender.send_zone_event(ZoneEventPayload {
                 site: None,
-                tid: track_id,
+                tid: track_id.0,
                 t: "zone_exit".to_string(),
                 z: Some(zone.clone()),
                 ts,
@@ -402,7 +400,7 @@ impl Tracker {
         let track_id = event.track_id;
 
         // Skip Xovis GROUP tracks
-        if track_id & XOVIS_GROUP_BIT != 0 {
+        if track_id.0 & XOVIS_GROUP_BIT != 0 {
             return;
         }
 
@@ -431,18 +429,18 @@ impl Tracker {
 
         // Add line cross event to journey manager
         self.journey_manager.add_event(
-            TrackId(track_id),
+            track_id,
             JourneyEvent::new(event_type, ts).with_extra(&format!("dir={direction}")),
         );
 
         // Mark crossed_entry if this is the entry line
         if self.config.entry_line() == Some(geometry_id) && direction == "forward" {
-            if let Some(journey) = self.journey_manager.get_mut(TrackId(track_id)) {
+            if let Some(journey) = self.journey_manager.get_mut(track_id) {
                 journey.crossed_entry = true;
             }
         }
 
-        let Some(person) = self.persons.remove(&TrackId(track_id)) else {
+        let Some(person) = self.persons.remove(&track_id) else {
             return;
         };
 
@@ -451,7 +449,7 @@ impl Tracker {
             // Get journey info for logging
             let (gate_cmd_at, event_count, started_at) = self
                 .journey_manager
-                .get(TrackId(track_id))
+                .get(track_id)
                 .map(|j| (j.gate_cmd_at, j.events.len(), j.started_at))
                 .unwrap_or((None, 0, 0));
             let duration_ms = if started_at > 0 { epoch_ms().saturating_sub(started_at) } else { 0 };
@@ -467,7 +465,7 @@ impl Tracker {
             );
 
             // Sync final state to journey manager and complete
-            if let Some(journey) = self.journey_manager.get_mut(TrackId(track_id)) {
+            if let Some(journey) = self.journey_manager.get_mut(track_id) {
                 journey.authorized = person.authorized;
                 journey.total_dwell_ms = person.accumulated_dwell_ms;
 
@@ -482,7 +480,7 @@ impl Tracker {
             self.journey_manager.end_journey(track_id, JourneyOutcome::Completed);
         } else {
             // Put person back - not complete yet
-            self.persons.insert(TrackId(track_id), person);
+            self.persons.insert(track_id, person);
         }
     }
 
@@ -513,7 +511,7 @@ impl Tracker {
                 site: None,
                 ts: epoch_ms(),
                 state: state.to_string(),
-                tid: self.door_correlator.last_gate_cmd_track_id(),
+                tid: self.door_correlator.last_gate_cmd_track_id().map(|t| t.0),
                 src: "rs485".to_string(),
             });
         }
@@ -536,8 +534,8 @@ impl Tracker {
 
         // Build accumulated dwell map from persons for ACC matching
         // This ensures ACC uses total journey dwell, not just current POS session dwell
-        let accumulated_dwells: std::collections::HashMap<i64, u64> =
-            self.persons.iter().map(|(tid, p)| (tid.0, p.accumulated_dwell_ms)).collect();
+        let accumulated_dwells: std::collections::HashMap<TrackId, u64> =
+            self.persons.iter().map(|(tid, p)| (*tid, p.accumulated_dwell_ms)).collect();
 
         // Try to match ACC to journeys using IP → POS lookup
         // Returns all group members if any member qualifies (sufficient dwell)
@@ -552,10 +550,10 @@ impl Tracker {
 
         // Authorize all matched group members
         for &track_id in &matched_tracks {
-            if let Some(person) = self.persons.get_mut(&TrackId(track_id)) {
+            if let Some(person) = self.persons.get_mut(&track_id) {
                 person.authorized = true;
             }
-            if let Some(journey) = self.journey_manager.get_mut_any(TrackId(track_id)) {
+            if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
                 journey.authorized = true;
             } else {
                 self.metrics.record_acc_no_journey();
@@ -572,7 +570,7 @@ impl Tracker {
                         t: "matched_no_journey".to_string(),
                         ip: ip.to_string(),
                         pos: pos.clone(),
-                        tid: Some(track_id),
+                        tid: Some(track_id.0),
                         dwell_ms: None,
                         gate_zone: None,
                         gate_entry_ts: None,
@@ -588,7 +586,7 @@ impl Tracker {
         let gate_zone = self.config.gate_zone();
         let gate_zone_name = self.config.zone_name(gate_zone);
         for &track_id in &matched_tracks {
-            if let Some(journey) = self.journey_manager.get_any(TrackId(track_id)) {
+            if let Some(journey) = self.journey_manager.get_any(track_id) {
                 let gate_entry_ts = journey
                     .events
                     .iter()
@@ -619,10 +617,10 @@ impl Tracker {
                                 t: "late_after_gate".to_string(),
                                 ip: ip.to_string(),
                                 pos: pos.clone(),
-                                tid: Some(track_id),
+                                tid: Some(track_id.0),
                                 dwell_ms: self
                                     .persons
-                                    .get(&TrackId(track_id))
+                                    .get(&track_id)
                                     .map(|p| p.accumulated_dwell_ms),
                                 gate_zone: Some(gate_zone_name.clone()),
                                 gate_entry_ts: Some(entry_ts),
@@ -638,11 +636,11 @@ impl Tracker {
 
             let in_gate_zone = self
                 .persons
-                .get(&TrackId(track_id))
+                .get(&track_id)
                 .and_then(|p| p.current_zone)
                 .is_some_and(|z| z == gate_zone);
             let gate_already_opened =
-                self.journey_manager.get_any(TrackId(track_id)).and_then(|j| j.gate_cmd_at).is_some();
+                self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
             if in_gate_zone && !gate_already_opened {
                 self.send_gate_open_command(track_id, ts, "acc", received_at)
                     .await;
@@ -664,17 +662,15 @@ impl Tracker {
             if !matched_tracks.is_empty() {
                 // Matched - send event for primary track (first in group)
                 let primary_track = matched_tracks[0];
-                let dwell_ms = self
-                    .persons
-                    .get(&primary_track)
-                    .map(|p| p.accumulated_dwell_ms);
+                let dwell_ms =
+                    self.persons.get(&TrackId(primary_track)).map(|p| p.accumulated_dwell_ms);
                 sender.send_acc_event(AccEventPayload {
                     site: None,
                     ts,
                     t: "matched".to_string(),
                     ip: ip.to_string(),
                     pos: pos.clone(),
-                    tid: Some(primary_track),
+                    tid: Some(primary_track.0),
                     dwell_ms,
                     gate_zone: None,
                     gate_entry_ts: None,
@@ -701,7 +697,7 @@ impl Tracker {
                     .get_pending_info()
                     .into_iter()
                     .map(|p| AccDebugPending {
-                        tid: p.track_id,
+                        tid: p.track_id.0,
                         last_zone: p.last_zone,
                         dwell_ms: p.dwell_ms,
                         auth: p.authorized,
@@ -747,7 +743,7 @@ impl Tracker {
     /// This allows us to measure the full E2E latency from event reception to gate command.
     async fn send_gate_open_command(
         &mut self,
-        track_id: i64,
+        track_id: TrackId,
         ts: u64,
         src: &str,
         received_at: Instant,
@@ -759,11 +755,11 @@ impl Tracker {
         let e2e_latency_us = received_at.elapsed().as_micros() as u64;
         self.metrics.record_gate_latency(e2e_latency_us);
 
-        if let Some(journey) = self.journey_manager.get_mut_any(TrackId(track_id)) {
+        if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
             journey.gate_cmd_at = Some(ts);
         }
         self.journey_manager.add_event(
-            TrackId(track_id),
+            track_id,
             JourneyEvent::new("gate_cmd", ts)
                 .with_extra(&format!("cmd_us={cmd_latency_us},e2e_us={e2e_latency_us}")),
         );
@@ -773,7 +769,7 @@ impl Tracker {
                 site: None,
                 ts,
                 state: "cmd_sent".to_string(),
-                tid: Some(track_id),
+                tid: Some(track_id.0),
                 src: src.to_string(),
             });
         }
