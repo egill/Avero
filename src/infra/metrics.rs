@@ -7,6 +7,7 @@
 //! NOTE: All atomics use Relaxed ordering intentionally—these are statistical
 //! counters only. Do NOT use these atomics for coordination or logic decisions.
 
+use rustc_hash::FxHashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tracing::info;
@@ -130,6 +131,8 @@ pub struct Metrics {
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
     /// Zone IDs for POS zones (set once at init)
     pos_zone_ids: parking_lot::Mutex<Vec<i32>>,
+    /// Pre-computed zone ID to index mapping (for O(1) lookup without mutex)
+    zone_id_to_index: parking_lot::RwLock<FxHashMap<i32, usize>>,
     /// Last report time (only accessed from reporter, not atomic)
     last_report_time: parking_lot::Mutex<Instant>,
 }
@@ -161,21 +164,32 @@ impl Metrics {
             acc_no_journey_total: AtomicU64::new(0),
             pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
             pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
+            zone_id_to_index: parking_lot::RwLock::new(FxHashMap::default()),
             last_report_time: parking_lot::Mutex::new(Instant::now()),
         }
     }
 
     /// Set the POS zone IDs (call once at initialization)
     pub fn set_pos_zones(&self, zone_ids: &[i32]) {
+        // Update the zone list (for reporting)
         let mut zones = self.pos_zone_ids.lock();
         zones.clear();
         zones.extend(zone_ids.iter().take(MAX_POS_ZONES));
+
+        // Pre-compute the zone ID to index mapping for O(1) lookup
+        let mut index_map = self.zone_id_to_index.write();
+        index_map.clear();
+        for (idx, &zone_id) in zone_ids.iter().take(MAX_POS_ZONES).enumerate() {
+            index_map.insert(zone_id, idx);
+        }
     }
 
     /// Get the index for a zone ID, or None if not a POS zone
+    /// Uses pre-computed O(1) lookup via FxHashMap (no mutex on hot path)
+    #[inline]
     fn zone_index(&self, zone_id: i32) -> Option<usize> {
-        let zones = self.pos_zone_ids.lock();
-        zones.iter().position(|&id| id == zone_id)
+        let index_map = self.zone_id_to_index.read();
+        index_map.get(&zone_id).copied()
     }
 
     /// Record a person entering a POS zone
