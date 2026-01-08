@@ -1,7 +1,7 @@
 //! Journey manager for tracking and persisting customer journeys
 
 use crate::domain::journey::{epoch_ms, Journey, JourneyEvent, JourneyOutcome};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
@@ -17,19 +17,19 @@ struct PendingEgress {
 /// Manages active journeys and handles stitching/egress
 pub struct JourneyManager {
     /// Active journeys by current track_id
-    active: HashMap<i64, Journey>,
+    active: FxHashMap<i64, Journey>,
     /// Journeys waiting for egress (10s delay)
     pending_egress: Vec<PendingEgress>,
     /// Mapping of track_id to person_id for stitch lookups
-    pid_by_track: HashMap<i64, String>,
+    pid_by_track: FxHashMap<i64, String>,
 }
 
 impl JourneyManager {
     pub fn new() -> Self {
         Self {
-            active: HashMap::new(),
+            active: FxHashMap::default(),
             pending_egress: Vec::new(),
-            pid_by_track: HashMap::new(),
+            pid_by_track: FxHashMap::default(),
         }
     }
 
@@ -77,7 +77,7 @@ impl JourneyManager {
 
         let journey = if let Some(idx) = pending_idx {
             // Remove from pending egress
-            let pending = self.pending_egress.remove(idx);
+            let pending = self.pending_egress.swap_remove(idx);
             Some(pending.journey)
         } else {
             // Try active journeys
@@ -168,7 +168,7 @@ impl JourneyManager {
     /// End a journey and move to pending egress
     pub fn end_journey(&mut self, track_id: i64, outcome: JourneyOutcome) {
         if let Some(mut journey) = self.active.remove(&track_id) {
-            journey.complete(outcome.clone());
+            journey.complete(outcome);
 
             info!(
                 track_id = %track_id,
@@ -238,6 +238,7 @@ impl JourneyManager {
     }
 
     /// Check if a track has an active journey
+    #[allow(dead_code)]
     pub fn has_journey(&self, track_id: i64) -> bool {
         self.active.contains_key(&track_id)
     }

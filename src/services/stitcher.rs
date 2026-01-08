@@ -51,6 +51,7 @@ pub struct Stitcher {
 }
 
 impl Stitcher {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             pending: Vec::new(),
@@ -147,9 +148,9 @@ impl Stitcher {
                 }
                 Some((_, best_dist, best_same)) => {
                     // Prefer same_zone, or if equal same_zone status, prefer closer
-                    if same_zone && !best_same {
-                        best_match = Some((i, distance_cm, same_zone));
-                    } else if same_zone == *best_same && distance_cm < *best_dist {
+                    if (same_zone && !best_same)
+                        || (same_zone == *best_same && distance_cm < *best_dist)
+                    {
                         best_match = Some((i, distance_cm, same_zone));
                     }
                 }
@@ -157,7 +158,7 @@ impl Stitcher {
         }
 
         best_match.map(|(idx, distance_cm, same_zone)| {
-            let pending = self.pending.remove(idx);
+            let pending = self.pending.swap_remove(idx);
             let time_ms = now.duration_since(pending.deleted_at).as_millis() as u64;
             info!(
                 old_track_id = %pending.person.track_id,

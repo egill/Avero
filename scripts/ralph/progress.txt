@@ -18,7 +18,7 @@ Started: 2026-01-07
 
 ### Conventions
 - Metrics use AtomicU64 for lock-free counters
-- HashMaps keyed by track_id (i64) or geometry_id (i32)
+- FxHashMap for integer-keyed maps (track_id: i64, geometry_id: i32) - faster than std HashMap
 - JourneyEvent uses builder pattern with_type().with_zone()
 - Config via TOML in config/ directory
 
@@ -27,11 +27,14 @@ Started: 2026-01-07
 - tokio (async runtime)
 - tracing (logging)
 - clap (CLI parsing - not yet used)
+- parking_lot (better Mutex - no poisoning)
+- rustc-hash (fast FxHashMap for integer keys)
 
 ### Gotchas
-- Mutex in metrics.rs uses std::sync::Mutex (can poison)
-- Some clippy warnings exist - check with cargo clippy
+- Mutex in metrics.rs now uses parking_lot::Mutex (no poisoning, no .unwrap() needed)
+- cargo clippy -- -D warnings now passes clean
 - Cross-compile target: aarch64-unknown-linux-gnu (RPi5)
+- Unused fields prefixed with underscore to suppress dead_code warnings
 
 ## Key Files
 - Cargo.toml (dependencies, profiles)
@@ -41,4 +44,76 @@ Started: 2026-01-07
 - src/infra/metrics.rs (Metrics struct)
 - src/services/tracker/mod.rs (Tracker - main orchestrator)
 
+---
+
+## 2026-01-07 - US-001 - Add rust-toolchain.toml to pin Rust version
+- Files changed: rust-toolchain.toml (new), CLAUDE.md
+- **Learnings:** rust-toolchain.toml uses [toolchain] section with channel key. 108 tests currently pass. 28 clippy warnings exist (addressed by US-002).
+---
+
+## 2026-01-07 - US-002 - Fix all clippy warnings
+- Files changed: src/bin/gate_test.rs, src/bin/tui.rs, src/domain/mod.rs, src/infra/config.rs, src/infra/metrics.rs, src/io/cloudplus.rs, src/io/mod.rs, src/io/rs485.rs, src/services/acc_collector.rs, src/services/door_correlator.rs, src/services/journey_manager.rs, src/services/mod.rs, src/services/stitcher.rs, src/services/tracker/handlers.rs, src/services/tracker/mod.rs
+- **Learnings:**
+  - Use `std::array::from_fn(|_| AtomicU64::new(0))` instead of const with interior mutability
+  - Prefix unused struct fields with underscore (e.g., `_field: Type`) to suppress dead_code warnings
+  - For serde deserialization of ignored fields, use `#[serde(default, rename = "field_name")]` with underscore-prefixed field
+  - Combine duplicate if branches with `||` operator
+  - `cargo clippy --fix` auto-fixes: useless format!, option_as_ref_deref, bind_instead_of_map, println_empty_string, unused imports
+  - #[allow(dead_code)] is acceptable for public API methods not yet used
+  - #[allow(clippy::too_many_arguments)] acceptable for internal functions when refactoring is impractical
+---
+
+## 2026-01-07 - US-005 - Add rustc-hash and replace integer-keyed HashMaps with FxHashMap
+- Files changed: Cargo.toml, Cargo.lock, src/services/tracker/mod.rs, src/services/journey_manager.rs
+- **Learnings:**
+  - FxHashMap is a drop-in replacement for HashMap with faster performance for integer keys
+  - Use `FxHashMap::default()` instead of `FxHashMap::new()` for initialization
+  - Import with `use rustc_hash::FxHashMap;`
+  - mqtt.rs uses std::collections::HashMap locally for temporary position tracking - no need to change local variables
+---
+
+## 2026-01-07 - US-006 - Replace Vec::remove with swap_remove where order doesn't matter
+- Files changed: src/services/door_correlator.rs, src/services/stitcher.rs, src/services/journey_manager.rs, src/services/acc_collector.rs
+- **Learnings:**
+  - `swap_remove(idx)` is O(1) vs `remove(idx)` which is O(n) - swaps last element into removed position
+  - Safe to use when element order after removal doesn't matter for subsequent operations
+  - Analyze each case: if code searches/filters the Vec on each access (not relying on order), swap_remove is safe
+  - All four locations found by searching `\.remove(idx)` were safe candidates
+---
+
+## 2026-01-07 - US-007 - Add Vec::with_capacity to hot-path allocations
+- Files changed: src/io/mqtt.rs, src/domain/journey.rs
+- **Learnings:**
+  - `Vec::with_capacity(n)` pre-allocates memory, avoiding reallocations during push operations
+  - Use for Vecs where typical size is known: mqtt events ~8, journey events ~16
+  - Both `parse_xovis_message` and `parse_frame` get capacity(8) since typical frame has 0-10 events
+  - `Journey::new()` events get capacity(16) since typical journey has 5-15 events
+---
+
+## 2026-01-07 - US-008 - Add Copy derive to JourneyOutcome enum
+- Files changed: src/domain/journey.rs, src/services/journey_manager.rs
+- **Learnings:**
+  - Fieldless enums (no data in variants) can implement Copy for zero-cost pass-by-value
+  - Adding Copy to a type causes clippy to warn on unnecessary .clone() calls
+  - Clippy `clone_on_copy` lint catches this: `using clone on type which implements Copy`
+  - Found and removed `outcome.clone()` in journey_manager.rs:171
+---
+
+## 2026-01-07 - US-009 - Implement FromStr trait for EventType
+- Files changed: src/domain/types.rs, src/io/mqtt.rs
+- **Learnings:**
+  - Implement `std::str::FromStr` trait instead of inherent `from_str` method for idiomatic Rust
+  - Use `std::convert::Infallible` as error type when parsing can never fail (e.g., returns Unknown variant for unmatched values)
+  - Call sites change from `EventType::from_str(s)` to `s.parse::<EventType>().unwrap()` or `s.parse().unwrap()` with type annotation
+  - With `Infallible` error type, `.unwrap()` is always safe and optimizes away
+---
+
+## 2026-01-07 - US-010 - Add #[cold] attribute to error handling paths
+- Files changed: src/services/gate.rs, src/io/cloudplus.rs
+- **Learnings:**
+  - `#[cold]` attribute tells the compiler a function is unlikely to be called, helping optimize the hot path
+  - Extract error logging into dedicated `#[cold]` functions instead of inline error! macros
+  - Useful for error paths that should rarely execute: connection failures, read/write errors, timeouts
+  - Works best when the function is called from a single location, so the compiler can optimize the branch
+  - Use with `&(dyn std::error::Error + Send + Sync)` for generic error types that implement Display
 ---

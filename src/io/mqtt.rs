@@ -81,7 +81,7 @@ pub async fn start_mqtt_client(
 
 /// Parse a Xovis JSON message and extract events
 pub fn parse_xovis_message(json_str: &str, received_at: Instant) -> Vec<ParsedEvent> {
-    let mut parsed_events = Vec::new();
+    let mut parsed_events = Vec::with_capacity(8);
 
     let message: XovisMessage = match serde_json::from_str(json_str) {
         Ok(m) => m,
@@ -120,7 +120,7 @@ fn timestamp_to_epoch_ms(ts: &TimestampValue) -> u64 {
 }
 
 fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
-    let mut events = Vec::new();
+    let mut events = Vec::with_capacity(8);
 
     // Build position map from tracked_objects
     let mut positions: std::collections::HashMap<i64, [f64; 3]> = std::collections::HashMap::new();
@@ -134,7 +134,7 @@ fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
     let event_time = timestamp_to_epoch_ms(&frame.time);
 
     for xovis_event in &frame.events {
-        let event_type = EventType::from_str(&xovis_event.event_type);
+        let event_type: EventType = xovis_event.event_type.parse().unwrap();
 
         let attrs = xovis_event.attributes.as_ref().unwrap_or(&EventAttributes {
             track_id: None,

@@ -19,6 +19,4 @@ pub mod tracker;
 
 // Re-export commonly used types
 pub use gate::GateController;
-pub use journey_manager::JourneyManager;
-pub use stitcher::Stitcher;
 pub use tracker::Tracker;

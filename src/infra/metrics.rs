@@ -130,23 +130,21 @@ pub struct Metrics {
     /// Index is determined by order in pos_zones config
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
     /// Zone IDs for POS zones (set once at init)
-    pos_zone_ids: std::sync::Mutex<Vec<i32>>,
+    pos_zone_ids: parking_lot::Mutex<Vec<i32>>,
     /// Last report time (only accessed from reporter, not atomic)
-    last_report_time: std::sync::Mutex<Instant>,
+    last_report_time: parking_lot::Mutex<Instant>,
 }
 
 impl Metrics {
     pub fn new() -> Self {
-        // Initialize atomic arrays with const default
-        const ZERO: AtomicU64 = AtomicU64::new(0);
         Self {
             events_total: AtomicU64::new(0),
             events_since_report: AtomicU64::new(0),
             latency_sum_us: AtomicU64::new(0),
             latency_max_us: AtomicU64::new(0),
-            latency_buckets: [ZERO; NUM_BUCKETS],
+            latency_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_commands_sent: AtomicU64::new(0),
-            gate_latency_buckets: [ZERO; NUM_BUCKETS],
+            gate_latency_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_latency_sum_us: AtomicU64::new(0),
             gate_latency_max_us: AtomicU64::new(0),
             gate_commands_since_report: AtomicU64::new(0),
@@ -156,28 +154,28 @@ impl Metrics {
             acc_matched_total: AtomicU64::new(0),
             stitch_matched_total: AtomicU64::new(0),
             stitch_expired_total: AtomicU64::new(0),
-            stitch_distance_buckets: [ZERO; NUM_BUCKETS],
+            stitch_distance_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             stitch_distance_sum: AtomicU64::new(0),
-            stitch_time_buckets: [ZERO; NUM_BUCKETS],
+            stitch_time_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             stitch_time_sum: AtomicU64::new(0),
             acc_late_total: AtomicU64::new(0),
             acc_no_journey_total: AtomicU64::new(0),
-            pos_occupancy: [ZERO; MAX_POS_ZONES],
-            pos_zone_ids: std::sync::Mutex::new(Vec::new()),
-            last_report_time: std::sync::Mutex::new(Instant::now()),
+            pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
+            pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
+            last_report_time: parking_lot::Mutex::new(Instant::now()),
         }
     }
 
     /// Set the POS zone IDs (call once at initialization)
     pub fn set_pos_zones(&self, zone_ids: &[i32]) {
-        let mut zones = self.pos_zone_ids.lock().unwrap();
+        let mut zones = self.pos_zone_ids.lock();
         zones.clear();
         zones.extend(zone_ids.iter().take(MAX_POS_ZONES));
     }
 
     /// Get the index for a zone ID, or None if not a POS zone
     fn zone_index(&self, zone_id: i32) -> Option<usize> {
-        let zones = self.pos_zone_ids.lock().unwrap();
+        let zones = self.pos_zone_ids.lock();
         zones.iter().position(|&id| id == zone_id)
     }
 
@@ -203,7 +201,7 @@ impl Metrics {
 
     /// Get current POS zone occupancy for all zones
     pub fn pos_occupancy(&self) -> Vec<(i32, u64)> {
-        let zones = self.pos_zone_ids.lock().unwrap();
+        let zones = self.pos_zone_ids.lock();
         zones
             .iter()
             .enumerate()
@@ -275,6 +273,7 @@ impl Metrics {
 
     /// Get total events processed
     #[inline]
+    #[allow(dead_code)]
     pub fn events_total(&self) -> u64 {
         self.events_total.load(Ordering::Relaxed)
     }
@@ -287,6 +286,7 @@ impl Metrics {
 
     /// Get current gate state
     #[inline]
+    #[allow(dead_code)]
     pub fn gate_state(&self) -> u64 {
         self.gate_state.load(Ordering::Relaxed)
     }
@@ -299,6 +299,7 @@ impl Metrics {
 
     /// Get total exits
     #[inline]
+    #[allow(dead_code)]
     pub fn exits_total(&self) -> u64 {
         self.exits_total.load(Ordering::Relaxed)
     }
@@ -355,24 +356,28 @@ impl Metrics {
 
     /// Get ACC events total
     #[inline]
+    #[allow(dead_code)]
     pub fn acc_events_total(&self) -> u64 {
         self.acc_events_total.load(Ordering::Relaxed)
     }
 
     /// Get ACC matched total
     #[inline]
+    #[allow(dead_code)]
     pub fn acc_matched_total(&self) -> u64 {
         self.acc_matched_total.load(Ordering::Relaxed)
     }
 
     /// Get stitch matched total
     #[inline]
+    #[allow(dead_code)]
     pub fn stitch_matched_total(&self) -> u64 {
         self.stitch_matched_total.load(Ordering::Relaxed)
     }
 
     /// Get stitch expired total (truly lost)
     #[inline]
+    #[allow(dead_code)]
     pub fn stitch_expired_total(&self) -> u64 {
         self.stitch_expired_total.load(Ordering::Relaxed)
     }
@@ -410,7 +415,7 @@ impl Metrics {
 
         // Calculate elapsed time and reset
         let elapsed = {
-            let mut last = self.last_report_time.lock().unwrap();
+            let mut last = self.last_report_time.lock();
             let elapsed = last.elapsed();
             *last = Instant::now();
             elapsed
@@ -516,10 +521,6 @@ impl Default for Metrics {
         Self::new()
     }
 }
-
-// Metrics is Send + Sync because all fields are atomic or Mutex-wrapped
-unsafe impl Send for Metrics {}
-unsafe impl Sync for Metrics {}
 
 /// Number of histogram buckets (exported for egress)
 pub const METRICS_NUM_BUCKETS: usize = NUM_BUCKETS;

@@ -7,6 +7,42 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info};
 
+/// Log TCP client not initialized error (cold path)
+#[cold]
+fn log_tcp_client_not_initialized(track_id: i64) {
+    error!(track_id = %track_id, "gate_tcp_client_not_initialized");
+}
+
+/// Log TCP command error (cold path)
+#[cold]
+fn log_tcp_command_error(track_id: i64, latency_us: u64, e: &(dyn std::error::Error + Send + Sync)) {
+    error!(
+        track_id = %track_id,
+        latency_us = %latency_us,
+        error = %e,
+        mode = "tcp",
+        "gate_open_command_error"
+    );
+}
+
+/// Log HTTP client not initialized error (cold path)
+#[cold]
+fn log_http_client_not_initialized(track_id: i64) {
+    error!(track_id = %track_id, "gate_http_client_not_initialized");
+}
+
+/// Log HTTP command error (cold path)
+#[cold]
+fn log_http_command_error(track_id: i64, latency_us: u64, e: &reqwest::Error) {
+    error!(
+        track_id = %track_id,
+        latency_us = %latency_us,
+        error = %e,
+        mode = "http",
+        "gate_open_command_error"
+    );
+}
+
 pub struct GateController {
     mode: GateMode,
     // HTTP mode
@@ -108,7 +144,7 @@ impl GateController {
 
     async fn send_open_tcp(&self, track_id: i64, start: Instant) -> u64 {
         let Some(ref client) = self.tcp_client else {
-            error!(track_id = %track_id, "gate_tcp_client_not_initialized");
+            log_tcp_client_not_initialized(track_id);
             return start.elapsed().as_micros() as u64;
         };
 
@@ -126,13 +162,7 @@ impl GateController {
             }
             Err(e) => {
                 let latency_us = start.elapsed().as_micros() as u64;
-                error!(
-                    track_id = %track_id,
-                    latency_us = %latency_us,
-                    error = %e,
-                    mode = "tcp",
-                    "gate_open_command_error"
-                );
+                log_tcp_command_error(track_id, latency_us, e.as_ref());
                 latency_us
             }
         }
@@ -140,7 +170,7 @@ impl GateController {
 
     async fn send_open_http(&self, track_id: i64, start: Instant) -> u64 {
         let Some(ref client) = self.http_client else {
-            error!(track_id = %track_id, "gate_http_client_not_initialized");
+            log_http_client_not_initialized(track_id);
             return start.elapsed().as_micros() as u64;
         };
 
@@ -173,13 +203,7 @@ impl GateController {
             }
             Err(e) => {
                 let latency_us = start.elapsed().as_micros() as u64;
-                error!(
-                    track_id = %track_id,
-                    latency_us = %latency_us,
-                    error = %e,
-                    mode = "http",
-                    "gate_open_command_error"
-                );
+                log_http_command_error(track_id, latency_us, &e);
                 latency_us
             }
         }

@@ -253,7 +253,7 @@ pub struct Config {
     exit_line: i32,
     entry_line: Option<i32>,
     approach_line: Option<i32>,
-    store_zone: Option<i32>,
+    _store_zone: Option<i32>,
     zone_names: HashMap<i32, String>,
     min_dwell_ms: u64,
     metrics_interval_secs: u64,
@@ -297,7 +297,7 @@ impl Default for Config {
             exit_line: 1006,
             entry_line: None,
             approach_line: None,
-            store_zone: None,
+            _store_zone: None,
             zone_names: Self::default_zone_names(),
             min_dwell_ms: 7000,
             metrics_interval_secs: 10,
@@ -393,7 +393,7 @@ impl Config {
             exit_line: toml_config.zones.exit_line,
             entry_line: toml_config.zones.entry_line,
             approach_line: toml_config.zones.approach_line,
-            store_zone: toml_config.zones.store_zone,
+            _store_zone: toml_config.zones.store_zone,
             zone_names,
             min_dwell_ms: toml_config.authorization.min_dwell_ms,
             metrics_interval_secs: toml_config.metrics.interval_secs,
@@ -515,8 +515,9 @@ impl Config {
         self.approach_line
     }
 
+    #[allow(dead_code)]
     pub fn store_zone(&self) -> Option<i32> {
-        self.store_zone
+        self._store_zone
     }
 
     pub fn min_dwell_ms(&self) -> u64 {

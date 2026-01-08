@@ -133,9 +133,11 @@ pub enum EventType {
     Unknown(String),
 }
 
-impl EventType {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for EventType {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "TRACK_CREATE" => EventType::TrackCreate,
             "TRACK_DELETE" => EventType::TrackDelete,
             "ZONE_ENTRY" => EventType::ZoneEntry,
@@ -143,8 +145,11 @@ impl EventType {
             "LINE_CROSS_FORWARD" => EventType::LineCrossForward,
             "LINE_CROSS_BACKWARD" => EventType::LineCrossBackward,
             other => EventType::Unknown(other.to_string()),
-        }
+        })
     }
+}
+
+impl EventType {
 
     #[allow(dead_code)]
     pub fn as_str(&self) -> &str {
@@ -213,8 +218,8 @@ mod tests {
 
     #[test]
     fn test_event_type_from_str() {
-        assert_eq!(EventType::from_str("ZONE_ENTRY"), EventType::ZoneEntry);
-        assert_eq!(EventType::from_str("TRACK_DELETE"), EventType::TrackDelete);
-        assert!(matches!(EventType::from_str("UNKNOWN_TYPE"), EventType::Unknown(_)));
+        assert_eq!("ZONE_ENTRY".parse::<EventType>().unwrap(), EventType::ZoneEntry);
+        assert_eq!("TRACK_DELETE".parse::<EventType>().unwrap(), EventType::TrackDelete);
+        assert!(matches!("UNKNOWN_TYPE".parse::<EventType>().unwrap(), EventType::Unknown(_)));
     }
 }

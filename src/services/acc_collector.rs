@@ -281,7 +281,7 @@ impl AccCollector {
         }
 
         // Second try: recently exited with sufficient dwell AND pos now empty
-        if self.pos_groups.get(pos).is_none() {
+        if !self.pos_groups.contains_key(pos) {
             debug!(pos = %pos, "acc_pos_empty_checking_recent_exits");
             self.cleanup_old_exits();
 
@@ -300,7 +300,7 @@ impl AccCollector {
                     .map(|(idx, _)| idx);
 
                 if let Some(idx) = idx {
-                    let exit = exits.remove(idx);
+                    let exit = exits.swap_remove(idx);
                     let track_id = exit.track_id;
                     let time_since = now.duration_since(exit.exited_at).as_millis() as u64;
 

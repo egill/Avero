@@ -22,7 +22,7 @@ use crate::infra::metrics::Metrics;
 use crate::services::reentry_detector::ReentryDetector;
 use crate::services::stitcher::Stitcher;
 use crate::domain::types::{EventType, ParsedEvent, Person};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -31,7 +31,7 @@ use tokio::time::{interval, Duration};
 /// Central event processor for person tracking and journey management
 pub struct Tracker {
     /// Active persons by track_id
-    pub(crate) persons: HashMap<i64, Person>,
+    pub(crate) persons: FxHashMap<i64, Person>,
     /// Handles track identity stitching across sensor gaps
     pub(crate) stitcher: Stitcher,
     /// Manages journey lifecycle and persistence
@@ -65,7 +65,7 @@ impl Tracker {
         let egress = Egress::new(config.egress_file());
         let acc_collector = AccCollector::new(&config);
         Self {
-            persons: HashMap::new(),
+            persons: FxHashMap::default(),
             stitcher: Stitcher::with_metrics(metrics.clone()),
             journey_manager: JourneyManager::new(),
             door_correlator: DoorCorrelator::new(),
@@ -167,6 +167,7 @@ impl Tracker {
     }
 
     /// Tick the journey manager and return journeys ready for egress
+    #[allow(dead_code)]
     pub fn tick_journeys(&mut self) -> Vec<Journey> {
         self.journey_manager.tick()
     }

@@ -13,7 +13,7 @@
       "instructions": "Create file at project root. This ensures consistent Rust version across all developers and deployment targets (RPi5).",
       "priority": 1,
       "estimatedMinutes": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -28,7 +28,7 @@
       "instructions": "Run 'cargo clippy' to see 33 warnings. Key fixes: (1) metrics.rs:172 - change const ZERO to static, (2) acc_collector.rs:321 - use !contains_key(), (3) stitcher.rs:153 - fix duplicate if/else, (4) handlers.rs:41,69 - remove unnecessary u64 casts. Run 'cargo clippy --fix' for auto-fixable ones first.",
       "priority": 1,
       "estimatedMinutes": 30,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -44,7 +44,7 @@
       "instructions": "Search: grep -n 'std::sync::Mutex' src/. In metrics.rs, replace Mutex imports and remove .unwrap() on .lock() calls. parking_lot::Mutex::lock() returns the guard directly.",
       "priority": 1,
       "estimatedMinutes": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -60,7 +60,7 @@
       "instructions": "The Metrics struct only contains AtomicU64 and Mutex<T> which are automatically Send+Sync. Try removing lines 641-642 and verify it compiles. If it doesn't compile, investigate which field is not Send+Sync.",
       "priority": 1,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -75,7 +75,7 @@
       "instructions": "Search: grep -rn 'HashMap<i64' src/. Key locations: tracker/mod.rs (persons), journey_manager.rs (active, pid_by_track). Import with 'use rustc_hash::FxHashMap;'. FxHashMap is faster for integer keys, drop-in replacement.",
       "priority": 2,
       "estimatedMinutes": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -90,7 +90,7 @@
       "instructions": "Search: grep -rn '\\.remove(idx)' src/. Locations: door_correlator.rs:108, stitcher.rs:163, journey_manager.rs:80, acc_collector.rs:340,427. swap_remove is O(1) vs O(n). Only use if element order doesn't matter (check each case).",
       "priority": 2,
       "estimatedMinutes": 20,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -105,7 +105,7 @@
       "instructions": "Search: grep -rn 'Vec::new()' src/. Focus on mqtt.rs parse_xovis_message and journey.rs Journey::new(). Typical frame has 0-10 events, typical journey has 5-15 events.",
       "priority": 2,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -120,7 +120,7 @@
       "instructions": "In domain/journey.rs:21-28, JourneyOutcome is a small fieldless enum. Add Copy to derives. Then search for .clone() on JourneyOutcome and remove them.",
       "priority": 2,
       "estimatedMinutes": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -135,7 +135,7 @@
       "instructions": "In domain/types.rs:136-147, EventType has 'pub fn from_str(s: &str) -> Self'. Convert to 'impl FromStr for EventType { type Err = (); fn from_str(s: &str) -> Result<Self, Self::Err> }'. Return Ok(EventType::Unknown(s.to_string())) for unknown values.",
       "priority": 3,
       "estimatedMinutes": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -149,7 +149,7 @@
       "instructions": "Search: grep -rn 'error!' src/. Add #[cold] attribute to functions that only handle errors. This hints to compiler to optimize hot path. Example: functions that only log errors and return early.",
       "priority": 3,
       "estimatedMinutes": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
