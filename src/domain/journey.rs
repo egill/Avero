@@ -2,6 +2,7 @@
 
 use crate::domain::types::TrackId;
 use serde::Serialize;
+use smallvec::{smallvec, SmallVec};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -79,7 +80,7 @@ impl JourneyEvent {
 pub struct Journey {
     pub jid: String,              // UUIDv7 journey ID
     pub pid: String,              // UUIDv7 person ID (stable across stitches)
-    pub tids: Vec<TrackId>,       // Xovis track_ids (stitch history)
+    pub tids: SmallVec<[TrackId; 4]>, // Xovis track_ids (stitch history)
     pub parent: Option<String>,   // Previous journey's jid (for re-entry)
     pub outcome: JourneyOutcome,
     pub authorized: bool,
@@ -101,7 +102,7 @@ impl Journey {
         Self {
             jid: new_uuid_v7(),
             pid: new_uuid_v7(),
-            tids: vec![track_id],
+            tids: smallvec![track_id],
             parent: None,
             outcome: JourneyOutcome::InProgress,
             authorized: false,
@@ -235,7 +236,7 @@ mod tests {
 
         assert!(!journey.jid.is_empty());
         assert!(!journey.pid.is_empty());
-        assert_eq!(journey.tids, vec![TrackId(100)]);
+        assert_eq!(journey.tids.as_slice(), &[TrackId(100)]);
         assert!(journey.parent.is_none());
         assert_eq!(journey.outcome, JourneyOutcome::InProgress);
         assert!(!journey.authorized);
@@ -249,7 +250,7 @@ mod tests {
     fn test_journey_with_parent() {
         let journey = Journey::new_with_parent(TrackId(200), "parent-jid-123", "pid-456");
 
-        assert_eq!(journey.tids, vec![TrackId(200)]);
+        assert_eq!(journey.tids.as_slice(), &[TrackId(200)]);
         assert_eq!(journey.parent, Some("parent-jid-123".to_string()));
         assert_eq!(journey.pid, "pid-456");
     }
@@ -260,7 +261,7 @@ mod tests {
         journey.add_track_id(TrackId(200));
         journey.add_track_id(TrackId(300));
 
-        assert_eq!(journey.tids, vec![TrackId(100), TrackId(200), TrackId(300)]);
+        assert_eq!(journey.tids.as_slice(), &[TrackId(100), TrackId(200), TrackId(300)]);
         assert_eq!(journey.current_track_id(), TrackId(300));
     }
 

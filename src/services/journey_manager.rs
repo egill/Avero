@@ -269,7 +269,7 @@ mod tests {
 
         let journey = manager.new_journey(TrackId(100));
 
-        assert_eq!(journey.tids, vec![TrackId(100)]);
+        assert_eq!(journey.tids.as_slice(), &[TrackId(100)]);
         assert!(manager.has_journey(TrackId(100)));
         assert_eq!(manager.active_count(), 1);
     }
@@ -317,7 +317,7 @@ mod tests {
         assert!(manager.has_journey(TrackId(200)));
 
         let journey = manager.get(TrackId(200)).unwrap();
-        assert_eq!(journey.tids, vec![TrackId(100), TrackId(200)]);
+        assert_eq!(journey.tids.as_slice(), &[TrackId(100), TrackId(200)]);
         assert!(journey.authorized);
         assert_eq!(journey.total_dwell_ms, 5000);
         assert_eq!(journey.events.len(), 1);
@@ -394,7 +394,7 @@ mod tests {
         let ready = manager.tick();
 
         assert_eq!(ready.len(), 1);
-        assert_eq!(ready[0].tids, vec![TrackId(100)]);
+        assert_eq!(ready[0].tids.as_slice(), &[TrackId(100)]);
         assert!(ready[0].crossed_entry);
     }
 
