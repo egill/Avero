@@ -531,7 +531,7 @@ impl Tracker {
         let ts = epoch_ms();
 
         // Look up POS zone from IP
-        let pos = self.acc_collector.pos_for_ip(ip).cloned();
+        let pos = self.acc_collector.pos_for_ip(ip).map(|s| s.to_string());
 
         // Build accumulated dwell map from persons for ACC matching
         // This ensures ACC uses total journey dwell, not just current POS session dwell

@@ -360,8 +360,8 @@ impl AccCollector {
     }
 
     /// Get the POS name for an IP address
-    pub fn pos_for_ip(&self, ip: &str) -> Option<&String> {
-        self.ip_to_pos.get(ip)
+    pub fn pos_for_ip(&self, ip: &str) -> Option<&str> {
+        self.ip_to_pos.get(ip).map(|s| s.as_str())
     }
 }
 
@@ -449,14 +449,8 @@ mod tests {
     fn test_pos_for_ip() {
         let collector = create_test_collector();
 
-        assert_eq!(
-            collector.pos_for_ip("192.168.1.10"),
-            Some(&"POS_1".to_string())
-        );
-        assert_eq!(
-            collector.pos_for_ip("192.168.1.11"),
-            Some(&"POS_2".to_string())
-        );
+        assert_eq!(collector.pos_for_ip("192.168.1.10"), Some(&"POS_1".to_string()));
+        assert_eq!(collector.pos_for_ip("192.168.1.11"), Some(&"POS_2".to_string()));
         assert_eq!(collector.pos_for_ip("192.168.1.99"), None);
     }
 
