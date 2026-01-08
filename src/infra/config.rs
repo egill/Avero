@@ -5,6 +5,7 @@
 //! 2. CONFIG_FILE environment variable
 //! 3. Default: config/dev.toml
 
+use anyhow::Context;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -353,13 +354,13 @@ impl Config {
     }
 
     /// Load configuration from a TOML file
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read config file {}: {}", path.display(), e))?;
+            .with_context(|| format!("Failed to read config file {}", path.display()))?;
 
         let toml_config: TomlConfig = toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse config file {}: {}", path.display(), e))?;
+            .with_context(|| format!("Failed to parse config file {}", path.display()))?;
 
         // Convert zone names from string keys to i32 keys
         let mut zone_names = HashMap::new();
