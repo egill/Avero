@@ -253,17 +253,24 @@ impl Default for CloudPlusConfig {
     }
 }
 
+/// Connection state that must be updated atomically to prevent deadlocks.
+/// All fields are modified together during connect/disconnect.
+#[derive(Default)]
+struct CloudPlusState {
+    read_half: Option<ReadHalf<TcpStream>>,
+    write_half: Option<WriteHalf<TcpStream>>,
+    connected: bool,
+    request_mode: bool,
+}
+
 pub struct CloudPlusClient {
     config: CloudPlusConfig,
-    read_half: Arc<Mutex<Option<ReadHalf<TcpStream>>>>,
-    write_half: Arc<Mutex<Option<WriteHalf<TcpStream>>>>,
+    state: Arc<Mutex<CloudPlusState>>,
     outbound_tx: mpsc::Sender<Vec<u8>>,
     outbound_rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
     internal_tx: mpsc::Sender<Vec<u8>>,
     internal_rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
     last_heartbeat: Arc<RwLock<Option<HeartbeatData>>>,
-    connected: Arc<RwLock<bool>>,
-    request_mode: Arc<RwLock<bool>>,
     heartbeats_rx: Arc<RwLock<u64>>,
     heartbeats_ack: Arc<RwLock<u64>>,
 }
@@ -275,15 +282,12 @@ impl CloudPlusClient {
 
         Self {
             config,
-            read_half: Arc::new(Mutex::new(None)),
-            write_half: Arc::new(Mutex::new(None)),
+            state: Arc::new(Mutex::new(CloudPlusState::default())),
             outbound_tx,
             outbound_rx: Arc::new(Mutex::new(outbound_rx)),
             internal_tx,
             internal_rx: Arc::new(Mutex::new(internal_rx)),
             last_heartbeat: Arc::new(RwLock::new(None)),
-            connected: Arc::new(RwLock::new(false)),
-            request_mode: Arc::new(RwLock::new(false)),
             heartbeats_rx: Arc::new(RwLock::new(0)),
             heartbeats_ack: Arc::new(RwLock::new(0)),
         }
@@ -303,16 +307,21 @@ impl CloudPlusClient {
 
         // Split stream into read and write halves for independent operation
         let (read_half, write_half) = tokio::io::split(stream);
-        *self.read_half.lock().await = Some(read_half);
-        *self.write_half.lock().await = Some(write_half);
-        *self.connected.write().await = true;
-        *self.request_mode.write().await = false;
+
+        // Atomically update all connection state
+        {
+            let mut state = self.state.lock().await;
+            state.read_half = Some(read_half);
+            state.write_half = Some(write_half);
+            state.connected = true;
+            state.request_mode = false;
+        }
 
         Ok(())
     }
 
     pub async fn is_connected(&self) -> bool {
-        *self.connected.read().await
+        self.state.lock().await.connected
     }
 
     pub async fn run(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
@@ -324,13 +333,26 @@ impl CloudPlusClient {
                 continue;
             }
 
+            // Take stream halves out of state for independent operation in loops
+            let (read_half, write_half) = {
+                let mut state = self.state.lock().await;
+                (state.read_half.take(), state.write_half.take())
+            };
+
+            let Some(read_half) = read_half else {
+                warn!("cloudplus_no_read_half");
+                continue;
+            };
+            let Some(write_half) = write_half else {
+                warn!("cloudplus_no_write_half");
+                continue;
+            };
+
             // Run read/write loops
             let read_handle = {
-                let read_half = self.read_half.clone();
+                let state = self.state.clone();
                 let internal_tx = self.internal_tx.clone();
                 let last_heartbeat = self.last_heartbeat.clone();
-                let connected = self.connected.clone();
-                let request_mode = self.request_mode.clone();
                 let heartbeats_rx = self.heartbeats_rx.clone();
                 let heartbeats_ack = self.heartbeats_ack.clone();
                 let read_timeout = self.config.read_timeout;
@@ -340,8 +362,7 @@ impl CloudPlusClient {
                         read_half,
                         internal_tx,
                         last_heartbeat,
-                        connected,
-                        request_mode,
+                        state,
                         heartbeats_rx,
                         heartbeats_ack,
                         read_timeout,
@@ -351,21 +372,12 @@ impl CloudPlusClient {
             };
 
             let write_handle = {
-                let write_half = self.write_half.clone();
                 let outbound_rx = self.outbound_rx.clone();
                 let internal_rx = self.internal_rx.clone();
-                let connected = self.connected.clone();
                 let write_timeout = self.config.write_timeout;
 
                 tokio::spawn(async move {
-                    Self::write_loop(
-                        write_half,
-                        outbound_rx,
-                        internal_rx,
-                        connected,
-                        write_timeout,
-                    )
-                    .await
+                    Self::write_loop(write_half, outbound_rx, internal_rx, write_timeout).await
                 })
             };
 
@@ -383,9 +395,13 @@ impl CloudPlusClient {
                 }
             }
 
-            *self.connected.write().await = false;
-            *self.read_half.lock().await = None;
-            *self.write_half.lock().await = None;
+            // Atomically clear connection state
+            {
+                let mut state = self.state.lock().await;
+                state.connected = false;
+                state.read_half = None;
+                state.write_half = None;
+            }
 
             // Wait before reconnect
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -394,11 +410,10 @@ impl CloudPlusClient {
 
     #[allow(clippy::too_many_arguments)]
     async fn read_loop(
-        read_half: Arc<Mutex<Option<ReadHalf<TcpStream>>>>,
+        mut read_half: ReadHalf<TcpStream>,
         internal_tx: mpsc::Sender<Vec<u8>>,
         last_heartbeat: Arc<RwLock<Option<HeartbeatData>>>,
-        _connected: Arc<RwLock<bool>>,
-        request_mode: Arc<RwLock<bool>>,
+        state: Arc<Mutex<CloudPlusState>>,
         heartbeats_rx: Arc<RwLock<u64>>,
         heartbeats_ack: Arc<RwLock<u64>>,
         read_timeout: Duration,
@@ -407,24 +422,17 @@ impl CloudPlusClient {
         let mut acc = BytesMut::with_capacity(4096);
 
         loop {
-            let n = {
-                let mut guard = read_half.lock().await;
-                let Some(ref mut reader) = *guard else {
+            let n = match tokio::time::timeout(read_timeout, read_half.read(&mut buf)).await {
+                Ok(Ok(0)) => {
+                    warn!("cloudplus_connection_closed");
                     return;
-                };
-
-                match tokio::time::timeout(read_timeout, reader.read(&mut buf)).await {
-                    Ok(Ok(0)) => {
-                        warn!("cloudplus_connection_closed");
-                        return;
-                    }
-                    Ok(Ok(n)) => n,
-                    Ok(Err(e)) => {
-                        log_read_error(&e);
-                        return;
-                    }
-                    Err(_) => continue, // Timeout, try again
                 }
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => {
+                    log_read_error(&e);
+                    return;
+                }
+                Err(_) => continue, // Timeout, try again
             };
 
             acc.extend_from_slice(&buf[..n]);
@@ -463,7 +471,8 @@ impl CloudPlusClient {
                             *last_heartbeat.write().await = Some(hb.clone());
 
                             // Send ack if not in request mode
-                            if !*request_mode.read().await {
+                            let request_mode = state.lock().await.request_mode;
+                            if !request_mode {
                                 let hi = ((hb.oem_code >> 8) & 0xFF) as u8;
                                 let lo = (hb.oem_code & 0xFF) as u8;
                                 let resp = build_frame_with_rand(
@@ -501,10 +510,9 @@ impl CloudPlusClient {
     }
 
     async fn write_loop(
-        write_half: Arc<Mutex<Option<WriteHalf<TcpStream>>>>,
+        mut write_half: WriteHalf<TcpStream>,
         outbound_rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
         internal_rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
-        _connected: Arc<RwLock<bool>>,
         write_timeout: Duration,
     ) {
         let mut internal = internal_rx.lock().await;
@@ -533,14 +541,7 @@ impl CloudPlusClient {
             let cmd_byte = if msg.len() > 2 { msg[2] } else { 0 };
             debug!(source = %source, cmd = format!("0x{:02X}", cmd_byte), "write_loop_msg_received");
 
-            let result = {
-                let mut guard = write_half.lock().await;
-                let Some(ref mut writer) = *guard else {
-                    return;
-                };
-
-                tokio::time::timeout(write_timeout, writer.write_all(&msg)).await
-            };
+            let result = tokio::time::timeout(write_timeout, write_half.write_all(&msg)).await;
 
             match result {
                 Ok(Ok(_)) => {
