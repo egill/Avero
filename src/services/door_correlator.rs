@@ -6,6 +6,7 @@
 use crate::domain::journey::{epoch_ms, JourneyEvent};
 use crate::domain::types::{DoorStatus, TrackId};
 use crate::services::journey_manager::JourneyManager;
+use smallvec::SmallVec;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -25,8 +26,8 @@ struct PendingGateCmd {
 pub struct DoorCorrelator {
     /// Previous door status for detecting transitions
     last_status: DoorStatus,
-    /// Pending gate commands waiting for correlation
-    pending_cmds: Vec<PendingGateCmd>,
+    /// Pending gate commands waiting for correlation (typically 0-2 elements)
+    pending_cmds: SmallVec<[PendingGateCmd; 2]>,
     /// Track ID of current gate flow (preserved across open/moving/closed cycle)
     current_flow_track_id: Option<TrackId>,
 }
@@ -35,7 +36,7 @@ impl DoorCorrelator {
     pub fn new() -> Self {
         Self {
             last_status: DoorStatus::Unknown,
-            pending_cmds: Vec::new(),
+            pending_cmds: SmallVec::new(),
             current_flow_track_id: None,
         }
     }
