@@ -21,30 +21,67 @@ fn create_test_tracker_with_config(config: Config) -> Tracker {
     Tracker::new(config, gate, metrics, None)
 }
 
-/// Create a test event with basic fields
-fn create_event(event_type: EventType, track_id: i64, geometry_id: Option<i32>) -> ParsedEvent {
-    ParsedEvent {
-        event_type,
-        track_id: TrackId(track_id),
-        geometry_id: geometry_id.map(GeometryId),
-        direction: None,
-        event_time: 1767617600000,
-        received_at: Instant::now(),
-        position: None,
+/// Builder for creating test ParsedEvent instances
+struct ParsedEventBuilder {
+    event_type: EventType,
+    track_id: i64,
+    geometry_id: Option<i32>,
+    position: Option<[f64; 3]>,
+}
+
+impl ParsedEventBuilder {
+    fn new(event_type: EventType) -> Self {
+        Self {
+            event_type,
+            track_id: 0,
+            geometry_id: None,
+            position: None,
+        }
+    }
+
+    fn with_track_id(mut self, track_id: i64) -> Self {
+        self.track_id = track_id;
+        self
+    }
+
+    fn with_geometry_id(mut self, geometry_id: i32) -> Self {
+        self.geometry_id = Some(geometry_id);
+        self
+    }
+
+    fn with_position(mut self, position: [f64; 3]) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    fn build(self) -> ParsedEvent {
+        ParsedEvent {
+            event_type: self.event_type,
+            track_id: TrackId(self.track_id),
+            geometry_id: self.geometry_id.map(GeometryId),
+            direction: None,
+            event_time: 1767617600000,
+            received_at: Instant::now(),
+            position: self.position,
+        }
     }
 }
 
-/// Create a test event with position data
-fn create_event_with_pos(event_type: EventType, track_id: i64, position: [f64; 3]) -> ParsedEvent {
-    ParsedEvent {
-        event_type,
-        track_id: TrackId(track_id),
-        geometry_id: None,
-        direction: None,
-        event_time: 1767617600000,
-        received_at: Instant::now(),
-        position: Some(position),
+/// Create a test event with basic fields (legacy helper, delegates to builder)
+fn create_event(event_type: EventType, track_id: i64, geometry_id: Option<i32>) -> ParsedEvent {
+    let mut builder = ParsedEventBuilder::new(event_type).with_track_id(track_id);
+    if let Some(gid) = geometry_id {
+        builder = builder.with_geometry_id(gid);
     }
+    builder.build()
+}
+
+/// Create a test event with position data (legacy helper, delegates to builder)
+fn create_event_with_pos(event_type: EventType, track_id: i64, position: [f64; 3]) -> ParsedEvent {
+    ParsedEventBuilder::new(event_type)
+        .with_track_id(track_id)
+        .with_position(position)
+        .build()
 }
 
 #[tokio::test]
