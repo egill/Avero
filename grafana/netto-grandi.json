@@ -593,12 +593,12 @@
       "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [{
         "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
-        "format": "table",
-        "rawSql": "WITH hours AS (\n  SELECT generate_series(0, 23) as hour\n),\ntoday_data AS (\n  SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik') as hour, COUNT(*) as cnt\n  FROM person_journeys\n  WHERE site = 'netto' AND time >= CURRENT_DATE AND outcome IS NOT NULL\n  GROUP BY 1\n),\nyesterday_data AS (\n  SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik') as hour, COUNT(*) as cnt\n  FROM person_journeys\n  WHERE site = 'netto' AND time >= CURRENT_DATE - INTERVAL '1 day'\n    AND time < CURRENT_DATE AND outcome IS NOT NULL\n  GROUP BY 1\n)\nSELECT h.hour,\n       COALESCE(t.cnt, 0) as today,\n       COALESCE(y.cnt, 0) as yesterday\nFROM hours h\nLEFT JOIN today_data t ON h.hour = t.hour\nLEFT JOIN yesterday_data y ON h.hour = y.hour\nORDER BY h.hour;",
+        "format": "time_series",
+        "rawSql": "WITH hours AS (\n  SELECT generate_series(0, 23) as hour\n),\ntoday_data AS (\n  SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int as hour, COUNT(*) as cnt\n  FROM person_journeys\n  WHERE site = 'netto' AND time >= CURRENT_DATE AND outcome IS NOT NULL\n  GROUP BY 1\n),\nyesterday_data AS (\n  SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int as hour, COUNT(*) as cnt\n  FROM person_journeys\n  WHERE site = 'netto' AND time >= CURRENT_DATE - INTERVAL '1 day'\n    AND time < CURRENT_DATE AND outcome IS NOT NULL\n  GROUP BY 1\n)\nSELECT (CURRENT_DATE + (h.hour || ' hours')::interval) AT TIME ZONE 'Atlantic/Reykjavik' as time,\n       COALESCE(t.cnt, 0) as today,\n       COALESCE(y.cnt, 0) as yesterday\nFROM hours h\nLEFT JOIN today_data t ON h.hour = t.hour\nLEFT JOIN yesterday_data y ON h.hour = y.hour\nORDER BY h.hour;",
         "refId": "A"
       }],
       "title": "Exits by Hour: Today vs Yesterday",
-      "transformations": [{ "id": "convertFieldType", "options": { "conversions": [{ "destinationType": "number", "targetField": "hour" }] } }],
+      "transformations": [],
       "type": "timeseries"
     },
     {
