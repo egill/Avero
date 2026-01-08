@@ -5,6 +5,7 @@
 //! 2. CONFIG_FILE environment variable
 //! 3. Default: config/dev.toml
 
+use crate::domain::types::GeometryId;
 use anyhow::Context;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -480,16 +481,17 @@ impl Config {
     ///
     /// ```
     /// use gateway_poc::infra::Config;
+    /// use gateway_poc::domain::types::GeometryId;
     ///
     /// let config = Config::default();
-    /// assert_eq!(config.zone_name(1001), "POS_1");
-    /// assert_eq!(config.zone_name(9999), "ZONE_9999");
+    /// assert_eq!(config.zone_name(GeometryId(1001)), "POS_1");
+    /// assert_eq!(config.zone_name(GeometryId(9999)), "ZONE_9999");
     /// ```
-    pub fn zone_name(&self, geometry_id: i32) -> String {
+    pub fn zone_name(&self, geometry_id: GeometryId) -> String {
         self.zone_names
-            .get(&geometry_id)
+            .get(&geometry_id.0)
             .cloned()
-            .unwrap_or_else(|| format!("ZONE_{}", geometry_id))
+            .unwrap_or_else(|| format!("ZONE_{}", geometry_id.0))
     }
 
     // Getters for all config fields
@@ -549,8 +551,8 @@ impl Config {
         &self.pos_zones
     }
 
-    pub fn gate_zone(&self) -> i32 {
-        self.gate_zone
+    pub fn gate_zone(&self) -> GeometryId {
+        GeometryId(self.gate_zone)
     }
 
     pub fn exit_line(&self) -> i32 {
@@ -671,7 +673,7 @@ mod tests {
         assert_eq!(config.min_dwell_ms(), 7000);
         assert_eq!(config.metrics_interval_secs(), 10);
         assert_eq!(config.pos_zones(), &[1001, 1002, 1003, 1004, 1005]);
-        assert_eq!(config.gate_zone(), 1007);
+        assert_eq!(config.gate_zone(), GeometryId(1007));
     }
 
     #[test]
@@ -686,10 +688,10 @@ mod tests {
     #[test]
     fn test_zone_name() {
         let config = Config::default();
-        assert_eq!(config.zone_name(1001), "POS_1");
-        assert_eq!(config.zone_name(1007), "GATE_1");
-        assert_eq!(config.zone_name(1006), "EXIT_1");
-        assert_eq!(config.zone_name(9999), "ZONE_9999");
+        assert_eq!(config.zone_name(GeometryId(1001)), "POS_1");
+        assert_eq!(config.zone_name(GeometryId(1007)), "GATE_1");
+        assert_eq!(config.zone_name(GeometryId(1006)), "EXIT_1");
+        assert_eq!(config.zone_name(GeometryId(9999)), "ZONE_9999");
     }
 
     #[test]

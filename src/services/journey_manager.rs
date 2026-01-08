@@ -274,7 +274,7 @@ mod tests {
         let mut manager = JourneyManager::new();
         manager.new_journey(TrackId(100));
 
-        manager.add_event(TrackId(100), JourneyEvent::new("zone_entry", 1000).with_zone("POS_1"));
+        manager.add_event(TrackId(100), JourneyEvent::new(JourneyEventType::ZoneEntry, 1000).with_zone("POS_1"));
 
         let journey = manager.get(TrackId(100)).unwrap();
         assert_eq!(journey.events.len(), 1);

@@ -1061,10 +1061,7 @@ impl DashboardState {
                     if !active.is_empty() {
                         let candidates: Vec<String> = active
                             .iter()
-                            .filter(|t| {
-                        let candidates: Vec<String> = active.iter()
                             .filter(|t| t.zone.as_ref().map(|z| z.starts_with("POS")).unwrap_or(false))
-                            })
                             .take(3)
                             .map(|t| format!("T{}@{}", t.tid, t.zone.as_deref().unwrap_or("?")))
                             .collect();
@@ -1202,12 +1199,7 @@ fn load_config(path: &str) -> Option<TuiConfig> {
         _mode: g.get("mode").and_then(|v| v.as_str().map(String::from)),
         tcp_addr: g.get("tcp_addr").and_then(|v| v.as_str().map(String::from)),
         _http_url: g.get("http_url").and_then(|v| v.as_str().map(String::from)),
-            host: g.get("host").and_then(|v| v.as_str().map(String::from)),
-            _mode: g.get("mode").and_then(|v| v.as_str().map(String::from)),
-            tcp_addr: g.get("tcp_addr").and_then(|v| v.as_str().map(String::from)),
-            _http_url: g.get("http_url").and_then(|v| v.as_str().map(String::from)),
-            _timeout_ms: g.get("timeout_ms").and_then(|v| v.as_integer().map(|t| t as u64)),
-        });
+        _timeout_ms: g.get("timeout_ms").and_then(|v| v.as_integer().map(|t| t as u64)),
     });
 
     Some(TuiConfig { mqtt, gate })
@@ -1544,7 +1536,7 @@ fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
         Span::raw("| "),
         Span::styled(
             format!("[{}]", view_text),
-        Span::styled(format!("[{}]", view_text), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         ),
         Span::raw(" | "),
         Span::styled(status_text, Style::default().fg(status_color)),
@@ -1576,16 +1568,6 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
     for zone in zones {
         let (icon, color, detail) = match zone.status() {
             ZoneStatus::Empty => ("○", Color::DarkGray, zone.name.replace("POS_", "P")),
-            ZoneStatus::Pending { tid, dwell_ms } => (
-                "?",
-                Color::Yellow,
-                format!(
-                    "{}:T{} {:.0}s",
-                    zone.name.replace("POS_", "P"),
-                    tid,
-                    dwell_ms as f64 / 1000.0
-                ),
-            ),
             ZoneStatus::Pending { tid, dwell_ms } => {
                 ("?", Color::Yellow, format!("{}:T{} {:.0}s", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
             }
@@ -1598,26 +1580,6 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
             ZoneStatus::Overdue { tid, dwell_ms } => {
                 ("✗", Color::Red, format!("{}:T{} {:.0}s!!", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
             }
-            ZoneStatus::Waiting { tid, dwell_ms } => (
-                "⚠",
-                Color::Yellow,
-                format!(
-                    "{}:T{} {:.0}s!",
-                    zone.name.replace("POS_", "P"),
-                    tid,
-                    dwell_ms as f64 / 1000.0
-                ),
-            ),
-            ZoneStatus::Overdue { tid, dwell_ms } => (
-                "✗",
-                Color::Red,
-                format!(
-                    "{}:T{} {:.0}s!!",
-                    zone.name.replace("POS_", "P"),
-                    tid,
-                    dwell_ms as f64 / 1000.0
-                ),
-            ),
         };
 
         cells.push(Span::styled(
@@ -1650,10 +1612,9 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
     cells.push(Span::styled(gate_detail, Style::default().fg(gate_color)));
 
     let zones_para = Paragraph::new(Line::from(cells)).block(
-    let zones_para = Paragraph::new(Line::from(cells))
-        .block(Block::default()
+        Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)));
+            .border_style(Style::default().fg(Color::Blue)),
     );
 
     f.render_widget(zones_para, area);
@@ -1736,13 +1697,7 @@ fn draw_track_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
                 Span::raw(format!(" T{:<4} ", e.tid)),
                 Span::styled(
                     auth_icon,
-        ListItem::new(Line::from(vec![
-            Span::styled(icon, Style::default().fg(color)),
-            Span::raw(format!(" T{:<4} ", e.tid)),
-            Span::styled(auth_icon, Style::default().fg(if e.auth { Color::Green } else { Color::DarkGray })),
-            Span::raw(format!(" {:.1}s", e.dwell_ms as f64 / 1000.0)),
-        ]))
-    }).collect();
+                    Style::default().fg(if e.auth { Color::Green } else { Color::DarkGray }),
                 ),
                 Span::raw(format!(" {:.1}s", e.dwell_ms as f64 / 1000.0)),
             ]))
@@ -1819,8 +1774,6 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
             Span::styled(moving_to_open, Style::default().fg(Color::Green)),
         ]),
         Line::from(vec![
-            Span::styled(
-                "TOTAL: ",
             Span::styled("TOTAL: ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
             Span::styled(total, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         ]),
@@ -1857,10 +1810,9 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
         .collect();
 
     let list = List::new(events).block(
-    let list = List::new(events)
-        .block(Block::default()
+        Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Magenta)));
+            .border_style(Style::default().fg(Color::Magenta)),
     );
 
     f.render_widget(list, chunks[1]);
@@ -1923,10 +1875,9 @@ fn draw_acc_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
         .collect();
 
     let list = List::new(events).block(
-    let list = List::new(events)
-        .block(Block::default()
+        Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow)));
+            .border_style(Style::default().fg(Color::Yellow)),
     );
 
     f.render_widget(list, chunks[1]);
@@ -1947,17 +1898,7 @@ fn draw_stitch_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
             let extra = match e.t.as_str() {
                 "stitch" => {
                     let prev = e.prev_tid.map(|p| format!("←T{}", p)).unwrap_or_default();
-        let extra = match e.t.as_str() {
-            "stitch" => {
-                let prev = e.prev_tid.map(|p| format!("←T{}", p)).unwrap_or_default();
-                let dist = e.stitch_dist_cm.map(|d| format!(" {}cm", d)).unwrap_or_default();
-                format!("{}{}", prev, dist)
-            }
-            "lost" | "pending" => {
-                format!("{:.1}s", e.dwell_ms as f64 / 1000.0)
-            }
-            _ => String::new(),
-        };
+                    let dist = e.stitch_dist_cm.map(|d| format!(" {}cm", d)).unwrap_or_default();
                     format!("{}{}", prev, dist)
                 }
                 "lost" | "pending" => {
@@ -1995,21 +1936,15 @@ fn draw_issues_panel(f: &mut Frame, area: Rect, state: &DashboardState) {
             };
 
             let age = issue.timestamp.elapsed().as_secs();
-        let age = issue.timestamp.elapsed().as_secs();
-        let age_str = if age < 60 {
-            format!("{}s", age)
-        } else {
-            format!("{}m", age / 60)
-        };
+            let age_str = if age < 60 {
+                format!("{}s", age)
+            } else {
+                format!("{}m", age / 60)
+            };
 
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", icon), Style::default().fg(color)),
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("{} ", icon), Style::default().fg(color)),
-            Span::styled(format!("{:>4} ", age_str), Style::default().fg(Color::DarkGray)),
-            Span::styled(&issue.message, Style::default().fg(color)),
-        ]))
-    }).collect();
+                Span::styled(format!("{:>4} ", age_str), Style::default().fg(Color::DarkGray)),
                 Span::styled(&issue.message, Style::default().fg(color)),
             ]))
         })
@@ -2141,9 +2076,7 @@ fn draw_latency_histogram(
         Line::from(format!("avg:{} p95:{} {}", avg_str, p95_str, unit)),
         Line::from(format!("n={}", stats.count())),
     ])
-    .block(
     .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
-    );
 
     f.render_widget(stats_text, chunks[1]);
 }

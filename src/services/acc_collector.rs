@@ -449,8 +449,8 @@ mod tests {
     fn test_pos_for_ip() {
         let collector = create_test_collector();
 
-        assert_eq!(collector.pos_for_ip("192.168.1.10"), Some(&"POS_1".to_string()));
-        assert_eq!(collector.pos_for_ip("192.168.1.11"), Some(&"POS_2".to_string()));
+        assert_eq!(collector.pos_for_ip("192.168.1.10"), Some("POS_1"));
+        assert_eq!(collector.pos_for_ip("192.168.1.11"), Some("POS_2"));
         assert_eq!(collector.pos_for_ip("192.168.1.99"), None);
     }
 

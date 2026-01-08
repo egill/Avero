@@ -211,6 +211,23 @@ impl Rs485Monitor {
             let poll_start = Instant::now();
 
             let status = if let Some(ref mut p) = port {
+                // Drain any stale bytes before sending query to ensure clean sync
+                let mut drain_buf = [0u8; 64];
+                loop {
+                    match tokio::time::timeout(
+                        Duration::from_millis(5),
+                        p.read(&mut drain_buf),
+                    )
+                    .await
+                    {
+                        Ok(Ok(0)) | Err(_) => break, // No data or timeout - buffer is clean
+                        Ok(Ok(n)) => {
+                            tracing::debug!(bytes_drained = n, "rs485_drain_stale");
+                        }
+                        Ok(Err(_)) => break,
+                    }
+                }
+
                 // Send query command
                 let cmd = self.build_query_command();
                 if let Err(e) = p.write_all(&cmd).await {

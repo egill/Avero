@@ -222,7 +222,8 @@ impl Journey {
 
         obj.insert("jid".to_string(), serde_json::Value::String(self.jid.clone()));
         obj.insert("pid".to_string(), serde_json::Value::String(self.pid.clone()));
-        obj.insert("tids".to_string(), serde_json::json!(self.tids));
+        let tids_raw: Vec<i64> = self.tids.iter().map(|t| t.0).collect();
+        obj.insert("tids".to_string(), serde_json::json!(tids_raw));
 
         if let Some(parent) = &self.parent {
             obj.insert(

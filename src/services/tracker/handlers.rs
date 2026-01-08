@@ -82,7 +82,7 @@ impl Tracker {
             self.persons.insert(track_id, person);
 
             // Stitch in journey manager (handles event recording)
-            self.journey_manager.stitch_journey(old_track_id, TrackId(track_id), time_ms, distance_cm);
+            self.journey_manager.stitch_journey(old_track_id, track_id, time_ms, distance_cm);
 
             if let Some(journey) = self.journey_manager.get_any(track_id) {
                 if journey.authorized {
@@ -239,7 +239,7 @@ impl Tracker {
         }
 
         let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
-        let zone = self.config.zone_name(geometry_id.0);
+        let zone = self.config.zone_name(geometry_id);
         let ts = epoch_ms();
 
         debug!(
@@ -251,7 +251,7 @@ impl Tracker {
 
         // Get or create person
         let person =
-            self.persons.entry(TrackId(track_id)).or_insert_with(|| Person::new(TrackId(track_id)));
+            self.persons.entry(track_id).or_insert_with(|| Person::new(track_id));
         person.current_zone = Some(geometry_id);
         let journey_authorized =
             self.journey_manager.get_any(track_id).map(|j| j.authorized).unwrap_or(false);
@@ -283,7 +283,7 @@ impl Tracker {
             self.acc_collector.record_pos_entry(track_id, &zone);
             // Update POS occupancy metric
             self.metrics.pos_zone_enter(geometry_id.0);
-        } else if geometry_id.0 == self.config.gate_zone() {
+        } else if geometry_id == self.config.gate_zone() {
             // Gate zone - check authorization and send command or blocked event
             if authorized && !gate_already_opened {
                 self.send_gate_open_command(track_id, ts, "tracker", event.received_at)
@@ -320,7 +320,7 @@ impl Tracker {
         }
 
         let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
-        let zone = self.config.zone_name(geometry_id.0);
+        let zone = self.config.zone_name(geometry_id);
         let ts = epoch_ms();
 
         debug!(
@@ -407,7 +407,7 @@ impl Tracker {
         }
 
         let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
-        let line = self.config.zone_name(geometry_id.0);
+        let line = self.config.zone_name(geometry_id);
         let ts = epoch_ms();
 
         debug!(
@@ -640,7 +640,7 @@ impl Tracker {
                 .persons
                 .get(&track_id)
                 .and_then(|p| p.current_zone)
-                .is_some_and(|z| z.0 == gate_zone);
+                .is_some_and(|z| z == gate_zone);
             let gate_already_opened =
                 self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
             if in_gate_zone && !gate_already_opened {
@@ -664,8 +664,7 @@ impl Tracker {
             if !matched_tracks.is_empty() {
                 // Matched - send event for primary track (first in group)
                 let primary_track = matched_tracks[0];
-                let dwell_ms =
-                    self.persons.get(&TrackId(primary_track)).map(|p| p.accumulated_dwell_ms);
+                let dwell_ms = self.persons.get(&primary_track).map(|p| p.accumulated_dwell_ms);
                 sender.send_acc_event(AccEventPayload {
                     site: None,
                     ts,
@@ -688,7 +687,7 @@ impl Tracker {
                     .iter()
                     .map(|(tid, p)| AccDebugTrack {
                         tid: tid.0,
-                        zone: p.current_zone.map(|z| self.config.zone_name(z.0)),
+                        zone: p.current_zone.map(|z| self.config.zone_name(z)),
                         dwell_ms: p.accumulated_dwell_ms,
                         auth: p.authorized,
                     })
@@ -729,11 +728,6 @@ impl Tracker {
                     gate_cmd_at: None,
                     debug_active: if debug_active.is_empty() { None } else { Some(debug_active) },
                     debug_pending: if debug_pending.is_empty() { None } else { Some(debug_pending) },
-                    debug_pending: if debug_pending.is_empty() {
-                        None
-                    } else {
-                        Some(debug_pending)
-                    },
                 });
             }
         }
