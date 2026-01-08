@@ -110,10 +110,10 @@ defmodule AveroCommandWeb.DashboardLive do
       </div>
 
       <!-- Grafana Stats Row -->
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
         <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=2&theme=light&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=2&theme=light&refresh=5s"
             class="w-full h-20 border-0"
             loading="lazy"
             title="Active Tracks"
@@ -121,42 +121,26 @@ defmodule AveroCommandWeb.DashboardLive do
         </div>
         <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=4&theme=light&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=4&theme=light&refresh=5s"
             class="w-full h-20 border-0"
             loading="lazy"
-            title="Exits"
+            title="Exits (1h)"
           ></iframe>
         </div>
         <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=5&theme=light&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=5&theme=light&refresh=5s"
             class="w-full h-20 border-0"
             loading="lazy"
-            title="Gate Opens"
+            title="Gate Opens (1h)"
           ></iframe>
         </div>
         <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=6&theme=light&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=6&theme=light&refresh=5s"
             class="w-full h-20 border-0"
             loading="lazy"
-            title="Payments"
-          ></iframe>
-        </div>
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=25&theme=light&refresh=5s"
-            class="w-full h-20 border-0"
-            loading="lazy"
-            title="POS Unpaid"
-          ></iframe>
-        </div>
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=26&theme=light&refresh=5s"
-            class="w-full h-20 border-0"
-            loading="lazy"
-            title="Exits Lost"
+            title="Payments (1h)"
           ></iframe>
         </div>
       </div>
@@ -185,41 +169,22 @@ defmodule AveroCommandWeb.DashboardLive do
               <% end %>
             </div>
           </.dash_card>
-
-          <div class="mt-4">
-            <.dash_card title="Gate Info">
-              <div class="p-3 space-y-2 text-sm">
-                <div class="flex justify-between">
-                  <span class="text-gray-500">Active Gates</span>
-                  <span class="font-medium"><%= length(@gates) %></span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-gray-500">Open</span>
-                  <span class="font-medium text-green-600"><%= Enum.count(@gates, fn g -> g.state && g.state.state == :open end) %></span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-gray-500">Faults</span>
-                  <span class="font-medium text-red-600"><%= Enum.count(@gates, fn g -> g.state && g.state.fault end) %></span>
-                </div>
-              </div>
-            </.dash_card>
-          </div>
         </div>
       </div>
 
       <!-- Charts Row -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <.dash_card title="Exits by Type (1h)">
+        <.dash_card title="Journey Outcomes (24h)">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=11&theme=light&from=now-1h&to=now&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=51&theme=light&from=now-24h&to=now&refresh=5s"
             class="w-full h-40 border-0"
             loading="lazy"
           ></iframe>
         </.dash_card>
 
-        <.dash_card title="People Tracking (30m)">
+        <.dash_card title="POS Zone Occupancy">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=8&theme=light&from=now-30m&to=now&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=30&theme=light&from=now-30m&to=now&refresh=5s"
             class="w-full h-40 border-0"
             loading="lazy"
           ></iframe>
@@ -262,9 +227,9 @@ defmodule AveroCommandWeb.DashboardLive do
           </div>
         </.dash_card>
 
-        <.dash_card title="Gate State (5m)">
+        <.dash_card title="Gate State Timeline">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=15&theme=light&from=now-5m&to=now&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=40&theme=light&from=now-30m&to=now&refresh=5s"
             class="w-full h-40 border-0"
             loading="lazy"
           ></iframe>
@@ -273,25 +238,25 @@ defmodule AveroCommandWeb.DashboardLive do
 
       <!-- Additional Metrics -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <.dash_card title="Cumulative Exits (24h)">
+        <.dash_card title="Today vs Yesterday">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=16&theme=light&from=now-24h&to=now&refresh=30s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=50&theme=light&from=now-24h&to=now&refresh=30s"
             class="w-full h-36 border-0"
             loading="lazy"
           ></iframe>
         </.dash_card>
 
-        <.dash_card title="Gate Cycle Duration">
+        <.dash_card title="Gate Latency">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=19&theme=light&from=now-1h&to=now&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=43&theme=light&from=now-1h&to=now&refresh=5s"
             class="w-full h-36 border-0"
             loading="lazy"
           ></iframe>
         </.dash_card>
 
-        <.dash_card title="Tailgating Detection">
+        <.dash_card title="Tailgating Rate">
           <iframe
-            src="https://grafana.e18n.net/d-solo/NETTO-GRANDI-gateway/avero-hq-live?orgId=1&panelId=20&theme=light&from=now-1h&to=now&refresh=5s"
+            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=22&theme=light&from=now-24h&to=now&refresh=5s"
             class="w-full h-36 border-0"
             loading="lazy"
           ></iframe>
