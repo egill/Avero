@@ -1,5 +1,6 @@
 //! Integration tests for configuration loading
 
+use gateway_poc::domain::types::GeometryId;
 use gateway_poc::infra::{Config, GateMode};
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -50,7 +51,7 @@ prometheus_port = 9091
     assert_eq!(config.mqtt_host(), "test-host");
     assert_eq!(config.mqtt_port(), 1884);
     assert_eq!(config.gate_mode(), &GateMode::Http);
-    assert_eq!(config.gate_zone(), 2003);
+    assert_eq!(config.gate_zone(), GeometryId(2003));
     assert_eq!(config.min_dwell_ms(), 5000);
     assert_eq!(config.prometheus_port(), 9091);
 }
