@@ -127,7 +127,13 @@ impl Rs485Monitor {
         // Validate checksum: sum all bytes (including checksum), add 1, should be 0
         let sum: u8 = data.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
         if sum.wrapping_add(1) != 0 {
-            warn!(checksum_error = true, "rs485_checksum_failed");
+            let hex_dump: String = data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ");
+            warn!(
+                checksum_error = true,
+                sum = %sum,
+                raw_bytes = %hex_dump,
+                "rs485_checksum_failed"
+            );
             return None;
         }
 
