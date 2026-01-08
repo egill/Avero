@@ -229,7 +229,7 @@ impl Stitcher {
         self.pending
             .iter()
             .map(|p| PendingTrackInfo {
-                track_id: p.person.track_id,
+                track_id: p.person.track_id.0,
                 last_zone: p.last_zone.clone(),
                 dwell_ms: p.person.accumulated_dwell_ms,
                 authorized: p.person.authorized,
@@ -242,13 +242,13 @@ impl Stitcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::Person;
+    use crate::domain::types::{Person, TrackId};
 
     #[test]
     fn test_stitch_within_criteria() {
         let mut stitcher = Stitcher::new();
 
-        let mut person = Person::new(100);
+        let mut person = Person::new(TrackId(100));
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
 
@@ -260,7 +260,7 @@ mod tests {
 
         assert!(result.is_some());
         let stitch = result.unwrap();
-        assert_eq!(stitch.person.track_id, 100);
+        assert_eq!(stitch.person.track_id, TrackId(100));
         assert!(stitch.person.authorized);
         assert_eq!(stitch.person.accumulated_dwell_ms, 5000);
         assert_eq!(stitch.distance_cm, 50);
@@ -271,7 +271,7 @@ mod tests {
     fn test_stitch_too_far() {
         let mut stitcher = Stitcher::new();
 
-        let person = Person::new(100);
+        let person = Person::new(TrackId(100));
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), None);
 
         // New track at [4.0, 1.0, 1.70] - 300cm away, too far
@@ -285,7 +285,7 @@ mod tests {
     fn test_stitch_height_mismatch() {
         let mut stitcher = Stitcher::new();
 
-        let person = Person::new(100);
+        let person = Person::new(TrackId(100));
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), None);
 
         // New track same location but 20cm taller
@@ -298,7 +298,7 @@ mod tests {
     fn test_no_position_no_match() {
         let mut stitcher = Stitcher::new();
 
-        let person = Person::new(100);
+        let person = Person::new(TrackId(100));
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), None);
 
         // New track without position
@@ -312,7 +312,7 @@ mod tests {
         let mut stitcher = Stitcher::new();
 
         // Pending track without position (rare but possible)
-        let person = Person::new(100);
+        let person = Person::new(TrackId(100));
         stitcher.add_pending(person, None, None);
 
         // New track with position - can't match pending without position
@@ -327,11 +327,11 @@ mod tests {
         let mut stitcher = Stitcher::new();
 
         // Add two pending tracks
-        let mut person1 = Person::new(100);
+        let mut person1 = Person::new(TrackId(100));
         person1.authorized = false;
         stitcher.add_pending(person1, Some([1.0, 1.0, 1.70]), None);
 
-        let mut person2 = Person::new(200);
+        let mut person2 = Person::new(TrackId(200));
         person2.authorized = true;
         stitcher.add_pending(person2, Some([1.2, 1.0, 1.70]), None); // Closer
 
@@ -340,7 +340,7 @@ mod tests {
 
         assert!(result.is_some());
         let stitch = result.unwrap();
-        assert_eq!(stitch.person.track_id, 200); // Closer match
+        assert_eq!(stitch.person.track_id, TrackId(200)); // Closer match
         assert!(stitch.person.authorized);
         assert_eq!(stitch.distance_cm, 10); // 10cm from person2
         assert_eq!(stitcher.pending_count(), 1); // person1 still pending
@@ -350,7 +350,7 @@ mod tests {
     fn test_absolutely_no_stitch() {
         let mut stitcher = Stitcher::new();
 
-        let mut person = Person::new(100);
+        let mut person = Person::new(TrackId(100));
         person.authorized = true;
         person.accumulated_dwell_ms = 99999;
 
@@ -371,7 +371,7 @@ mod tests {
     fn test_get_pending_info() {
         let mut stitcher = Stitcher::new();
 
-        let mut person = Person::new(100);
+        let mut person = Person::new(TrackId(100));
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));

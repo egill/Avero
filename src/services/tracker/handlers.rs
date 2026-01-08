@@ -5,7 +5,7 @@
 
 use super::Tracker;
 use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyOutcome};
-use crate::domain::types::{DoorStatus, ParsedEvent, Person};
+use crate::domain::types::{DoorStatus, ParsedEvent, Person, TrackId};
 use crate::infra::metrics::{GATE_STATE_CLOSED, GATE_STATE_MOVING, GATE_STATE_OPEN};
 use crate::io::{
     AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload,
@@ -49,7 +49,7 @@ impl Tracker {
 
             // Stitch found! Transfer state from old track to new track
             let old_track_id = person.track_id;
-            person.track_id = track_id;
+            person.track_id = TrackId(track_id);
             person.last_position = event.position;
 
             info!(
@@ -69,7 +69,7 @@ impl Tracker {
                     ts,
                     t: "stitch".to_string(),
                     tid: track_id,
-                    prev_tid: Some(old_track_id),
+                    prev_tid: Some(old_track_id.0),
                     auth: person.authorized,
                     dwell_ms: person.accumulated_dwell_ms,
                     stitch_dist_cm: Some(distance_cm as u64),
@@ -97,7 +97,7 @@ impl Tracker {
             let reentry_match = self.reentry_detector.try_match(height);
 
             debug!(track_id = %track_id, reentry = %reentry_match.is_some(), "track_created");
-            let mut person = Person::new(track_id);
+            let mut person = Person::new(TrackId(track_id));
             person.last_position = event.position;
             self.persons.insert(track_id, person);
 

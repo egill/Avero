@@ -1,7 +1,18 @@
 //! Shared types for the gateway PoC
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Instant;
+
+/// Newtype wrapper for track IDs to provide type safety
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(transparent)]
+pub struct TrackId(pub i64);
+
+impl std::fmt::Display for TrackId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// Xovis message structure for parsing
 #[derive(Debug, Deserialize)]
@@ -170,7 +181,7 @@ impl EventType {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Person {
-    pub track_id: i64,
+    pub track_id: TrackId,
     pub current_zone: Option<i32>,
     pub zone_entered_at: Option<Instant>,
     pub accumulated_dwell_ms: u64,
@@ -179,7 +190,7 @@ pub struct Person {
 }
 
 impl Person {
-    pub fn new(track_id: i64) -> Self {
+    pub fn new(track_id: TrackId) -> Self {
         Self {
             track_id,
             current_zone: None,
