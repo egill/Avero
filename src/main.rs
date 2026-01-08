@@ -14,7 +14,17 @@ mod infra;
 mod io;
 mod services;
 
+use clap::Parser;
 use infra::{Config, GateMode, Metrics};
+
+/// Gateway PoC - Automated retail gate control system
+#[derive(Parser, Debug)]
+#[command(name = "gateway-poc", version, about)]
+struct Args {
+    /// Path to TOML configuration file
+    #[arg(short, long, default_value = "config/dev.toml")]
+    config: String,
+}
 use io::{
     create_egress_channel, start_acc_listener, AccListenerConfig, MqttPublisher, Rs485Monitor,
 };
@@ -39,9 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("gateway-poc starting");
 
+    // Parse command line arguments using clap
+    let args = Args::parse();
+
     // Load configuration from TOML file (needed for broker config)
-    let args: Vec<String> = std::env::args().collect();
-    let config = Config::load(&args);
+    let config = Config::load_from_path(&args.config);
 
     // Start embedded MQTT broker with config
     infra::broker::start_embedded_broker(&config);

@@ -331,6 +331,8 @@ impl Config {
     }
 
     /// Determine config file path from args or environment
+    /// Used by tests; prefer clap-parsed arguments for main
+    #[allow(dead_code)]
     pub fn resolve_config_path(args: &[String]) -> String {
         // Check for --config argument
         for (i, arg) in args.iter().enumerate() {
@@ -414,17 +416,23 @@ impl Config {
         })
     }
 
-    /// Load configuration - tries TOML file first, falls back to defaults
-    pub fn load(args: &[String]) -> Self {
-        let config_path = Self::resolve_config_path(args);
-
-        match Self::from_file(&config_path) {
+    /// Load configuration from a specific path - tries TOML file first, falls back to defaults
+    pub fn load_from_path(config_path: &str) -> Self {
+        match Self::from_file(config_path) {
             Ok(config) => config,
             Err(e) => {
                 eprintln!("Warning: {}. Using defaults.", e);
                 Self::default()
             }
         }
+    }
+
+    /// Load configuration - tries TOML file first, falls back to defaults
+    /// Used by tests; prefer load_from_path with clap-parsed arguments for main
+    #[allow(dead_code)]
+    pub fn load(args: &[String]) -> Self {
+        let config_path = Self::resolve_config_path(args);
+        Self::load_from_path(&config_path)
     }
 
     /// Check if a geometry_id is a POS zone
