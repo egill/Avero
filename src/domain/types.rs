@@ -97,7 +97,9 @@ where
         where
             E: de::Error,
         {
-            Ok(TimestampValue::EpochMs(value as u64))
+            // Use TryFrom to safely convert i64 to u64, defaulting to 0 for negative values
+            let epoch_ms = u64::try_from(value).unwrap_or(0);
+            Ok(TimestampValue::EpochMs(epoch_ms))
         }
     }
 
