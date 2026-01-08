@@ -5,6 +5,7 @@
 //! When ACC matches any group member, all members are authorized.
 
 use crate::domain::journey::{epoch_ms, JourneyEvent};
+use crate::domain::types::TrackId;
 use crate::infra::config::Config;
 use crate::services::journey_manager::JourneyManager;
 use std::collections::HashMap;
@@ -265,11 +266,11 @@ impl AccCollector {
 
                 // Update journeys for all group members
                 for &track_id in &all_members {
-                    if let Some(journey) = journey_manager.get_mut_any(track_id) {
+                    if let Some(journey) = journey_manager.get_mut_any(TrackId(track_id)) {
                         journey.acc_matched = true;
                     }
                     journey_manager.add_event(
-                        track_id,
+                        TrackId(track_id),
                         JourneyEvent::new("acc", ts)
                             .with_zone(pos)
                             .with_extra(&format!("kiosk={kiosk_str},group={}", all_members.len())),
@@ -319,17 +320,15 @@ impl AccCollector {
 
                     // Update journeys for all group members
                     for &tid in &all_members {
-                        if let Some(journey) = journey_manager.get_mut_any(tid) {
+                        if let Some(journey) = journey_manager.get_mut_any(TrackId(tid)) {
                             journey.acc_matched = true;
                         }
                         journey_manager.add_event(
                             tid,
-                            JourneyEvent::new("acc", ts)
-                                .with_zone(pos)
-                                .with_extra(&format!(
-                                    "kiosk={kiosk_str},group={}",
-                                    all_members.len()
-                                )),
+                            JourneyEvent::new("acc", ts).with_zone(pos).with_extra(&format!(
+                                "kiosk={kiosk_str},group={}",
+                                all_members.len()
+                            )),
                         );
                     }
 
@@ -385,7 +384,7 @@ mod tests {
         let mut jm = JourneyManager::new();
 
         // Create journey
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         // Record entry to POS with sufficient dwell
         collector.record_pos_entry(100, "POS_1");
@@ -402,7 +401,7 @@ mod tests {
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
         assert_eq!(result, vec![100]);
-        let journey = jm.get(100).unwrap();
+        let journey = jm.get(TrackId(100)).unwrap();
         assert!(journey.acc_matched);
     }
 
@@ -411,7 +410,7 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         // Record exit with sufficient dwell
         collector.record_pos_exit(100, "POS_1", 8000);
@@ -427,7 +426,7 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
         collector.record_pos_entry(100, "POS_1");
 
         // Process ACC immediately (insufficient dwell)
@@ -466,8 +465,8 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
-        jm.new_journey(200);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
 
         // Two people enter same POS (forming a group)
         collector.record_pos_entry(100, "POS_1");
@@ -493,8 +492,8 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
-        jm.new_journey(200);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
 
         // Two people enter same POS (forming a group)
         collector.record_pos_entry(100, "POS_1");
@@ -517,7 +516,7 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
         collector.record_pos_entry(100, "POS_1");
 
         // Without accumulated dwell, should not match (just entered)
@@ -541,8 +540,8 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
-        jm.new_journey(200);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
 
         // First person enters
         collector.record_pos_entry(100, "POS_1");
@@ -572,8 +571,8 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
-        jm.new_journey(200);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
 
         // First person enters
         collector.record_pos_entry(100, "POS_1");
@@ -596,7 +595,7 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         // Record exit with sufficient dwell
         collector.record_pos_exit(100, "POS_1", 8000);
@@ -619,7 +618,7 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         // Record exit with sufficient dwell
         collector.record_pos_exit(100, "POS_1", 8000);
@@ -642,8 +641,8 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
-        jm.new_journey(200);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
 
         // Track 100 exits with sufficient dwell
         collector.record_pos_exit(100, "POS_1", 8000);
@@ -666,9 +665,9 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
-        jm.new_journey(200);
-        jm.new_journey(300);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+        jm.new_journey(TrackId(300));
 
         // Record multiple exits in sequence
         collector.record_pos_exit(100, "POS_1", 8000);
@@ -696,9 +695,9 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
-        jm.new_journey(200);
-        jm.new_journey(300);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+        jm.new_journey(TrackId(300));
 
         // Three people enter same POS (forming a group)
         collector.record_pos_entry(100, "POS_1");
@@ -721,9 +720,9 @@ mod tests {
         assert!(result.contains(&300));
 
         // Verify all journeys have acc_matched=true
-        assert!(jm.get(100).unwrap().acc_matched, "Track 100 should have acc_matched");
-        assert!(jm.get(200).unwrap().acc_matched, "Track 200 should have acc_matched");
-        assert!(jm.get(300).unwrap().acc_matched, "Track 300 should have acc_matched");
+        assert!(jm.get(TrackId(100)).unwrap().acc_matched, "Track 100 should have acc_matched");
+        assert!(jm.get(TrackId(200)).unwrap().acc_matched, "Track 200 should have acc_matched");
+        assert!(jm.get(TrackId(300)).unwrap().acc_matched, "Track 300 should have acc_matched");
     }
 
     #[test]
@@ -750,7 +749,7 @@ mod tests {
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
         collector.record_pos_exit(100, "POS_1", 8000);
 
         // Exactly at 1500ms - the condition is <= so this should pass

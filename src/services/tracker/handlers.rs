@@ -81,10 +81,9 @@ impl Tracker {
             self.persons.insert(TrackId(track_id), person);
 
             // Stitch in journey manager (handles event recording)
-            self.journey_manager
-                .stitch_journey(old_track_id, track_id, time_ms, distance_cm);
+            self.journey_manager.stitch_journey(old_track_id.0, track_id, time_ms, distance_cm);
 
-            if let Some(journey) = self.journey_manager.get_any(track_id) {
+            if let Some(journey) = self.journey_manager.get_any(TrackId(track_id)) {
                 if journey.authorized {
                     if let Some(p) = self.persons.get_mut(&TrackId(track_id)) {
                         p.authorized = true;
@@ -105,12 +104,12 @@ impl Tracker {
             if let Some(reentry) = reentry_match {
                 // Re-entry detected - create journey with parent reference
                 self.journey_manager.new_journey_with_parent(
-                    track_id,
+                    TrackId(track_id),
                     &reentry.parent_jid,
                     &reentry.parent_pid,
                 );
                 self.journey_manager.add_event(
-                    track_id,
+                    TrackId(track_id),
                     JourneyEvent::new("track_create", ts)
                         .with_extra(&format!("reentry_from={}", reentry.parent_jid)),
                 );
@@ -132,8 +131,7 @@ impl Tracker {
                 }
             } else {
                 self.journey_manager.new_journey(track_id);
-                self.journey_manager
-                    .add_event(track_id, JourneyEvent::new("track_create", ts));
+                self.journey_manager.add_event(track_id, JourneyEvent::new("track_create", ts));
 
                 // Publish create event to MQTT
                 if let Some(ref sender) = self.egress_sender {
@@ -201,18 +199,18 @@ impl Tracker {
             }
 
             // Update journey manager state before going to pending
-            if let Some(journey) = self.journey_manager.get_mut(track_id) {
+            if let Some(journey) = self.journey_manager.get_mut(TrackId(track_id)) {
                 journey.authorized = person.authorized;
                 journey.total_dwell_ms = person.accumulated_dwell_ms;
             }
             self.journey_manager.add_event(
                 track_id,
-                JourneyEvent::new("pending", ts)
-                    .with_zone(&last_zone)
-                    .with_extra(&format!("auth={},dwell={}", person.authorized, person.accumulated_dwell_ms)),
+                JourneyEvent::new("pending", ts).with_zone(&last_zone).with_extra(&format!(
+                    "auth={},dwell={}",
+                    person.authorized, person.accumulated_dwell_ms
+                )),
             );
-            self.journey_manager
-                .end_journey(track_id, JourneyOutcome::Abandoned);
+            self.journey_manager.end_journey(track_id, JourneyOutcome::Abandoned);
 
             // Add to stitcher for potential re-connection (with zone context)
             let last_zone_name = if last_zone.is_empty() {
@@ -256,13 +254,14 @@ impl Tracker {
             .or_insert_with(|| Person::new(track_id));
         person.current_zone = Some(geometry_id);
         let journey_authorized =
-            self.journey_manager.get_any(track_id).map(|j| j.authorized).unwrap_or(false);
+            self.journey_manager.get_any(TrackId(track_id)).map(|j| j.authorized).unwrap_or(false);
         let authorized = person.authorized || journey_authorized;
         let gate_already_opened =
-            self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
+            self.journey_manager.get_any(TrackId(track_id)).and_then(|j| j.gate_cmd_at).is_some();
 
         // Add to journey manager
-        self.journey_manager.add_event(track_id, JourneyEvent::new("zone_entry", ts).with_zone(&zone));
+        self.journey_manager
+            .add_event(track_id, JourneyEvent::new("zone_entry", ts).with_zone(&zone));
 
         // Publish zone event to MQTT
         if let Some(ref sender) = self.egress_sender {
@@ -349,12 +348,12 @@ impl Tracker {
 
                 // Update journey manager
                 self.journey_manager.add_event(
-                    track_id,
+                    TrackId(track_id),
                     JourneyEvent::new("zone_exit", ts)
                         .with_zone(&zone)
                         .with_extra(&format!("dwell={dwell_ms}")),
                 );
-                if let Some(journey) = self.journey_manager.get_mut(track_id) {
+                if let Some(journey) = self.journey_manager.get_mut(TrackId(track_id)) {
                     journey.total_dwell_ms = person.accumulated_dwell_ms;
                 }
 
@@ -373,7 +372,7 @@ impl Tracker {
             }
         } else {
             self.journey_manager
-                .add_event(track_id, JourneyEvent::new("zone_exit", ts).with_zone(&zone));
+                .add_event(TrackId(track_id), JourneyEvent::new("zone_exit", ts).with_zone(&zone));
             None
         };
 
@@ -432,13 +431,13 @@ impl Tracker {
 
         // Add line cross event to journey manager
         self.journey_manager.add_event(
-            track_id,
+            TrackId(track_id),
             JourneyEvent::new(event_type, ts).with_extra(&format!("dir={direction}")),
         );
 
         // Mark crossed_entry if this is the entry line
         if self.config.entry_line() == Some(geometry_id) && direction == "forward" {
-            if let Some(journey) = self.journey_manager.get_mut(track_id) {
+            if let Some(journey) = self.journey_manager.get_mut(TrackId(track_id)) {
                 journey.crossed_entry = true;
             }
         }
@@ -452,7 +451,7 @@ impl Tracker {
             // Get journey info for logging
             let (gate_cmd_at, event_count, started_at) = self
                 .journey_manager
-                .get(track_id)
+                .get(TrackId(track_id))
                 .map(|j| (j.gate_cmd_at, j.events.len(), j.started_at))
                 .unwrap_or((None, 0, 0));
             let duration_ms = if started_at > 0 { epoch_ms().saturating_sub(started_at) } else { 0 };
@@ -468,7 +467,7 @@ impl Tracker {
             );
 
             // Sync final state to journey manager and complete
-            if let Some(journey) = self.journey_manager.get_mut(track_id) {
+            if let Some(journey) = self.journey_manager.get_mut(TrackId(track_id)) {
                 journey.authorized = person.authorized;
                 journey.total_dwell_ms = person.accumulated_dwell_ms;
 
@@ -480,8 +479,7 @@ impl Tracker {
                 // Record exit in Prometheus metrics
                 self.metrics.record_exit();
             }
-            self.journey_manager
-                .end_journey(track_id, JourneyOutcome::Completed);
+            self.journey_manager.end_journey(track_id, JourneyOutcome::Completed);
         } else {
             // Put person back - not complete yet
             self.persons.insert(TrackId(track_id), person);
@@ -557,7 +555,7 @@ impl Tracker {
             if let Some(person) = self.persons.get_mut(&TrackId(track_id)) {
                 person.authorized = true;
             }
-            if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+            if let Some(journey) = self.journey_manager.get_mut_any(TrackId(track_id)) {
                 journey.authorized = true;
             } else {
                 self.metrics.record_acc_no_journey();
@@ -590,7 +588,7 @@ impl Tracker {
         let gate_zone = self.config.gate_zone();
         let gate_zone_name = self.config.zone_name(gate_zone);
         for &track_id in &matched_tracks {
-            if let Some(journey) = self.journey_manager.get_any(track_id) {
+            if let Some(journey) = self.journey_manager.get_any(TrackId(track_id)) {
                 let gate_entry_ts = journey
                     .events
                     .iter()
@@ -644,7 +642,7 @@ impl Tracker {
                 .and_then(|p| p.current_zone)
                 .is_some_and(|z| z == gate_zone);
             let gate_already_opened =
-                self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
+                self.journey_manager.get_any(TrackId(track_id)).and_then(|j| j.gate_cmd_at).is_some();
             if in_gate_zone && !gate_already_opened {
                 self.send_gate_open_command(track_id, ts, "acc", received_at)
                     .await;
@@ -761,11 +759,11 @@ impl Tracker {
         let e2e_latency_us = received_at.elapsed().as_micros() as u64;
         self.metrics.record_gate_latency(e2e_latency_us);
 
-        if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+        if let Some(journey) = self.journey_manager.get_mut_any(TrackId(track_id)) {
             journey.gate_cmd_at = Some(ts);
         }
         self.journey_manager.add_event(
-            track_id,
+            TrackId(track_id),
             JourneyEvent::new("gate_cmd", ts)
                 .with_extra(&format!("cmd_us={cmd_latency_us},e2e_us={e2e_latency_us}")),
         );

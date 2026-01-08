@@ -4,7 +4,7 @@
 //! changes from the RS485 monitor.
 
 use crate::domain::journey::{epoch_ms, JourneyEvent};
-use crate::domain::types::DoorStatus;
+use crate::domain::types::{DoorStatus, TrackId};
 use crate::services::journey_manager::JourneyManager;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -123,14 +123,14 @@ impl DoorCorrelator {
             );
 
             // Update journey with per-command door state
-            if let Some(journey) = journey_manager.get_mut(track_id) {
+            if let Some(journey) = journey_manager.get_mut(TrackId(track_id)) {
                 journey.gate_opened_at = Some(now_ms);
                 journey.gate_was_open = cmd.door_was_open;
             }
 
             // Add event to journey
             journey_manager.add_event(
-                track_id,
+                TrackId(track_id),
                 JourneyEvent::new("gate_open", now_ms).with_extra(&format!("delta_ms={delta_ms}")),
             );
 
@@ -194,7 +194,7 @@ mod tests {
     fn test_door_open_correlates() {
         let mut correlator = DoorCorrelator::new();
         let mut jm = JourneyManager::new();
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         // Record gate command
         correlator.record_gate_cmd(100);
@@ -203,7 +203,7 @@ mod tests {
         let result = correlator.process_door_state(DoorStatus::Open, &mut jm);
 
         assert_eq!(result, Some(100));
-        let journey = jm.get(100).unwrap();
+        let journey = jm.get(TrackId(100)).unwrap();
         assert!(journey.gate_opened_at.is_some());
         assert!(!journey.gate_was_open);
     }
@@ -212,7 +212,7 @@ mod tests {
     fn test_door_was_already_open() {
         let mut correlator = DoorCorrelator::new();
         let mut jm = JourneyManager::new();
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         // Door is already open when command sent
         correlator.last_status = DoorStatus::Open;
@@ -224,7 +224,7 @@ mod tests {
         let result = correlator.process_door_state(DoorStatus::Open, &mut jm);
 
         assert_eq!(result, Some(100));
-        let journey = jm.get(100).unwrap();
+        let journey = jm.get(TrackId(100)).unwrap();
         assert!(journey.gate_was_open);
     }
 
@@ -243,7 +243,7 @@ mod tests {
     fn test_no_correlation_door_closed() {
         let mut correlator = DoorCorrelator::new();
         let mut jm = JourneyManager::new();
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         correlator.record_gate_cmd(100);
 
@@ -257,7 +257,7 @@ mod tests {
     fn test_no_correlation_already_open() {
         let mut correlator = DoorCorrelator::new();
         let mut jm = JourneyManager::new();
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         // Door already open
         correlator.last_status = DoorStatus::Open;
@@ -293,7 +293,7 @@ mod tests {
     fn test_moving_to_open_transition() {
         let mut correlator = DoorCorrelator::new();
         let mut jm = JourneyManager::new();
-        jm.new_journey(100);
+        jm.new_journey(TrackId(100));
 
         correlator.record_gate_cmd(100);
 
@@ -310,8 +310,8 @@ mod tests {
     fn test_newest_command_selected() {
         let mut correlator = DoorCorrelator::new();
         let mut jm = JourneyManager::new();
-        jm.new_journey(100);
-        jm.new_journey(200);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
 
         // Record two gate commands - 100 first, then 200
         correlator.record_gate_cmd(100);
@@ -331,8 +331,8 @@ mod tests {
     fn test_per_command_door_was_open() {
         let mut correlator = DoorCorrelator::new();
         let mut jm = JourneyManager::new();
-        jm.new_journey(100);
-        jm.new_journey(200);
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
 
         // First command: door is closed
         correlator.last_status = DoorStatus::Closed;
@@ -350,7 +350,7 @@ mod tests {
 
         // Should match track 200 (newest) and use ITS door_was_open (true)
         assert_eq!(result, Some(200));
-        let journey = jm.get(200).unwrap();
+        let journey = jm.get(TrackId(200)).unwrap();
         assert!(journey.gate_was_open); // From track 200's command
     }
 }

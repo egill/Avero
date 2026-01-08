@@ -385,12 +385,7 @@ async fn test_gate_opens_when_acc_after_gate_entry() {
 
     let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
     assert_eq!(summary.gate_commands_sent, 1);
-    assert!(tracker
-        .journey_manager
-        .get(100)
-        .unwrap()
-        .gate_cmd_at
-        .is_some());
+    assert!(tracker.journey_manager.get(100).unwrap().gate_cmd_at.is_some());
 }
 
 #[tokio::test]
@@ -429,10 +424,5 @@ async fn test_acc_authorization_survives_pending_and_stitch() {
 
     let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
     assert_eq!(summary.gate_commands_sent, 1);
-    assert!(tracker
-        .journey_manager
-        .get(200)
-        .unwrap()
-        .gate_cmd_at
-        .is_some());
+    assert!(tracker.journey_manager.get(200).unwrap().gate_cmd_at.is_some());
 }
