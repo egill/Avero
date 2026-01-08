@@ -21,8 +21,9 @@ pub fn epoch_ms() -> u64 {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum JourneyOutcome {
     InProgress,
-    Completed, // crossed EXIT
-    Abandoned, // track deleted, never crossed EXIT
+    Completed,       // crossed EXIT line forward
+    ReturnedToStore, // went back into store (backward entry cross or zone entry to STORE)
+    Lost,            // track disappeared between ENTRY and EXIT (true loss)
 }
 
 impl JourneyOutcome {
@@ -31,7 +32,8 @@ impl JourneyOutcome {
         match self {
             JourneyOutcome::InProgress => "in_progress",
             JourneyOutcome::Completed => "exit",
-            JourneyOutcome::Abandoned => "abandoned",
+            JourneyOutcome::ReturnedToStore => "returned",
+            JourneyOutcome::Lost => "lost",
         }
     }
 }
@@ -196,6 +198,36 @@ impl Journey {
     /// Get the current/last track ID
     pub fn current_track_id(&self) -> TrackId {
         *self.tids.last().unwrap_or(&TrackId(0))
+    }
+
+    /// Check if this journey has meaningful activity (not just STORE zone)
+    ///
+    /// A journey is considered meaningful if it:
+    /// - Had dwell time in a POS zone (total_dwell_ms > 0)
+    /// - Received an ACC match
+    /// - Had a gate command sent
+    /// - Visited any zone with POS, GATE, APPROACH, or EXIT in the name
+    pub fn has_meaningful_activity(&self) -> bool {
+        // Had dwell time or ACC match or gate command
+        if self.total_dwell_ms > 0 || self.acc_matched || self.gate_cmd_at.is_some() {
+            return true;
+        }
+
+        // Check zone events for meaningful areas
+        for event in &self.events {
+            if let Some(zone) = &event.z {
+                let zone_upper = zone.to_uppercase();
+                if zone_upper.contains("POS")
+                    || zone_upper.contains("GATE")
+                    || zone_upper.contains("APPROACH")
+                    || zone_upper.contains("EXIT")
+                {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     /// Convert to short-key JSON string (without site)
@@ -365,6 +397,7 @@ mod tests {
     fn test_outcome_as_str() {
         assert_eq!(JourneyOutcome::InProgress.as_str(), "in_progress");
         assert_eq!(JourneyOutcome::Completed.as_str(), "exit");
-        assert_eq!(JourneyOutcome::Abandoned.as_str(), "abandoned");
+        assert_eq!(JourneyOutcome::ReturnedToStore.as_str(), "returned");
+        assert_eq!(JourneyOutcome::Lost.as_str(), "lost");
     }
 }

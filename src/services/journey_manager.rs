@@ -213,7 +213,9 @@ impl JourneyManager {
                     self.pid_by_track.remove(tid);
                 }
 
-                if pending.journey.crossed_entry {
+                // Filter: must have crossed entry AND have meaningful activity
+                // (not just wandering in STORE zone)
+                if pending.journey.crossed_entry && pending.journey.has_meaningful_activity() {
                     info!(
                         jid = %pending.journey.jid,
                         pid = %pending.journey.pid,
@@ -222,11 +224,17 @@ impl JourneyManager {
                         "journey_ready_for_egress"
                     );
                     ready.push(pending.journey);
-                } else {
+                } else if !pending.journey.crossed_entry {
                     debug!(
                         jid = %pending.journey.jid,
                         tids = ?pending.journey.tids,
                         "journey_discarded_no_entry"
+                    );
+                } else {
+                    debug!(
+                        jid = %pending.journey.jid,
+                        tids = ?pending.journey.tids,
+                        "journey_discarded_store_only"
                     );
                 }
             }
@@ -334,7 +342,7 @@ mod tests {
         manager.new_journey(TrackId(100));
 
         // End journey (moves to pending)
-        manager.end_journey(TrackId(100), JourneyOutcome::Abandoned);
+        manager.end_journey(TrackId(100), JourneyOutcome::Lost);
         assert_eq!(manager.pending_count(), 1);
 
         // Stitch from pending
@@ -364,7 +372,7 @@ mod tests {
         manager.new_journey(TrackId(100));
 
         // End journey without crossing entry
-        manager.end_journey(TrackId(100), JourneyOutcome::Abandoned);
+        manager.end_journey(TrackId(100), JourneyOutcome::Lost);
 
         // Manually set eligible_at to past
         if let Some(pending) = manager.pending_egress.get_mut(&TrackId(100)) {
@@ -383,9 +391,10 @@ mod tests {
         let mut manager = JourneyManager::new();
         manager.new_journey(TrackId(100));
 
-        // Mark as crossed entry
+        // Mark as crossed entry and add meaningful activity (dwell time)
         if let Some(j) = manager.get_mut(TrackId(100)) {
             j.crossed_entry = true;
+            j.total_dwell_ms = 5000; // Meaningful activity
         }
 
         manager.end_journey(TrackId(100), JourneyOutcome::Completed);
@@ -403,12 +412,37 @@ mod tests {
     }
 
     #[test]
+    fn test_tick_filters_store_only() {
+        let mut manager = JourneyManager::new();
+        manager.new_journey(TrackId(100));
+
+        // Mark as crossed entry but NO meaningful activity (only STORE zone)
+        if let Some(j) = manager.get_mut(TrackId(100)) {
+            j.crossed_entry = true;
+            // No dwell, no ACC, no gate cmd, no POS/GATE/EXIT zones
+        }
+
+        manager.end_journey(TrackId(100), JourneyOutcome::Lost);
+
+        // Manually set eligible_at to past
+        if let Some(pending) = manager.pending_egress.get_mut(&TrackId(100)) {
+            pending.eligible_at = Instant::now() - Duration::from_secs(1);
+        }
+
+        // Should be filtered out - no meaningful activity
+        let ready = manager.tick();
+        assert!(ready.is_empty());
+        assert_eq!(manager.pending_count(), 0); // Was processed and discarded
+    }
+
+    #[test]
     fn test_tick_respects_delay() {
         let mut manager = JourneyManager::new();
         manager.new_journey(TrackId(100));
 
         if let Some(j) = manager.get_mut(TrackId(100)) {
             j.crossed_entry = true;
+            j.total_dwell_ms = 5000; // Meaningful activity
         }
 
         manager.end_journey(TrackId(100), JourneyOutcome::Completed);

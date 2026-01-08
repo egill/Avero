@@ -50,6 +50,11 @@ defmodule AveroCommand.MQTT.EventRouter do
     end
   end
 
+  def route_event(topic, event_data) do
+    Logger.warning("Invalid event format: topic=#{inspect(topic)}, data=#{inspect(event_data)}")
+    :error
+  end
+
   # Legacy routing for old avero/events/* format
   defp route_legacy_event(topic, event_data) do
     event_type = extract_event_type(topic)
@@ -73,11 +78,6 @@ defmodule AveroCommand.MQTT.EventRouter do
     Evaluator.evaluate(event)
 
     :ok
-  end
-
-  def route_event(topic, event_data) do
-    Logger.warning("Invalid event format: topic=#{inspect(topic)}, data=#{inspect(event_data)}")
-    :error
   end
 
   # Extract event type from topic

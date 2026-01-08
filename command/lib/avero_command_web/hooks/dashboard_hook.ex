@@ -21,6 +21,7 @@ defmodule AveroCommandWeb.DashboardHook do
   end
 
   # Map LiveView modules to their paths
+  defp module_to_path(AveroCommandWeb.DashboardLive), do: "/dashboard"
   defp module_to_path(AveroCommandWeb.IncidentFeedLive), do: "/"
   defp module_to_path(AveroCommandWeb.IncidentDetailLive), do: "/incidents"
   defp module_to_path(AveroCommandWeb.JourneyFeedLive), do: "/journeys"

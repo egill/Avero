@@ -146,7 +146,7 @@ mod tests {
         // Write second journey
         let mut journey2 = Journey::new(TrackId(200));
         journey2.crossed_entry = true;
-        journey2.complete(JourneyOutcome::Abandoned);
+        journey2.complete(JourneyOutcome::Lost);
         egress.write_journey(&journey2);
 
         // Verify both journeys are in file

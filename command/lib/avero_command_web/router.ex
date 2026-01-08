@@ -32,6 +32,9 @@ defmodule AveroCommandWeb.Router do
     pipe_through [:browser, :require_auth]
 
     live_session :default, on_mount: [{AveroCommandWeb.DashboardHook, :default}, {AveroCommandWeb.SiteFilterHook, :default}, {AveroCommandWeb.AuthHook, :default}] do
+      # Gate dashboard (real-time gate status)
+      live "/dashboard", DashboardLive, :index
+
       # Main incident feed (LiveView)
       live "/", IncidentFeedLive, :index
 

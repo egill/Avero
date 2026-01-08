@@ -208,7 +208,12 @@ impl Tracker {
                     &format!("auth={},dwell={}", person.authorized, person.accumulated_dwell_ms),
                 ),
             );
-            self.journey_manager.end_journey(track_id, JourneyOutcome::Abandoned);
+
+            // Determine journey outcome based on last zone and events
+            // ReturnedToStore: went back into store (POS zone, STORE, or backward entry cross)
+            // Lost: disappeared near gate/exit area
+            let outcome = self.determine_journey_outcome(track_id, &person, &last_zone);
+            self.journey_manager.end_journey(track_id, outcome);
 
             // Add to stitcher for potential re-connection (with zone context)
             let last_zone_name = if last_zone.is_empty() { None } else { Some(last_zone.clone()) };
@@ -427,10 +432,18 @@ impl Tracker {
             JourneyEvent::new(event_type, ts).with_extra(&format!("dir={direction}")),
         );
 
-        // Mark crossed_entry if this is the entry line
-        if self.config.entry_line() == Some(geometry_id.0) && direction == "forward" {
-            if let Some(journey) = self.journey_manager.get_mut(track_id) {
-                journey.crossed_entry = true;
+        // Mark crossed_entry if this is the entry line (forward direction)
+        // Backward crossing means person is returning to store
+        if self.config.entry_line() == Some(geometry_id.0) {
+            if direction == "forward" {
+                if let Some(journey) = self.journey_manager.get_mut(track_id) {
+                    journey.crossed_entry = true;
+                }
+            } else if direction == "backward" {
+                info!(
+                    track_id = %track_id,
+                    "entry_line_backward_returning_to_store"
+                );
             }
         }
 
@@ -766,5 +779,66 @@ impl Tracker {
         }
 
         self.door_correlator.record_gate_cmd(track_id);
+    }
+
+    /// Determine the journey outcome when a track is deleted
+    ///
+    /// Returns:
+    /// - `ReturnedToStore` if person went back into store (POS zone, STORE zone, or backward entry cross)
+    /// - `Lost` if person disappeared near gate/exit area
+    fn determine_journey_outcome(
+        &self,
+        track_id: TrackId,
+        person: &Person,
+        last_zone: &str,
+    ) -> JourneyOutcome {
+        // Check journey events for backward entry line crossing
+        if let Some(journey) = self.journey_manager.get_any(track_id) {
+            // Look for backward entry line crossing - strong signal they returned to store
+            for event in journey.events.iter().rev() {
+                if event.t == JourneyEventType::EntryCross {
+                    if let Some(extra) = &event.extra {
+                        if extra.contains("dir=backward") {
+                            info!(
+                                track_id = %track_id,
+                                "journey_returned_backward_entry"
+                            );
+                            return JourneyOutcome::ReturnedToStore;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check last zone - if in POS or STORE area, they went back to shopping
+        if let Some(zone_id) = person.current_zone {
+            if self.config.is_pos_zone(zone_id.0) {
+                info!(
+                    track_id = %track_id,
+                    zone = %last_zone,
+                    "journey_returned_pos_zone"
+                );
+                return JourneyOutcome::ReturnedToStore;
+            }
+        }
+
+        // Check zone name for STORE indication
+        let zone_upper = last_zone.to_uppercase();
+        if zone_upper.contains("STORE") || zone_upper.contains("SHOPPING") {
+            info!(
+                track_id = %track_id,
+                zone = %last_zone,
+                "journey_returned_store_zone"
+            );
+            return JourneyOutcome::ReturnedToStore;
+        }
+
+        // If near gate/exit or unknown, consider it lost
+        info!(
+            track_id = %track_id,
+            zone = %last_zone,
+            "journey_lost"
+        );
+        JourneyOutcome::Lost
     }
 }

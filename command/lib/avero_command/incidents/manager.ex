@@ -10,6 +10,7 @@ defmodule AveroCommand.Incidents.Manager do
   alias AveroCommand.Repo
   alias AveroCommand.Incidents
   alias AveroCommand.Incidents.Incident
+  alias AveroCommand.Metrics
 
   @escalation_check_interval 60_000  # Check every minute
   @dedup_window_seconds 300  # 5 minute deduplication window
@@ -42,12 +43,15 @@ defmodule AveroCommand.Incidents.Manager do
     case check_duplicate(attrs) do
       {:duplicate, existing_id} ->
         Logger.debug("Duplicate incident detected, skipping: #{existing_id}")
+        Metrics.inc_incident_duplicate(attrs[:type], attrs[:site])
         {:reply, {:ok, :duplicate}, state}
 
       :ok ->
         case Incidents.create(attrs) do
           {:ok, incident} ->
             Logger.info("Incident created: #{incident.type} (#{incident.severity}) at #{incident.site}")
+            Metrics.inc_incident_created(incident.type, incident.severity, incident.category, incident.site)
+            update_active_incidents_gauge()
             execute_auto_actions(incident)
             {:reply, {:ok, incident}, state}
 
@@ -139,5 +143,15 @@ defmodule AveroCommand.Incidents.Manager do
         # TODO: Send escalation notification
       end
     end)
+
+    # Update active incidents gauge during escalation check
+    update_active_incidents_gauge()
+  end
+
+  defp update_active_incidents_gauge do
+    count = Incidents.list_active() |> length()
+    Metrics.set_active_incidents(count)
+  rescue
+    _ -> :ok
   end
 end
