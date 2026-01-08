@@ -1,119 +1,191 @@
-# Ralph Progress Log - Code Quality & Performance
-Started: 2026-01-07
-
-## Codebase Patterns
-
-### Architecture
-- Async runtime: Tokio
-- Domain types: src/domain/ (types.rs, journey.rs)
-- Services: src/services/ (tracker is central orchestrator)
-- I/O adapters: src/io/ (mqtt, rs485, cloudplus, egress, prometheus)
-- Infrastructure: src/infra/ (config, metrics, broker)
-
-### Testing
-- Primary tests: src/services/tracker/tests.rs
-- Test helpers: create_test_tracker(), create_event()
-- All tests use #[tokio::test]
-- Run: cargo test
-
-### Conventions
-- Metrics use AtomicU64 for lock-free counters
-- FxHashMap for integer-keyed maps (track_id: i64, geometry_id: i32) - faster than std HashMap
-- JourneyEvent uses builder pattern with_type().with_zone()
-- Config via TOML in config/ directory
-
-### Dependencies Already Available
-- serde, serde_json (serialization)
-- tokio (async runtime)
-- tracing (logging)
-- clap (CLI parsing - not yet used)
-- parking_lot (better Mutex - no poisoning)
-- rustc-hash (fast FxHashMap for integer keys)
-
-### Gotchas
-- Mutex in metrics.rs now uses parking_lot::Mutex (no poisoning, no .unwrap() needed)
-- cargo clippy -- -D warnings now passes clean
-- Cross-compile target: aarch64-unknown-linux-gnu (RPi5)
-- Unused fields prefixed with underscore to suppress dead_code warnings
-
-## Key Files
-- Cargo.toml (dependencies, profiles)
-- src/main.rs (entry point)
-- src/domain/types.rs (ParsedEvent, Person, EventType)
-- src/domain/journey.rs (Journey, JourneyEvent, JourneyOutcome)
-- src/infra/metrics.rs (Metrics struct)
-- src/services/tracker/mod.rs (Tracker - main orchestrator)
+# Ralph Progress Log - Test Coverage Analysis
+Started: 2026-01-08
 
 ---
 
-## 2026-01-07 - US-001 - Add rust-toolchain.toml to pin Rust version
-- Files changed: rust-toolchain.toml (new), CLAUDE.md
-- **Learnings:** rust-toolchain.toml uses [toolchain] section with channel key. 108 tests currently pass. 28 clippy warnings exist (addressed by US-002).
+## Deployment Log
+
+### 2026-01-08 10:27:54 UTC - Gate Correlation Fix Deployed (netto-grandi)
+
+**Issue**: Gate latency showing 2-3 seconds instead of expected ~250ms
+
+**Root Cause**: Old binary (`gateway-poc-bin` from Jan 7 19:52) correlated on `Moving` state,
+which happens TWICE per door cycle (opening AND closing). The 2-3s "latency" was actually
+measuring from gate_cmd to door CLOSING, not opening.
+
+**Fix**: Deployed newer binary (Jan 7 23:17) that correlates on `Open` state instead.
+
+**Change**: `gate_moving_correlated` → `gate_open_correlated`
+
+**Expected Result**: Gate latency should now show actual door open time (~250-600ms)
+
+**Data Analysis**: Compare journeys before vs after 10:27:54 UTC to verify improvement.
+
+### 2026-01-08 10:45:54 UTC - ACC Dwell Matching Fix Deployed (netto-grandi)
+
+**Issue**: ACC events not matching customers who had sufficient session dwell but 0 accumulated dwell
+
+**Root Cause**: Commit 59ad8ab introduced a bug - `members_with_sufficient_dwell()` used accumulated_dwell_ms
+exclusively, but accumulated_dwell_ms only updates on POS zone EXIT. While IN a zone, it stays at 0 (or
+previous value). So customers with 90s+ session dwell in a POS zone weren't matching because accumulated=0.
+
+**Symptom**: Logs showed `acc_group_exists_but_no_qualified_members` with `dwells_ms=[(track, 90058, Some(0))]`
+meaning 90s session dwell but 0 accumulated.
+
+**Fix**: Use MAX(session_dwell, accumulated_dwell) instead of just accumulated_dwell.
+- session_dwell handles "still in zone" case (accumulated hasn't updated yet)
+- accumulated_dwell handles zone flicker (re-entry after brief exit)
+
+**Change**: `members_with_sufficient_dwell()` now computes `effective_dwell = session_dwell.max(accumulated)`
+
+**Expected Result**: ACC events should match customers who are currently in POS zone with sufficient time.
+
 ---
 
-## 2026-01-07 - US-002 - Fix all clippy warnings
-- Files changed: src/bin/gate_test.rs, src/bin/tui.rs, src/domain/mod.rs, src/infra/config.rs, src/infra/metrics.rs, src/io/cloudplus.rs, src/io/mod.rs, src/io/rs485.rs, src/services/acc_collector.rs, src/services/door_correlator.rs, src/services/journey_manager.rs, src/services/mod.rs, src/services/stitcher.rs, src/services/tracker/handlers.rs, src/services/tracker/mod.rs
-- **Learnings:**
-  - Use `std::array::from_fn(|_| AtomicU64::new(0))` instead of const with interior mutability
-  - Prefix unused struct fields with underscore (e.g., `_field: Type`) to suppress dead_code warnings
-  - For serde deserialization of ignored fields, use `#[serde(default, rename = "field_name")]` with underscore-prefixed field
-  - Combine duplicate if branches with `||` operator
-  - `cargo clippy --fix` auto-fixes: useless format!, option_as_ref_deref, bind_instead_of_map, println_empty_string, unused imports
-  - #[allow(dead_code)] is acceptable for public API methods not yet used
-  - #[allow(clippy::too_many_arguments)] acceptable for internal functions when refactoring is impractical
+## Test Gap Analysis Summary
+
+Analysis Date: 2026-01-08
+Current Test Count: ~100 tests
+Overall Coverage: ~35% (estimated by module analysis)
+
+### Coverage by Layer
+
+| Layer | Tests | Coverage | Risk Level |
+|-------|-------|----------|------------|
+| Domain | 12 | ~40% | Medium |
+| Services | 55 | ~60% | High |
+| IO | 22 | ~20% | CRITICAL |
+| Infrastructure | 18 | ~10% | CRITICAL |
+
+### Zero-Test Modules (CRITICAL)
+
+1. `io/acc_listener.rs` - Accepts untrusted network input from payment terminals
+2. `io/egress_channel.rs` - Data pipeline to cloud
+3. `io/mqtt_egress.rs` - MQTT publishing with QoS levels
+4. `infra/broker.rs` - Embedded MQTT broker startup
+
+### Business Logic Boundaries Untested (CRITICAL)
+
+These time-sensitive boundaries determine customer authorization:
+
+| Boundary | Module | Value | Impact |
+|----------|--------|-------|--------|
+| ACC group window | acc_collector | 10s | Customers grouped for payment matching |
+| ACC recent exit | acc_collector | 1.5s | Authorization after leaving POS |
+| Stitch grace time | stitcher | 4.5s/8s | Track identity continuity |
+| Stitch distance | stitcher | 180cm/300cm | Spatial matching threshold |
+| Door correlation | door_correlator | 5s | Gate command matching |
+| Re-entry window | reentry_detector | 30s | Repeat visit linking |
+| Height tolerance | stitcher/reentry | 10cm | Person height matching |
+
+### Key Untested Scenarios
+
+1. **Gate Blocked**: Unauthorized customer enters gate zone - common in production
+2. **Chain Stitching**: Track A→B→C through multiple sensor gaps
+3. **GROUP Bit Filtering**: Xovis group tracks (0x80000000 bit) should be skipped
+4. **Re-entry Flow**: Customer exits and re-enters - journey should have parent reference
+5. **Config Silent Fallback**: Invalid config silently uses defaults - masks production issues
+
+### User Stories (US-001 to US-012)
+
+All priority 1 (testing category):
+
+- US-001: ACC Collector time boundary tests
+- US-002: Stitcher time and distance boundary tests
+- US-003: Door Correlator boundary tests
+- US-004: Re-entry Detection tests
+- US-005: Tracker edge case tests
+- US-006: ACC Listener unit tests
+- US-007: Egress Channel and MQTT Egress tests
+- US-008: Protocol error handling tests
+- US-009: Config validation tests
+- US-010: Broker startup tests
+- US-011: Domain type parsing tests
+- US-012: Journey Manager state tests
+- US-013: Barcode Fallback TDD tests (NEW)
+- US-014: Journey scenario pattern tests (NEW)
+
+### Barcode Fallback Feature (TDD)
+
+New feature to implement with tests first:
+- Receipt ID from ACC becomes barcode
+- 45-minute TTL, single use
+- Invalidated on physical exit (EXIT line cross)
+- If Xovis loses track, barcode scan still opens gate
+- API endpoint: POST /api/v1/barcode/scan (spec in ~/Documents/GitHub/Avero/docs/openapi.yaml)
+- Stats: generated, scanned, invalidated_by_exit (both totals + time-series)
+
+### Journey Patterns from TimescaleDB
+
+Production data analysis (1343 journeys):
+- **paid_exit** (782): entry_cross → POS dwell → ACC → gate_cmd → exit_cross
+- **unpaid_exit** (270): entry_cross → brief POS → backward entry_cross
+- **lost_unauthorized** (291): entry_cross → POS → tracking_lost
+
+Event counts: 4-138 events per journey, most have 10-20
+
+Key patterns to test:
+- Multiple entry crosses (forward/backward/forward)
+- Stitched journeys (pending → stitch → continue)
+- Re-entry journeys (reentry_from parent reference)
+- Mid-store spawn (track_create without entry_cross)
+- Multi-POS visits with accumulated dwell
+
+### Test Philosophy
+
+Focus on meaningful business logic tests, not coverage metrics:
+- Time boundary tests at critical authorization thresholds
+- State machine transitions for door/journey lifecycle
+- Error handling for network/protocol failures
+- Validation of config to prevent production misconfigurations
+
+Avoid:
+- Testing trivial getters/setters
+- Duplicating existing integration coverage
+- Tests that just exercise code without business value
+
 ---
 
-## 2026-01-07 - US-005 - Add rustc-hash and replace integer-keyed HashMaps with FxHashMap
-- Files changed: Cargo.toml, Cargo.lock, src/services/tracker/mod.rs, src/services/journey_manager.rs
-- **Learnings:**
-  - FxHashMap is a drop-in replacement for HashMap with faster performance for integer keys
-  - Use `FxHashMap::default()` instead of `FxHashMap::new()` for initialization
-  - Import with `use rustc_hash::FxHashMap;`
-  - mqtt.rs uses std::collections::HashMap locally for temporary position tracking - no need to change local variables
+## Architecture Reference
+
+### Data Flow
+```
+Ingress → Processing → Egress
+
+Ingress:
+  - MQTT (Xovis sensor) → ParsedEvent
+  - RS485 (door state) → DoorStateChange
+  - ACC TCP (payment terminal) → AccEvent
+
+Processing (Tracker):
+  - Person state management
+  - Stitcher: track identity across gaps
+  - JourneyManager: journey lifecycle
+  - DoorCorrelator: gate command ↔ door state
+  - AccCollector: payment event correlation
+
+Egress:
+  - JSONL file (journeys)
+  - MQTT (events, metrics)
+  - Prometheus HTTP
+```
+
+### Key Modules
+
+| Module | Purpose | Test Status |
+|--------|---------|-------------|
+| tracker/ | Central orchestrator | Good coverage, edge cases missing |
+| acc_collector | Payment matching | Time boundaries untested |
+| stitcher | Track identity | Distance/time boundaries untested |
+| door_correlator | Gate state matching | Window boundary untested |
+| journey_manager | Journey lifecycle | Chain stitching untested |
+| config | TOML loading | Validation untested |
+| acc_listener | TCP protocol | ZERO tests |
+| egress_channel | Data pipeline | ZERO tests |
+| broker | MQTT broker | ZERO tests |
+
 ---
 
-## 2026-01-07 - US-006 - Replace Vec::remove with swap_remove where order doesn't matter
-- Files changed: src/services/door_correlator.rs, src/services/stitcher.rs, src/services/journey_manager.rs, src/services/acc_collector.rs
-- **Learnings:**
-  - `swap_remove(idx)` is O(1) vs `remove(idx)` which is O(n) - swaps last element into removed position
-  - Safe to use when element order after removal doesn't matter for subsequent operations
-  - Analyze each case: if code searches/filters the Vec on each access (not relying on order), swap_remove is safe
-  - All four locations found by searching `\.remove(idx)` were safe candidates
----
+## Completed Work
 
-## 2026-01-07 - US-007 - Add Vec::with_capacity to hot-path allocations
-- Files changed: src/io/mqtt.rs, src/domain/journey.rs
-- **Learnings:**
-  - `Vec::with_capacity(n)` pre-allocates memory, avoiding reallocations during push operations
-  - Use for Vecs where typical size is known: mqtt events ~8, journey events ~16
-  - Both `parse_xovis_message` and `parse_frame` get capacity(8) since typical frame has 0-10 events
-  - `Journey::new()` events get capacity(16) since typical journey has 5-15 events
----
-
-## 2026-01-07 - US-008 - Add Copy derive to JourneyOutcome enum
-- Files changed: src/domain/journey.rs, src/services/journey_manager.rs
-- **Learnings:**
-  - Fieldless enums (no data in variants) can implement Copy for zero-cost pass-by-value
-  - Adding Copy to a type causes clippy to warn on unnecessary .clone() calls
-  - Clippy `clone_on_copy` lint catches this: `using clone on type which implements Copy`
-  - Found and removed `outcome.clone()` in journey_manager.rs:171
----
-
-## 2026-01-07 - US-009 - Implement FromStr trait for EventType
-- Files changed: src/domain/types.rs, src/io/mqtt.rs
-- **Learnings:**
-  - Implement `std::str::FromStr` trait instead of inherent `from_str` method for idiomatic Rust
-  - Use `std::convert::Infallible` as error type when parsing can never fail (e.g., returns Unknown variant for unmatched values)
-  - Call sites change from `EventType::from_str(s)` to `s.parse::<EventType>().unwrap()` or `s.parse().unwrap()` with type annotation
-  - With `Infallible` error type, `.unwrap()` is always safe and optimizes away
----
-
-## 2026-01-07 - US-010 - Add #[cold] attribute to error handling paths
-- Files changed: src/services/gate.rs, src/io/cloudplus.rs
-- **Learnings:**
-  - `#[cold]` attribute tells the compiler a function is unlikely to be called, helping optimize the hot path
-  - Extract error logging into dedicated `#[cold]` functions instead of inline error! macros
-  - Useful for error paths that should rarely execute: connection failures, read/write errors, timeouts
-  - Works best when the function is called from a single location, so the compiler can optimize the branch
-  - Use with `&(dyn std::error::Error + Send + Sync)` for generic error types that implement Display
----
+(No entries yet - this is a fresh analysis)

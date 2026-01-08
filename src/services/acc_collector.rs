@@ -67,7 +67,9 @@ impl PosGroup {
     }
 
     /// Get all track_ids of members with sufficient dwell
-    /// Uses accumulated dwell from tracker if provided, otherwise falls back to time since entry
+    /// Uses MAX of accumulated dwell and session dwell to handle:
+    /// - Zone flicker: accumulated_dwell tracks total time even after brief exit
+    /// - Still in zone: session_dwell counts while accumulated hasn't updated yet
     fn members_with_sufficient_dwell(
         &self,
         accumulated_dwells: Option<&HashMap<i64, u64>>,
@@ -75,14 +77,15 @@ impl PosGroup {
         self.members
             .iter()
             .filter(|m| {
-                // Use accumulated dwell from tracker if available
-                if let Some(dwells) = accumulated_dwells {
-                    if let Some(&dwell) = dwells.get(&m.track_id) {
-                        return dwell >= self.min_dwell_for_acc;
-                    }
-                }
-                // Fallback to time since entry to this POS
-                m.entered_at.elapsed().as_millis() as u64 >= self.min_dwell_for_acc
+                let session_dwell = m.entered_at.elapsed().as_millis() as u64;
+                let accumulated = accumulated_dwells
+                    .and_then(|dwells| dwells.get(&m.track_id).copied())
+                    .unwrap_or(0);
+                // Use max of accumulated and session dwell
+                // - accumulated handles zone flicker (re-entry after brief exit)
+                // - session handles currently in zone (accumulated only updates on exit)
+                let effective_dwell = session_dwell.max(accumulated);
+                effective_dwell >= self.min_dwell_for_acc
             })
             .map(|m| m.track_id)
             .collect()
