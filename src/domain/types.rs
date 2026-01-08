@@ -203,6 +203,7 @@ pub struct Person {
 }
 
 impl Person {
+    #[inline]
     pub fn new(track_id: TrackId) -> Self {
         Self {
             track_id,

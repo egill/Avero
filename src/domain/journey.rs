@@ -11,6 +11,7 @@ pub fn new_uuid_v7() -> String {
 }
 
 /// Get current epoch milliseconds
+#[inline]
 pub fn epoch_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
@@ -24,6 +25,7 @@ pub enum JourneyOutcome {
 }
 
 impl JourneyOutcome {
+    #[inline]
     pub fn as_str(&self) -> &str {
         match self {
             JourneyOutcome::InProgress => "in_progress",
