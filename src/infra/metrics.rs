@@ -21,26 +21,16 @@ const NUM_BUCKETS: usize = 11;
 /// Buckets: ≤10, ≤20, ≤40, ≤80, ≤160, ≤320, ≤640, ≤1280, ≤2560, ≤5120, >5120 cm
 const STITCH_DIST_BOUNDS: [u64; 10] = [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120];
 
-/// Compute bucket index for a latency value
+/// Compute bucket index for a latency value using binary search
 #[inline]
 fn bucket_index(latency_us: u64) -> usize {
-    for (i, &bound) in BUCKET_BOUNDS.iter().enumerate() {
-        if latency_us <= bound {
-            return i;
-        }
-    }
-    10 // overflow bucket (>51200µs)
+    BUCKET_BOUNDS.partition_point(|&bound| bound < latency_us)
 }
 
-/// Compute bucket index for stitch distance (cm)
+/// Compute bucket index for stitch distance (cm) using binary search
 #[inline]
 fn stitch_dist_bucket_index(dist_cm: u64) -> usize {
-    for (i, &bound) in STITCH_DIST_BOUNDS.iter().enumerate() {
-        if dist_cm <= bound {
-            return i;
-        }
-    }
-    10 // overflow bucket (>5120cm)
+    STITCH_DIST_BOUNDS.partition_point(|&bound| bound < dist_cm)
 }
 
 /// Swap all buckets to zero and return their values
