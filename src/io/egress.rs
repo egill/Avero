@@ -17,9 +17,7 @@ pub struct Egress {
 impl Egress {
     pub fn new(file_path: &str) -> Self {
         info!(file_path = %file_path, "egress_initialized");
-        Self {
-            file_path: file_path.to_string(),
-        }
+        Self { file_path: file_path.to_string() }
     }
 
     /// Write a journey to the egress file

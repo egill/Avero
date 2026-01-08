@@ -11,10 +11,7 @@ pub fn new_uuid_v7() -> String {
 
 /// Get current epoch milliseconds
 pub fn epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
 /// Journey outcome
@@ -46,12 +43,7 @@ pub struct JourneyEvent {
 
 impl JourneyEvent {
     pub fn new(event_type: &str, ts: u64) -> Self {
-        Self {
-            t: event_type.to_string(),
-            z: None,
-            ts,
-            extra: None,
-        }
+        Self { t: event_type.to_string(), z: None, ts, extra: None }
     }
 
     pub fn with_zone(mut self, zone: &str) -> Self {

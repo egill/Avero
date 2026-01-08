@@ -135,11 +135,7 @@ impl Frame {
             return None; // Need more data
         }
 
-        let data = if data_len > 0 {
-            buf[7..7 + data_len as usize].to_vec()
-        } else {
-            vec![]
-        };
+        let data = if data_len > 0 { buf[7..7 + data_len as usize].to_vec() } else { vec![] };
 
         let checksum = buf[7 + data_len as usize];
         let etx = buf[7 + data_len as usize + 1];
@@ -176,15 +172,7 @@ impl Frame {
         }
 
         Some((
-            Frame {
-                rand,
-                command,
-                address,
-                door,
-                data,
-                valid: true,
-                parse_err: None,
-            },
+            Frame { rand, command, address, door, data, valid: true, parse_err: None },
             total_len,
         ))
     }
@@ -237,11 +225,7 @@ fn parse_heartbeat(data: &[u8]) -> Option<HeartbeatData> {
         received_at: Instant::now(),
         door_state: if data.len() > 7 { data[7] } else { 0 },
         relay_status: if data.len() > 12 { data[12] } else { 0 },
-        oem_code: if data.len() > 20 {
-            (data[19] as u16) | ((data[20] as u16) << 8)
-        } else {
-            0
-        },
+        oem_code: if data.len() > 20 { (data[19] as u16) | ((data[20] as u16) << 8) } else { 0 },
         serial_number: serial,
         version: if data.len() > 18 { data[18] } else { 0 },
     })
@@ -308,11 +292,9 @@ impl CloudPlusClient {
     pub async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!(addr = %self.config.addr, "cloudplus_connecting");
 
-        let stream = tokio::time::timeout(
-            self.config.dial_timeout,
-            TcpStream::connect(&self.config.addr),
-        )
-        .await??;
+        let stream =
+            tokio::time::timeout(self.config.dial_timeout, TcpStream::connect(&self.config.addr))
+                .await??;
 
         // Enable TCP nodelay for low latency
         stream.set_nodelay(true)?;
@@ -596,17 +578,10 @@ impl CloudPlusClient {
 
         info!(door_id = door_id, "cloudplus_sending_open_command");
 
-        self.outbound_tx
-            .send(frame)
-            .await
-            .map_err(|_| "channel closed")?;
+        self.outbound_tx.send(frame).await.map_err(|_| "channel closed")?;
 
         let latency_us = start.elapsed().as_micros() as u64;
-        info!(
-            door_id = door_id,
-            latency_us = latency_us,
-            "cloudplus_open_command_queued"
-        );
+        info!(door_id = door_id, latency_us = latency_us, "cloudplus_open_command_queued");
 
         Ok(latency_us)
     }
@@ -619,10 +594,7 @@ impl CloudPlusClient {
         }
 
         let frame = build_frame(CMD_CLOSE_DOOR, 0xff, 1, &[]);
-        self.outbound_tx
-            .send(frame)
-            .await
-            .map_err(|_| "channel closed")?;
+        self.outbound_tx.send(frame).await.map_err(|_| "channel closed")?;
 
         info!("cloudplus_close_command_sent");
         Ok(())
@@ -650,10 +622,7 @@ impl CloudPlusClient {
         ];
 
         let frame = build_frame(CMD_TIME_SYNC, 0xff, 0, &data);
-        self.outbound_tx
-            .send(frame)
-            .await
-            .map_err(|_| "channel closed")?;
+        self.outbound_tx.send(frame).await.map_err(|_| "channel closed")?;
 
         info!("cloudplus_time_sync_sent");
         Ok(())

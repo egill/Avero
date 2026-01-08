@@ -54,9 +54,8 @@ fn percentile_from_buckets(buckets: &[u64; NUM_BUCKETS], percentile: f64) -> u64
     let mut cumulative = 0u64;
 
     // Upper bounds for each bucket (last bucket uses 2x the previous bound)
-    const BUCKET_UPPER_BOUNDS: [u64; NUM_BUCKETS] = [
-        100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400,
-    ];
+    const BUCKET_UPPER_BOUNDS: [u64; NUM_BUCKETS] =
+        [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400];
 
     for (i, &count) in buckets.iter().enumerate() {
         cumulative += count;
@@ -431,11 +430,7 @@ impl Metrics {
             0.0
         };
 
-        let avg_latency = if events_count > 0 {
-            latency_sum / events_count
-        } else {
-            0
-        };
+        let avg_latency = if events_count > 0 { latency_sum / events_count } else { 0 };
 
         // Compute percentiles from histogram
         let lat_p50 = percentile_from_buckets(&lat_buckets, 0.50);
@@ -443,11 +438,7 @@ impl Metrics {
         let lat_p99 = percentile_from_buckets(&lat_buckets, 0.99);
 
         // Gate latency metrics
-        let gate_avg_latency = if gate_count > 0 {
-            gate_latency_sum / gate_count
-        } else {
-            0
-        };
+        let gate_avg_latency = if gate_count > 0 { gate_latency_sum / gate_count } else { 0 };
         let gate_lat_p99 = percentile_from_buckets(&gate_lat_buckets, 0.99);
 
         // Get current gate state and exits (don't reset)
@@ -469,11 +460,8 @@ impl Metrics {
         }
         let stitch_distance_sum = self.stitch_distance_sum.load(Ordering::Relaxed);
         let stitch_distance_count: u64 = stitch_distance_buckets.iter().sum();
-        let stitch_distance_avg_cm = if stitch_distance_count > 0 {
-            stitch_distance_sum / stitch_distance_count
-        } else {
-            0
-        };
+        let stitch_distance_avg_cm =
+            if stitch_distance_count > 0 { stitch_distance_sum / stitch_distance_count } else { 0 };
 
         let mut stitch_time_buckets = [0u64; NUM_BUCKETS];
         for (i, bucket) in self.stitch_time_buckets.iter().enumerate() {
@@ -481,11 +469,8 @@ impl Metrics {
         }
         let stitch_time_sum = self.stitch_time_sum.load(Ordering::Relaxed);
         let stitch_time_count: u64 = stitch_time_buckets.iter().sum();
-        let stitch_time_avg_ms = if stitch_time_count > 0 {
-            stitch_time_sum / stitch_time_count
-        } else {
-            0
-        };
+        let stitch_time_avg_ms =
+            if stitch_time_count > 0 { stitch_time_sum / stitch_time_count } else { 0 };
 
         MetricsSummary {
             events_total,

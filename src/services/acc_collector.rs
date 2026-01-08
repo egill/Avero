@@ -35,10 +35,7 @@ impl PosGroup {
     fn new(track_id: i64, min_dwell_for_acc: u64) -> Self {
         let now = Instant::now();
         Self {
-            members: vec![GroupMember {
-                track_id,
-                entered_at: now,
-            }],
+            members: vec![GroupMember { track_id, entered_at: now }],
             last_entry: now,
             min_dwell_for_acc,
         }
@@ -46,10 +43,7 @@ impl PosGroup {
 
     fn add_member(&mut self, track_id: i64) {
         let now = Instant::now();
-        self.members.push(GroupMember {
-            track_id,
-            entered_at: now,
-        });
+        self.members.push(GroupMember { track_id, entered_at: now });
         self.last_entry = now;
     }
 
@@ -134,11 +128,8 @@ impl AccCollector {
     /// This prevents losing track of people who are still at the POS zone.
     pub fn record_pos_entry(&mut self, track_id: i64, pos_zone: &str) {
         // Debug: log current state of all POS groups
-        let all_groups: Vec<(&String, Vec<i64>)> = self
-            .pos_groups
-            .iter()
-            .map(|(k, g)| (k, g.all_members()))
-            .collect();
+        let all_groups: Vec<(&String, Vec<i64>)> =
+            self.pos_groups.iter().map(|(k, g)| (k, g.all_members())).collect();
         debug!(
             track_id = %track_id,
             pos = %pos_zone,
@@ -169,11 +160,8 @@ impl AccCollector {
     /// Record that a track exited a POS zone
     pub fn record_pos_exit(&mut self, track_id: i64, pos_zone: &str, dwell_ms: u64) {
         // Get group members before removing this track
-        let group_members = self
-            .pos_groups
-            .get(pos_zone)
-            .map(|g| g.all_members())
-            .unwrap_or_default();
+        let group_members =
+            self.pos_groups.get(pos_zone).map(|g| g.all_members()).unwrap_or_default();
 
         debug!(track_id = %track_id, pos = %pos_zone, dwell_ms = %dwell_ms, group_size = %group_members.len(), "acc_pos_exit");
 
@@ -574,11 +562,7 @@ mod tests {
         collector.record_pos_entry(200, "POS_1");
 
         let group = collector.pos_groups.get("POS_1").unwrap();
-        assert_eq!(
-            group.all_members().len(),
-            2,
-            "Second person should join group within 9.999s"
-        );
+        assert_eq!(group.all_members().len(), 2, "Second person should join group within 9.999s");
     }
 
     #[test]
@@ -626,10 +610,7 @@ mod tests {
 
         // Process ACC - should match
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
-        assert!(
-            result.contains(&100),
-            "Exit within 1.499s should match ACC"
-        );
+        assert!(result.contains(&100), "Exit within 1.499s should match ACC");
     }
 
     #[test]
@@ -652,10 +633,7 @@ mod tests {
 
         // Process ACC - should NOT match
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
-        assert!(
-            result.is_empty(),
-            "Exit after 1.501s should NOT match ACC"
-        );
+        assert!(result.is_empty(), "Exit after 1.501s should NOT match ACC");
     }
 
     #[test]
@@ -679,10 +657,7 @@ mod tests {
 
         // Current implementation: tries current group first, fails due to insufficient dwell
         // Does NOT fall back to recent exits when POS is occupied
-        assert!(
-            result.is_empty(),
-            "Should not match recent exit when POS is currently occupied"
-        );
+        assert!(result.is_empty(), "Should not match recent exit when POS is currently occupied");
     }
 
     #[test]
@@ -712,10 +687,7 @@ mod tests {
 
         // Process ACC - should match newest exit (300)
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
-        assert!(
-            result.contains(&300),
-            "Should match newest exit (track 300)"
-        );
+        assert!(result.contains(&300), "Should match newest exit (track 300)");
     }
 
     #[test]
@@ -749,18 +721,9 @@ mod tests {
         assert!(result.contains(&300));
 
         // Verify all journeys have acc_matched=true
-        assert!(
-            jm.get(100).unwrap().acc_matched,
-            "Track 100 should have acc_matched"
-        );
-        assert!(
-            jm.get(200).unwrap().acc_matched,
-            "Track 200 should have acc_matched"
-        );
-        assert!(
-            jm.get(300).unwrap().acc_matched,
-            "Track 300 should have acc_matched"
-        );
+        assert!(jm.get(100).unwrap().acc_matched, "Track 100 should have acc_matched");
+        assert!(jm.get(200).unwrap().acc_matched, "Track 200 should have acc_matched");
+        assert!(jm.get(300).unwrap().acc_matched, "Track 300 should have acc_matched");
     }
 
     #[test]
@@ -798,9 +761,6 @@ mod tests {
         }
 
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
-        assert!(
-            result.contains(&100),
-            "Exactly 1500ms should match (uses <=)"
-        );
+        assert!(result.contains(&100), "Exactly 1500ms should match (uses <=)");
     }
 }

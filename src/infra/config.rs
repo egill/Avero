@@ -106,9 +106,7 @@ pub struct EgressConfig {
 
 impl Default for EgressConfig {
     fn default() -> Self {
-        Self {
-            file: default_egress_file(),
-        }
+        Self { file: default_egress_file() }
     }
 }
 
@@ -194,10 +192,7 @@ fn default_broker_port() -> u16 {
 
 impl Default for BrokerConfig {
     fn default() -> Self {
-        Self {
-            bind_address: default_broker_bind_address(),
-            port: default_broker_port(),
-        }
+        Self { bind_address: default_broker_bind_address(), port: default_broker_port() }
     }
 }
 
@@ -662,10 +657,8 @@ mod tests {
 
     #[test]
     fn test_resolve_config_path_from_arg_equals() {
-        let args: Vec<String> = vec![
-            "gateway-poc".to_string(),
-            "--config=config/grandi.toml".to_string(),
-        ];
+        let args: Vec<String> =
+            vec!["gateway-poc".to_string(), "--config=config/grandi.toml".to_string()];
         assert_eq!(Config::resolve_config_path(&args), "config/grandi.toml");
     }
 

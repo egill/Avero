@@ -174,10 +174,7 @@ impl Tracker {
                 person.last_position = event.position;
             }
 
-            let last_zone = person
-                .current_zone
-                .map(|id| self.config.zone_name(id))
-                .unwrap_or_default();
+            let last_zone = person.current_zone.map(|id| self.config.zone_name(id)).unwrap_or_default();
 
             info!(
                 track_id = %track_id,
@@ -212,10 +209,7 @@ impl Tracker {
                 track_id,
                 JourneyEvent::new("pending", ts)
                     .with_zone(&last_zone)
-                    .with_extra(&format!(
-                        "auth={},dwell={}",
-                        person.authorized, person.accumulated_dwell_ms
-                    )),
+                    .with_extra(&format!("auth={},dwell={}", person.authorized, person.accumulated_dwell_ms)),
             );
             self.journey_manager
                 .end_journey(track_id, JourneyOutcome::Abandoned);
@@ -261,23 +255,14 @@ impl Tracker {
             .entry(track_id)
             .or_insert_with(|| Person::new(track_id));
         person.current_zone = Some(geometry_id);
-        let journey_authorized = self
-            .journey_manager
-            .get_any(track_id)
-            .map(|j| j.authorized)
-            .unwrap_or(false);
+        let journey_authorized =
+            self.journey_manager.get_any(track_id).map(|j| j.authorized).unwrap_or(false);
         let authorized = person.authorized || journey_authorized;
-        let gate_already_opened = self
-            .journey_manager
-            .get_any(track_id)
-            .and_then(|j| j.gate_cmd_at)
-            .is_some();
+        let gate_already_opened =
+            self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
 
         // Add to journey manager
-        self.journey_manager.add_event(
-            track_id,
-            JourneyEvent::new("zone_entry", ts).with_zone(&zone),
-        );
+        self.journey_manager.add_event(track_id, JourneyEvent::new("zone_entry", ts).with_zone(&zone));
 
         // Publish zone event to MQTT
         if let Some(ref sender) = self.egress_sender {
@@ -387,10 +372,8 @@ impl Tracker {
                 None
             }
         } else {
-            self.journey_manager.add_event(
-                track_id,
-                JourneyEvent::new("zone_exit", ts).with_zone(&zone),
-            );
+            self.journey_manager
+                .add_event(track_id, JourneyEvent::new("zone_exit", ts).with_zone(&zone));
             None
         };
 
@@ -472,11 +455,7 @@ impl Tracker {
                 .get(track_id)
                 .map(|j| (j.gate_cmd_at, j.events.len(), j.started_at))
                 .unwrap_or((None, 0, 0));
-            let duration_ms = if started_at > 0 {
-                epoch_ms().saturating_sub(started_at)
-            } else {
-                0
-            };
+            let duration_ms = if started_at > 0 { epoch_ms().saturating_sub(started_at) } else { 0 };
 
             info!(
                 track_id = %track_id,
@@ -559,11 +538,8 @@ impl Tracker {
 
         // Build accumulated dwell map from persons for ACC matching
         // This ensures ACC uses total journey dwell, not just current POS session dwell
-        let accumulated_dwells: std::collections::HashMap<i64, u64> = self
-            .persons
-            .iter()
-            .map(|(&tid, p)| (tid, p.accumulated_dwell_ms))
-            .collect();
+        let accumulated_dwells: std::collections::HashMap<i64, u64> =
+            self.persons.iter().map(|(&tid, p)| (tid, p.accumulated_dwell_ms)).collect();
 
         // Try to match ACC to journeys using IP → POS lookup
         // Returns all group members if any member qualifies (sufficient dwell)
@@ -667,11 +643,8 @@ impl Tracker {
                 .get(&track_id)
                 .and_then(|p| p.current_zone)
                 .is_some_and(|z| z == gate_zone);
-            let gate_already_opened = self
-                .journey_manager
-                .get_any(track_id)
-                .and_then(|j| j.gate_cmd_at)
-                .is_some();
+            let gate_already_opened =
+                self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
             if in_gate_zone && !gate_already_opened {
                 self.send_gate_open_command(track_id, ts, "acc", received_at)
                     .await;
@@ -758,11 +731,8 @@ impl Tracker {
                     gate_entry_ts: None,
                     delta_ms: None,
                     gate_cmd_at: None,
-                    debug_active: if debug_active.is_empty() {
-                        None
-                    } else {
-                        Some(debug_active)
-                    },
+                    debug_active: if debug_active.is_empty() { None } else { Some(debug_active) },
+                    debug_pending: if debug_pending.is_empty() { None } else { Some(debug_pending) },
                     debug_pending: if debug_pending.is_empty() {
                         None
                     } else {

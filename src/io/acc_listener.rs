@@ -21,10 +21,7 @@ pub struct AccListenerConfig {
 
 impl Default for AccListenerConfig {
     fn default() -> Self {
-        Self {
-            port: 25803,
-            enabled: true,
-        }
+        Self { port: 25803, enabled: true }
     }
 }
 

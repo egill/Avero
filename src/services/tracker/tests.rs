@@ -206,11 +206,7 @@ async fn test_stitch_transfers_state() {
 
     // Create track with position
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
         .await;
 
     // Manually authorize (simulating ACC match) and set dwell
@@ -224,21 +220,13 @@ async fn test_stitch_transfers_state() {
 
     // Delete track (goes to stitch pending)
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70])).await;
         .await;
     assert_eq!(tracker.active_tracks(), 0);
 
     // New track nearby within stitch criteria
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            200,
-            [1.05, 1.0, 1.71],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71])).await;
         .await;
     assert_eq!(tracker.active_tracks(), 1);
 
@@ -254,11 +242,7 @@ async fn test_stitch_fails_too_late() {
 
     // Create and authorize track
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
         .await;
     {
         let person = tracker.persons.get_mut(&100).unwrap();
@@ -268,11 +252,7 @@ async fn test_stitch_fails_too_late() {
 
     // Delete track
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70])).await;
         .await;
     assert_eq!(tracker.active_tracks(), 0);
 
@@ -281,11 +261,7 @@ async fn test_stitch_fails_too_late() {
 
     // New track nearby - should NOT stitch (too late)
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            200,
-            [1.05, 1.0, 1.71],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71])).await;
         .await;
 
     // New track should be fresh (no inherited state)
@@ -300,11 +276,7 @@ async fn test_stitch_fails_too_far() {
 
     // Create and authorize track
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
         .await;
     {
         let person = tracker.persons.get_mut(&100).unwrap();
@@ -314,20 +286,12 @@ async fn test_stitch_fails_too_far() {
 
     // Delete track
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70])).await;
         .await;
 
     // New track 3m away - should NOT stitch (too far)
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            200,
-            [4.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [4.0, 1.0, 1.70])).await;
         .await;
 
     // New track should be fresh
@@ -342,11 +306,7 @@ async fn test_no_stitch_without_new_track() {
 
     // Create and authorize track
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
         .await;
     {
         let person = tracker.persons.get_mut(&100).unwrap();
@@ -355,11 +315,7 @@ async fn test_no_stitch_without_new_track() {
 
     // Delete track
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70])).await;
         .await;
     assert_eq!(tracker.active_tracks(), 0);
 
@@ -374,11 +330,7 @@ async fn test_absolutely_no_stitch() {
 
     // Create authorized track with accumulated dwell
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [0.0, 0.0, 1.50],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [0.0, 0.0, 1.50])).await;
         .await;
     {
         let person = tracker.persons.get_mut(&100).unwrap();
@@ -388,11 +340,7 @@ async fn test_absolutely_no_stitch() {
 
     // Delete track
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [0.0, 0.0, 1.50],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [0.0, 0.0, 1.50])).await;
         .await;
     assert_eq!(tracker.active_tracks(), 0);
 
@@ -400,11 +348,7 @@ async fn test_absolutely_no_stitch() {
     // Distance: 14m away (1414cm >> 180cm limit)
     // Height: 50cm different (>> 10cm limit)
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            999,
-            [10.0, 10.0, 2.00],
-        ))
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 999, [10.0, 10.0, 2.00])).await;
         .await;
 
     // New track should be completely fresh - NO state transferred
@@ -417,9 +361,7 @@ async fn test_absolutely_no_stitch() {
 async fn test_gate_opens_when_acc_after_gate_entry() {
     let mut ip_to_pos = HashMap::new();
     ip_to_pos.insert("127.0.0.1".to_string(), "POS_1".to_string());
-    let config = Config::default()
-        .with_min_dwell_ms(50)
-        .with_acc_ip_to_pos(ip_to_pos);
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(ip_to_pos);
     let mut tracker = create_test_tracker_with_config(config);
 
     tracker
@@ -438,16 +380,10 @@ async fn test_gate_opens_when_acc_after_gate_entry() {
         .await;
 
     tracker
-        .process_event(create_event(
-            EventType::AccEvent("127.0.0.1".to_string()),
-            0,
-            None,
-        ))
+        .process_event(create_event(EventType::AccEvent("127.0.0.1".to_string()), 0, None))
         .await;
 
-    let summary = tracker
-        .metrics
-        .report(tracker.active_tracks(), tracker.authorized_tracks());
+    let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
     assert_eq!(summary.gate_commands_sent, 1);
     assert!(tracker
         .journey_manager
@@ -461,17 +397,11 @@ async fn test_gate_opens_when_acc_after_gate_entry() {
 async fn test_acc_authorization_survives_pending_and_stitch() {
     let mut ip_to_pos = HashMap::new();
     ip_to_pos.insert("127.0.0.1".to_string(), "POS_1".to_string());
-    let config = Config::default()
-        .with_min_dwell_ms(50)
-        .with_acc_ip_to_pos(ip_to_pos);
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(ip_to_pos);
     let mut tracker = create_test_tracker_with_config(config);
 
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+        .process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70]))
         .await;
     tracker
         .process_event(create_event(EventType::ZoneEntry, 100, Some(1001)))
@@ -482,36 +412,22 @@ async fn test_acc_authorization_survives_pending_and_stitch() {
         .await;
 
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackDelete,
-            100,
-            [1.0, 1.0, 1.70],
-        ))
+        .process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]))
         .await;
 
     tracker
-        .process_event(create_event(
-            EventType::AccEvent("127.0.0.1".to_string()),
-            0,
-            None,
-        ))
+        .process_event(create_event(EventType::AccEvent("127.0.0.1".to_string()), 0, None))
         .await;
 
     tracker
-        .process_event(create_event_with_pos(
-            EventType::TrackCreate,
-            200,
-            [1.05, 1.0, 1.71],
-        ))
+        .process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71]))
         .await;
 
     tracker
         .process_event(create_event(EventType::ZoneEntry, 200, Some(1007)))
         .await;
 
-    let summary = tracker
-        .metrics
-        .report(tracker.active_tracks(), tracker.authorized_tracks());
+    let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
     assert_eq!(summary.gate_commands_sent, 1);
     assert!(tracker
         .journey_manager

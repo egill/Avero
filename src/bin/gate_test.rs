@@ -210,12 +210,7 @@ impl GateInvestigator {
     fn record_status_change(&mut self, new_status: DoorStatus) -> bool {
         if new_status != self.last_status {
             let t = self.elapsed_ms();
-            println!(
-                "[{:>6}ms] DOOR: {} -> {}",
-                t,
-                self.last_status.as_str(),
-                new_status.as_str()
-            );
+            println!("[{:>6}ms] DOOR: {} -> {}", t, self.last_status.as_str(), new_status.as_str());
             self.events.push(StateEvent {
                 time_ms: t,
                 event: new_status.as_str().to_string(),
@@ -469,16 +464,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("{}", "-".repeat(60));
 
-    let baseline_open_duration = results
-        .first()
+    let baseline_open_duration = results.first()
         .and_then(|(_, r)| r.open_duration_ms)
         .unwrap_or(0);
 
     for (name, r) in &results {
-        let cmd_open = r
-            .cmd_to_open_ms
-            .map(|ms| format!("{}ms", ms))
-            .unwrap_or("-".to_string());
+        let cmd_open = r.cmd_to_open_ms.map(|ms| format!("{}ms", ms)).unwrap_or("-".to_string());
+        let open_dur = r.open_duration_ms.map(|ms| {
+            let delta = ms as i64 - baseline_open_duration as i64;
+            let sign = if delta >= 0 { "+" } else { "" };
+            format!("{:.1}s ({}{}ms)", ms as f64 / 1000.0, sign, delta)
+        }).unwrap_or("-".to_string());
         let open_dur = r
             .open_duration_ms
             .map(|ms| {
@@ -499,15 +495,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╚══════════════════════════════════════════════════════════╝\n");
 
     // Analyze patterns
-    let durations: Vec<u64> = results
-        .iter()
+    let durations: Vec<u64> = results.iter()
         .filter_map(|(_, r)| r.open_duration_ms)
         .collect();
 
     if durations.len() >= 2 {
         let baseline = durations[0];
-        let extended: Vec<_> = durations[1..]
-            .iter()
+        let extended: Vec<_> = durations[1..].iter()
             .filter(|&&d| d > baseline + 500)
             .collect();
 

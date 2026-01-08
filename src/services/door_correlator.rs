@@ -159,8 +159,7 @@ impl DoorCorrelator {
     /// Get the track ID of the current gate flow (preserved across door cycle)
     /// Falls back to most recent pending command if no flow active
     pub fn last_gate_cmd_track_id(&self) -> Option<i64> {
-        self.current_flow_track_id
-            .or_else(|| self.pending_cmds.last().map(|cmd| cmd.track_id))
+        self.current_flow_track_id.or_else(|| self.pending_cmds.last().map(|cmd| cmd.track_id))
     }
 
     /// Get the current flow track ID (only set after correlation, cleared on close)

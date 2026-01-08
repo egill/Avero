@@ -14,6 +14,8 @@ Gateway-poc is a Rust application for automated retail gate control. It processe
 
 **Clippy Config**: Project-specific lints configured in `clippy.toml` (e.g., `too-many-arguments-threshold = 8`).
 
+**Rustfmt Config**: Formatting preferences in `rustfmt.toml` (e.g., `max_width = 100`, `use_small_heuristics = "Max"`).
+
 ```bash
 # Build
 cargo build --release

@@ -67,10 +67,8 @@ impl GateController {
         let timeout = Duration::from_millis(config.gate_timeout_ms());
 
         let tcp_client = if *config.gate_mode() == GateMode::Tcp {
-            let tcp_config = CloudPlusConfig {
-                addr: config.gate_tcp_addr().to_string(),
-                ..Default::default()
-            };
+            let tcp_config =
+                CloudPlusConfig { addr: config.gate_tcp_addr().to_string(), ..Default::default() };
             Some(Arc::new(CloudPlusClient::new(tcp_config)))
         } else {
             None
@@ -78,11 +76,7 @@ impl GateController {
 
         // Create HTTP client once for reuse (connection pooling)
         let http_client = if *config.gate_mode() == GateMode::Http {
-            reqwest::Client::builder()
-                .timeout(timeout)
-                .http1_only()
-                .build()
-                .ok()
+            reqwest::Client::builder().timeout(timeout).http1_only().build().ok()
         } else {
             None
         };
@@ -178,10 +172,8 @@ impl GateController {
             return start.elapsed().as_micros() as u64;
         };
 
-        let mut request = client
-            .get(&self.url)
-            .header("Accept", "*/*")
-            .header("User-Agent", "curl/7.88.1");
+        let mut request =
+            client.get(&self.url).header("Accept", "*/*").header("User-Agent", "curl/7.88.1");
 
         if let (Some(username), Some(password)) = (&self.username, &self.password) {
             let credentials = format!("{}:{}", username, password);

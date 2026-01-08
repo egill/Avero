@@ -191,10 +191,8 @@ impl JourneyManager {
             );
 
             // Add to pending egress with 10s delay
-            self.pending_egress.push(PendingEgress {
-                journey,
-                eligible_at: Instant::now() + EGRESS_DELAY,
-            });
+            self.pending_egress
+                .push(PendingEgress { journey, eligible_at: Instant::now() + EGRESS_DELAY });
         }
     }
 

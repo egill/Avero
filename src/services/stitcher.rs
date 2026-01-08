@@ -53,18 +53,12 @@ pub struct Stitcher {
 impl Stitcher {
     #[allow(dead_code)]
     pub fn new() -> Self {
-        Self {
-            pending: Vec::new(),
-            metrics: None,
-        }
+        Self { pending: Vec::new(), metrics: None }
     }
 
     /// Create a stitcher with metrics recording
     pub fn with_metrics(metrics: Arc<Metrics>) -> Self {
-        Self {
-            pending: Vec::new(),
-            metrics: Some(metrics),
-        }
+        Self { pending: Vec::new(), metrics: Some(metrics) }
     }
 
     /// Add a deleted track as pending for potential stitching
@@ -82,12 +76,7 @@ impl Stitcher {
             "pending_stitch_added"
         );
 
-        self.pending.push(PendingTrack {
-            person,
-            deleted_at: Instant::now(),
-            position,
-            last_zone,
-        });
+        self.pending.push(PendingTrack { person, deleted_at: Instant::now(), position, last_zone });
     }
 
     /// Try to find and remove a stitch candidate for a new track at given position
@@ -185,11 +174,7 @@ impl Stitcher {
                 last_zone = ?pending.last_zone,
                 "stitch_match_found"
             );
-            StitchMatch {
-                person: pending.person,
-                time_ms,
-                distance_cm: distance_cm as u32,
-            }
+            StitchMatch { person: pending.person, time_ms, distance_cm: distance_cm as u32 }
         })
     }
 
