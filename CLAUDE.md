@@ -170,6 +170,18 @@ cargo clippy -- -D warnings   # Lint with warnings as errors
 cargo test             # Run all tests
 ```
 
+## Commit Workflow
+
+**Important**: Commit work only AFTER it has been tested and deployed:
+
+1. Make changes locally
+2. Test locally (`cargo test`, `mix test`, etc.)
+3. Deploy to production using the appropriate skill (`/deploy-netto`, `/deploy-command`, etc.)
+4. Verify the deployment is working
+5. **Then** commit and push to git
+
+This ensures that git history reflects working, deployed code rather than untested changes.
+
 ## Rust Coding Guidelines
 
 ### Avoid Common Pitfalls
