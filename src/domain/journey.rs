@@ -133,7 +133,21 @@ pub struct Journey {
 }
 
 impl Journey {
-    /// Create a new journey for a track
+    /// Create a new journey for a track.
+    ///
+    /// Initializes a journey with a unique ID (UUIDv7), person ID,
+    /// and the initial track ID. The journey starts in `InProgress` state.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gateway_poc::domain::journey::Journey;
+    /// use gateway_poc::domain::types::TrackId;
+    ///
+    /// let journey = Journey::new(TrackId(100));
+    /// assert_eq!(journey.current_track_id(), TrackId(100));
+    /// assert!(!journey.authorized);
+    /// ```
     pub fn new(track_id: TrackId) -> Self {
         let now = epoch_ms();
         Self {
