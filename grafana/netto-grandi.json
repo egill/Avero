@@ -585,7 +585,7 @@
         },
         "overrides": [
           { "matcher": { "id": "byName", "options": "today" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "yesterday" }, "properties": [{ "id": "color", "value": { "fixedColor": "grey", "mode": "fixed" } }, { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }] }
+          { "matcher": { "id": "byName", "options": "yesterday" }, "properties": [{ "id": "color", "value": { "fixedColor": "#808080", "mode": "fixed" } }, { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }] }
         ]
       },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 42 },
