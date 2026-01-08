@@ -3,10 +3,18 @@
 use crate::domain::types::TrackId;
 use crate::infra::config::{Config, GateMode};
 use crate::io::cloudplus::{CloudPlusClient, CloudPlusConfig};
+use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info};
+
+/// Trait for gate control operations - enables mock implementations for testing
+#[async_trait]
+pub trait GateCommand: Send + Sync {
+    /// Send gate open command, returns latency in microseconds
+    async fn send_open_command(&self, track_id: TrackId) -> u64;
+}
 
 /// Log TCP client not initialized error (cold path)
 #[cold]
@@ -57,8 +65,6 @@ pub struct GateController {
     http_client: Option<reqwest::Client>,
     // TCP mode
     tcp_client: Option<Arc<CloudPlusClient>>,
-    #[cfg(test)]
-    mock_enabled: bool,
 }
 
 impl GateController {
@@ -89,8 +95,6 @@ impl GateController {
             password,
             http_client,
             tcp_client,
-            #[cfg(test)]
-            mock_enabled: true,
         }
     }
 
@@ -116,29 +120,6 @@ impl GateController {
             }
         }
         (url.to_string(), None, None)
-    }
-
-    /// Send gate open command
-    /// Returns latency in microseconds
-    pub async fn send_open_command(&self, track_id: TrackId) -> u64 {
-        let start = Instant::now();
-
-        #[cfg(test)]
-        if self.mock_enabled {
-            let latency_us = start.elapsed().as_micros() as u64;
-            info!(
-                track_id = %track_id,
-                latency_us = %latency_us,
-                mock = true,
-                "gate_open_command"
-            );
-            return latency_us;
-        }
-
-        match self.mode {
-            GateMode::Tcp => self.send_open_tcp(track_id, start).await,
-            GateMode::Http => self.send_open_http(track_id, start).await,
-        }
     }
 
     async fn send_open_tcp(&self, track_id: TrackId, start: Instant) -> u64 {
@@ -207,11 +188,39 @@ impl GateController {
     }
 }
 
+#[async_trait]
+impl GateCommand for GateController {
+    async fn send_open_command(&self, track_id: TrackId) -> u64 {
+        let start = Instant::now();
+        match self.mode {
+            GateMode::Tcp => self.send_open_tcp(track_id, start).await,
+            GateMode::Http => self.send_open_http(track_id, start).await,
+        }
+    }
+}
+
+/// Mock gate controller for testing
+#[cfg(test)]
+pub struct MockGateController;
+
+#[cfg(test)]
+#[async_trait]
+impl GateCommand for MockGateController {
+    async fn send_open_command(&self, track_id: TrackId) -> u64 {
+        info!(
+            track_id = %track_id,
+            latency_us = 0,
+            mock = true,
+            "gate_open_command"
+        );
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::types::TrackId;
-    use crate::infra::config::Config;
 
     #[test]
     fn test_parse_url_with_auth() {
@@ -234,8 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_gate_command() {
-        let config = Config::default();
-        let gate = GateController::new(config);
+        let gate = MockGateController;
 
         let latency_us = gate.send_open_command(TrackId(100)).await;
         // Mock should return very fast
@@ -244,8 +252,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_gate_commands() {
-        let config = Config::default();
-        let gate = GateController::new(config);
+        let gate = MockGateController;
 
         for track_id in 1..=5 {
             let latency_us = gate.send_open_command(TrackId(track_id)).await;

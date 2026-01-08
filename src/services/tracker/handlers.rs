@@ -11,6 +11,7 @@ use crate::io::{
     AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload,
     ZoneEventPayload,
 };
+use crate::services::gate::GateCommand;
 use crate::services::stitcher::StitchMatch;
 use std::time::Instant;
 use tracing::{debug, info, warn};
