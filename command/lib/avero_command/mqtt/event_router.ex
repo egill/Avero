@@ -31,7 +31,17 @@ defmodule AveroCommand.MQTT.EventRouter do
       ["gateway", topic_name] ->
         # Other gateway-poc topics (events, gate, acc, metrics)
         event = normalize_gateway_event(topic_name, event_data)
+
+        # 1. Persist to store (async)
         Task.start(fn -> Store.insert_event(event) end)
+
+        # 2. Transform to scenario-compatible format and evaluate
+        scenario_event = normalize_for_scenarios(topic_name, event, event_data)
+        if scenario_event do
+          route_to_entities(scenario_event)
+          Evaluator.evaluate(scenario_event)
+        end
+
         :ok
 
       _ ->
@@ -187,4 +197,173 @@ defmodule AveroCommand.MQTT.EventRouter do
         Logger.warning("Failed to route to gate #{gate_id}: #{inspect(reason)}")
     end
   end
+
+  # =============================================================================
+  # Gateway-PoC to Scenario Event Normalization
+  # =============================================================================
+  # Maps gateway event types to formats expected by scenario detectors.
+  # Gateway uses short keys (t, ts, tid) while scenarios expect (event_type, data["type"])
+
+  # gateway/gate: state = cmd_sent | open | closed | moving
+  defp normalize_for_scenarios("gate", event, data) do
+    gate_type = case data["state"] do
+      "open" -> "gate.opened"
+      "closed" -> "gate.closed"
+      "cmd_sent" -> "gate.cmd"
+      "moving" -> "gate.moving"
+      _ -> "gate.status"
+    end
+
+    gate_id = data["gate_id"] || 1
+
+    %{event |
+      event_type: "gates",
+      gate_id: gate_id,
+      data: Map.merge(event.data, %{
+        "type" => gate_type,
+        "gate_id" => gate_id,
+        "open_duration_ms" => data["duration_ms"],
+        "_source" => "gateway"
+      })
+    }
+  end
+
+  # gateway/events: t = zone_entry | zone_exit | line_cross
+  defp normalize_for_scenarios("events", event, data) do
+    case data["t"] do
+      "zone_entry" ->
+        %{event |
+          event_type: "sensors",
+          data: Map.merge(event.data, %{
+            "type" => "xovis.zone.entry",
+            "zone" => data["z"],
+            "_source" => "gateway"
+          })
+        }
+
+      "zone_exit" ->
+        %{event |
+          event_type: "sensors",
+          data: Map.merge(event.data, %{
+            "type" => "xovis.zone.exit",
+            "zone" => data["z"],
+            "dwell_ms" => data["dwell_ms"],
+            "_source" => "gateway"
+          })
+        }
+
+      "line_cross" ->
+        # Check if this is an exit line crossing
+        zone = data["z"] || ""
+        is_exit = String.contains?(String.upcase(zone), "EXIT")
+
+        if is_exit do
+          %{event |
+            event_type: "exits",
+            data: Map.merge(event.data, %{
+              "type" => "exit.confirmed",
+              "authorized" => data["auth"] || false,
+              "zone" => zone,
+              "_source" => "gateway"
+            })
+          }
+        else
+          %{event |
+            event_type: "sensors",
+            data: Map.merge(event.data, %{
+              "type" => "xovis.line.cross",
+              "zone" => zone,
+              "_source" => "gateway"
+            })
+          }
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  # gateway/acc: t = received | matched | unmatched
+  defp normalize_for_scenarios("acc", event, data) do
+    case data["t"] do
+      "matched" ->
+        %{event |
+          event_type: "people",
+          data: Map.merge(event.data, %{
+            "type" => "person.payment.received",
+            "person_id" => data["tid"],
+            "pos_zone" => data["pos"],
+            "_source" => "gateway"
+          })
+        }
+
+      "received" ->
+        %{event |
+          event_type: "acc",
+          data: Map.merge(event.data, %{
+            "type" => "acc.received",
+            "pos_zone" => data["pos"],
+            "_source" => "gateway"
+          })
+        }
+
+      "unmatched" ->
+        %{event |
+          event_type: "acc",
+          data: Map.merge(event.data, %{
+            "type" => "acc.unmatched",
+            "pos_zone" => data["pos"],
+            "_source" => "gateway"
+          })
+        }
+
+      _ ->
+        nil
+    end
+  end
+
+  # gateway/tracks: t = create | delete | stitch | lost | reentry
+  defp normalize_for_scenarios("tracks", event, data) do
+    case data["t"] do
+      "delete" ->
+        # Track deletion can be treated as exit for some scenarios
+        %{event |
+          event_type: "exits",
+          data: Map.merge(event.data, %{
+            "type" => "exit.confirmed",
+            "authorized" => data["auth"] || false,
+            "_source" => "gateway"
+          })
+        }
+
+      "create" ->
+        %{event |
+          event_type: "tracking",
+          data: Map.merge(event.data, %{
+            "type" => "track.created",
+            "_source" => "gateway"
+          })
+        }
+
+      "stitch" ->
+        %{event |
+          event_type: "tracking",
+          data: Map.merge(event.data, %{
+            "type" => "track.stitched",
+            "prev_track_id" => data["prev_tid"],
+            "_source" => "gateway"
+          })
+        }
+
+      _ ->
+        # lost, reentry - pass through but don't evaluate
+        nil
+    end
+  end
+
+  # gateway/metrics: metrics snapshots - no scenario evaluation needed
+  defp normalize_for_scenarios("metrics", _event, _data), do: nil
+
+  # Unknown topic - skip
+  defp normalize_for_scenarios(_topic, _event, _data), do: nil
 end

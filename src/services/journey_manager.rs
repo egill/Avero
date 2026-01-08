@@ -133,10 +133,16 @@ impl JourneyManager {
         }
     }
 
-    /// Add an event to a journey
+    /// Add an event to a journey (checks both active and pending_egress)
     pub fn add_event(&mut self, track_id: TrackId, event: JourneyEvent) {
+        // Try active journeys first
         if let Some(journey) = self.active.get_mut(&track_id) {
             journey.add_event(event);
+            return;
+        }
+        // Fall back to pending_egress (for events that arrive after journey completes, like gate_open)
+        if let Some(pending) = self.pending_egress.get_mut(&track_id) {
+            pending.journey.add_event(event);
         }
     }
 

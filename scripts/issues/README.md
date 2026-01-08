@@ -11,6 +11,39 @@ This directory contains tools and data for diagnosing journey anomalies.
 
 ## Scripts
 
+### chat-journeys.py (NEW)
+
+Natural language interface to journey data, powered by Claude.
+
+```bash
+# Install dependencies
+pip install -r ../requirements.txt
+
+# Set API key
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Interactive mode
+python ../chat-journeys.py
+
+# Single query
+python ../chat-journeys.py "show me journeys with lost tracking after POS"
+```
+
+**Example queries:**
+- "Show me journeys where someone spent time at POS but tracking was lost"
+- "What's the ACC match rate for the last 24 hours?"
+- "Why did journey abc123 not get authorized?"
+- "Find journeys where gate command was sent but no exit detected"
+- "Create an issue for this journey"
+
+**Tools available to Claude:**
+- `query_journeys` - Search journeys with filters
+- `get_journey_detail` - Get full events for a journey
+- `get_journey_stats` - Aggregate statistics
+- `query_logs` - Search RPi logs
+- `create_issue` - Create tracking issue
+- `get_issue_stats` - View issue counters
+
 ### diagnose-journeys.sh
 
 Main diagnostic script. Fetches journey data and logs from RPi, analyzes for anomalies.

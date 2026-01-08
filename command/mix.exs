@@ -62,7 +62,11 @@ defmodule AveroCommand.MixProject do
       {:elixir_uuid, "~> 1.2"},
 
       # Scheduler for periodic jobs
-      {:quantum, "~> 3.5"}
+      {:quantum, "~> 3.5"},
+
+      # Prometheus metrics
+      {:prometheus_ex, "~> 3.1"},
+      {:prometheus_plugs, "~> 1.1"}
     ]
   end
 

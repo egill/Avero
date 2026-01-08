@@ -2,9 +2,17 @@ defmodule AveroCommand.Application do
   @moduledoc false
 
   use Application
+  require Logger
 
   @impl true
   def start(_type, _args) do
+    # Initialize Prometheus metrics before starting supervision tree
+    AveroCommand.Metrics.setup()
+
+    # Initialize the scenario evaluator warmup timer
+    AveroCommand.Scenarios.Evaluator.init()
+    Logger.info("Application: Metrics and Evaluator initialized")
+
     children = [
       # Database
       AveroCommand.Repo,

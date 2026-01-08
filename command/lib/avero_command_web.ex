@@ -69,6 +69,8 @@ defmodule AveroCommandWeb do
       use PhoenixHTMLHelpers
 
       import AveroCommandWeb.CoreComponents
+      import AveroCommandWeb.DashboardComponents
+      import AveroCommandWeb.UIComponents
 
       alias Phoenix.LiveView.JS
 

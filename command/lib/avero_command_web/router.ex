@@ -31,7 +31,7 @@ defmodule AveroCommandWeb.Router do
   scope "/", AveroCommandWeb do
     pipe_through [:browser, :require_auth]
 
-    live_session :default, on_mount: [{AveroCommandWeb.SiteFilterHook, :default}, {AveroCommandWeb.AuthHook, :default}] do
+    live_session :default, on_mount: [{AveroCommandWeb.DashboardHook, :default}, {AveroCommandWeb.SiteFilterHook, :default}, {AveroCommandWeb.AuthHook, :default}] do
       # Main incident feed (LiveView)
       live "/", IncidentFeedLive, :index
 
@@ -59,12 +59,25 @@ defmodule AveroCommandWeb.Router do
     get "/", HealthController, :index
   end
 
+  # Prometheus metrics endpoint
+  scope "/metrics", AveroCommandWeb do
+    pipe_through :api
+
+    get "/", MetricsController, :index
+  end
+
   # API endpoints
   scope "/api", AveroCommandWeb do
     pipe_through :api
 
     # Review endpoint for automated anomaly detection
     get "/review", ReviewController, :index
+
+    # Journey query API (for chat-journeys CLI tool)
+    get "/journeys", JourneyController, :index
+    get "/journeys/stats", JourneyController, :stats
+    get "/journeys/by-session/:session_id", JourneyController, :by_session
+    get "/journeys/:id", JourneyController, :show
 
     # Debug endpoints (development only)
     get "/debug/persons", DebugController, :persons

@@ -63,6 +63,7 @@ defmodule AveroCommand.Scenarios.Evaluator do
   alias AveroCommand.Scenarios.HighTraffic
 
   alias AveroCommand.Incidents.Manager
+  alias AveroCommand.Metrics
 
   # Warmup period after server start (seconds) - ignore alerts during this time
   @warmup_seconds 120
@@ -141,16 +142,28 @@ defmodule AveroCommand.Scenarios.Evaluator do
   defp do_evaluate(event) do
     Logger.debug("Evaluator: processing event_type=#{event.event_type}")
     Enum.each(@scenarios, fn scenario ->
-      case scenario.evaluate(event) do
+      # Track timing for each scenario evaluation
+      start_time = System.monotonic_time(:microsecond)
+      result = scenario.evaluate(event)
+      duration_seconds = (System.monotonic_time(:microsecond) - start_time) / 1_000_000
+
+      # Extract scenario name for metrics
+      scenario_name = scenario |> Module.split() |> List.last() |> Macro.underscore()
+      Metrics.observe_scenario_duration(scenario_name, duration_seconds)
+
+      case result do
         {:match, incident_attrs} ->
           Logger.info("Scenario matched: #{scenario}")
+          Metrics.inc_scenario_result(scenario_name, :match)
           Manager.create_incident(incident_attrs)
 
         :no_match ->
+          Metrics.inc_scenario_result(scenario_name, :no_match)
           :ok
 
         {:error, reason} ->
           Logger.warning("Scenario evaluation error in #{scenario}: #{inspect(reason)}")
+          Metrics.inc_scenario_result(scenario_name, :error)
       end
     end)
   rescue

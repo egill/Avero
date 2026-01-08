@@ -9,7 +9,7 @@ defmodule AveroCommandWeb.SessionController do
     if get_session(conn, :authenticated) do
       redirect(conn, to: "/")
     else
-      render(conn, :new, error: nil, layout: false)
+      render(conn, :new, error: nil, layout: {AveroCommandWeb.Layouts, :auth})
     end
   end
 
@@ -20,7 +20,7 @@ defmodule AveroCommandWeb.SessionController do
       |> put_session(:username, username)
       |> redirect(to: "/")
     else
-      render(conn, :new, error: "Invalid username or password", layout: false)
+      render(conn, :new, error: "Invalid username or password", layout: {AveroCommandWeb.Layouts, :auth})
     end
   end
 

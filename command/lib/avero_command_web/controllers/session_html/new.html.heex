@@ -1,181 +1,49 @@
-<!DOCTYPE html>
-<html lang="en" class="h-full">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Login - Avero Command</title>
-    <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
-    <style>
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        background: linear-gradient(135deg, #1e3a5f 0%, #0d1b2a 100%);
-        min-height: 100vh;
-        margin: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .login-container {
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        padding: 48px;
-        width: 100%;
-        max-width: 400px;
-        margin: 20px;
-      }
-      .login-header {
-        text-align: center;
-        margin-bottom: 32px;
-      }
-      .login-header h1 {
-        color: #1e3a5f;
-        font-size: 28px;
-        font-weight: 700;
-        margin: 0 0 8px 0;
-      }
-      .login-header p {
-        color: #6b7280;
-        font-size: 14px;
-        margin: 0;
-      }
-      .form-group {
-        margin-bottom: 20px;
-      }
-      .form-group label {
-        display: block;
-        color: #374151;
-        font-size: 14px;
-        font-weight: 600;
-        margin-bottom: 8px;
-      }
-      .form-group input {
-        width: 100%;
-        padding: 12px 16px;
-        border: 2px solid #e5e7eb;
-        border-radius: 8px;
-        font-size: 16px;
-        color: #1f2937;
-        background: #f9fafb;
-        transition: border-color 0.2s, box-shadow 0.2s;
-        box-sizing: border-box;
-      }
-      .form-group input:focus {
-        outline: none;
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        background: white;
-      }
-      .form-group input::placeholder {
-        color: #9ca3af;
-      }
-      .submit-btn {
-        width: 100%;
-        padding: 14px;
-        background: #3b82f6;
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-size: 16px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background 0.2s, transform 0.1s;
-        margin-top: 8px;
-      }
-      .submit-btn:hover {
-        background: #2563eb;
-      }
-      .submit-btn:active {
-        transform: scale(0.98);
-      }
-      .error-box {
-        background: #fef2f2;
-        border: 1px solid #fecaca;
-        border-radius: 8px;
-        padding: 12px 16px;
-        margin-bottom: 24px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .error-box svg {
-        flex-shrink: 0;
-        color: #dc2626;
-      }
-      .error-box p {
-        color: #dc2626;
-        font-size: 14px;
-        margin: 0;
-      }
-      .logo-icon {
-        width: 64px;
-        height: 64px;
-        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-        border-radius: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 0 auto 20px;
-      }
-      .logo-icon svg {
-        width: 36px;
-        height: 36px;
-        color: white;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="login-container">
-      <div class="login-header">
-        <div class="logo-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-          </svg>
-        </div>
-        <h1>Avero Command</h1>
-        <p>Sign in to access the dashboard</p>
-      </div>
+<%= if @error do %>
+  <div class="mb-6 flex items-center gap-3 rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-900/20 dark:text-red-400">
+    <svg class="h-5 w-5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+    </svg>
+    <p class="text-sm font-medium"><%= @error %></p>
+  </div>
+<% end %>
 
-      <%= if @error do %>
-        <div class="error-box">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
-          </svg>
-          <p><%= @error %></p>
-        </div>
-      <% end %>
+<form action="/login" method="post" class="space-y-5">
+  <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
 
-      <form action="/login" method="post">
-        <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+  <div>
+    <label for="username" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+      Username
+    </label>
+    <input
+      id="username"
+      name="username"
+      type="text"
+      autocomplete="username"
+      placeholder="Enter your username"
+      required
+      class="block w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 placeholder-gray-400 transition-colors focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-brand-500 dark:focus:bg-gray-700"
+    />
+  </div>
 
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input
-            id="username"
-            name="username"
-            type="text"
-            autocomplete="username"
-            placeholder="Enter your username"
-            required
-          />
-        </div>
+  <div>
+    <label for="password" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+      Password
+    </label>
+    <input
+      id="password"
+      name="password"
+      type="password"
+      autocomplete="current-password"
+      placeholder="Enter your password"
+      required
+      class="block w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 placeholder-gray-400 transition-colors focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-brand-500 dark:focus:bg-gray-700"
+    />
+  </div>
 
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            placeholder="Enter your password"
-            required
-          />
-        </div>
-
-        <button type="submit" class="submit-btn">
-          Sign In
-        </button>
-      </form>
-    </div>
-  </body>
-</html>
+  <button
+    type="submit"
+    class="w-full rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+  >
+    Sign In
+  </button>
+</form>

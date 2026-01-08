@@ -1027,37 +1027,48 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   defp journey_timing_summary(assigns) do
     events = assigns.journey.events || []
 
-    # Extract timing data from events
-    gate_open_requested = find_event_by_type(events, "gate_open_requested")
-    gate_opened = find_event_by_type(events, "gate_opened")
+    # Extract timing data from events - support both old and new event type names
+    gate_cmd = find_event_by_type(events, "gate_cmd") || find_event_by_type(events, "gate_open_requested")
+    gate_open = find_event_by_type(events, "gate_open") || find_event_by_type(events, "gate_opened")
     last_pos_exit = find_last_pos_exit(events)
-    exit_event = find_event_by_type(events, "exit")
+    exit_event = find_event_by_type(events, "exit_cross") || find_event_by_type(events, "exit")
+    entry_event = find_event_by_type(events, "entry_cross") || find_event_by_type(events, "entry")
 
-    # Gate Open: prefer gate_opened (RS485 confirmation), fall back to gate_open_requested
-    # This handles cases where gate was already open when command arrived
-    gate_opened_at = get_event_timestamp(gate_opened) || get_event_timestamp(gate_open_requested)
+    # Gate Open: prefer gate_open (RS485 confirmation), fall back to gate_cmd
+    gate_open_confirmed_at = get_event_timestamp(gate_open)
 
     assigns =
       assigns
-      |> assign(:gate_open_requested_at, get_event_timestamp(gate_open_requested))
-      |> assign(:gate_opened_at, gate_opened_at)
+      |> assign(:entry_at, get_event_timestamp(entry_event))
+      |> assign(:gate_cmd_at, get_event_timestamp(gate_cmd))
+      |> assign(:gate_open_confirmed_at, gate_open_confirmed_at)
       |> assign(:pos_exit_at, get_event_timestamp(last_pos_exit))
       |> assign(:exit_at, get_event_timestamp(exit_event))
 
     ~H"""
     <div class="px-4 py-2 bg-white border-b border-gray-100">
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
         <div>
           <span class="text-gray-500">Total:</span>
           <span class="font-medium ml-1"><%= format_duration(@journey.duration_ms) || "-" %></span>
         </div>
         <div>
-          <span class="text-gray-500">Gate Cmd:</span>
-          <span class="font-medium ml-1"><%= format_event_timestamp(@gate_open_requested_at) %></span>
+          <span class="text-gray-500">Entry:</span>
+          <span class="font-medium ml-1"><%= format_event_timestamp(@entry_at) %></span>
         </div>
         <div>
-          <span class="text-gray-500">Gate Open:</span>
-          <span class="font-medium ml-1"><%= format_event_timestamp(@gate_opened_at) %></span>
+          <span class="text-gray-500">Gate Cmd:</span>
+          <span class="font-medium ml-1"><%= format_event_timestamp(@gate_cmd_at) %></span>
+        </div>
+        <div>
+          <span class="text-gray-500">Gate Opened:</span>
+          <span class="font-medium ml-1">
+            <%= if @gate_open_confirmed_at do %>
+              <%= format_event_timestamp(@gate_open_confirmed_at) %>
+            <% else %>
+              <span class="text-gray-400">(no RS485)</span>
+            <% end %>
+          </span>
         </div>
         <div>
           <span class="text-gray-500">POS→Exit:</span>
@@ -1083,9 +1094,9 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       end)
       |> List.last()
 
-    # Fall back to acc_payment event if no POS zone exit recorded
+    # Fall back to acc event if no POS zone exit recorded
     # (handles cases where zone tracking was lost but payment was received)
-    pos_exit || find_event_by_type(events, "acc_payment")
+    pos_exit || find_event_by_type(events, "acc") || find_event_by_type(events, "acc_payment")
   end
 
   defp get_event_timestamp(nil), do: nil
@@ -1163,9 +1174,8 @@ defmodule AveroCommandWeb.JourneyFeedLive do
               <tr class="border-b border-gray-200 text-left text-gray-500">
                 <th class="py-1.5 pr-3 font-medium">Event</th>
                 <th class="py-1.5 px-2 font-medium text-right whitespace-nowrap">+Start</th>
-                <th class="py-1.5 px-2 font-medium text-right whitespace-nowrap">Delta</th>
-                <th class="py-1.5 px-2 font-medium whitespace-nowrap">Event Time</th>
-                <th class="py-1.5 pl-2 font-medium whitespace-nowrap">Received</th>
+                <th class="py-1.5 px-2 font-medium text-right whitespace-nowrap">Gap</th>
+                <th class="py-1.5 px-2 font-medium whitespace-nowrap">Time</th>
               </tr>
             </thead>
             <tbody class="font-mono">
@@ -1218,13 +1228,11 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   # Table row for timeline - cleaner columnar layout
   defp timeline_table_row(assigns) do
     {icon, color, description} = format_journey_event(assigns.event)
-    received_at = get_received_timestamp(assigns.event)
 
     assigns = assigns
       |> assign(:icon, icon)
       |> assign(:color, color)
       |> assign(:description, description)
-      |> assign(:received_at, received_at)
 
     ~H"""
     <tr class="border-b border-gray-100 hover:bg-gray-50/50">
@@ -1245,7 +1253,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
         <% end %>
       </td>
 
-      <!-- Delta (time since previous event) -->
+      <!-- Gap (time since previous event) -->
       <td class="py-1.5 px-2 text-right whitespace-nowrap">
         <%= if @timing.delta && @timing.delta > 0 do %>
           <span class={"inline-block px-1 py-0.5 rounded text-xs #{delta_color(@timing.delta)}"}>
@@ -1256,31 +1264,14 @@ defmodule AveroCommandWeb.JourneyFeedLive do
         <% end %>
       </td>
 
-      <!-- Event timestamp (from sensor/source) -->
+      <!-- Event timestamp -->
       <td class="py-1.5 px-2 text-gray-600 whitespace-nowrap">
         <%= format_time_with_ms(@timing.absolute) %>
-      </td>
-
-      <!-- Received timestamp (when gateway got it) -->
-      <td class="py-1.5 pl-2 text-gray-400 whitespace-nowrap">
-        <%= format_time_with_ms(@received_at) %>
       </td>
     </tr>
     """
   end
 
-  # Get received_at timestamp from event (when gateway processed it, vs sensor event time)
-  defp get_received_timestamp(%{"received_at" => ts}) when is_binary(ts) do
-    case DateTime.from_iso8601(ts) do
-      {:ok, dt, _} -> dt
-      _ -> nil
-    end
-  end
-  defp get_received_timestamp(%{"data" => %{"received_at" => ts}}) when is_integer(ts) do
-    # Legacy: received_at in milliseconds
-    DateTime.from_unix!(ts, :millisecond)
-  end
-  defp get_received_timestamp(_), do: nil
 
   # Color delta badges based on time - helps spot delays
   defp delta_color(ms) when ms < 100, do: "bg-green-100 text-green-700"
@@ -1328,49 +1319,63 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   defp format_journey_event(%{"type" => "zone_entry"} = event) do
     zone = get_in(event, ["data", "zone"]) || "?"
-    is_pos = String.starts_with?(zone, "POS")
-
-    if is_pos do
-      {"→", "text-blue-600", "Entered #{zone}"}
-    else
-      {"→", "text-gray-500", "Entered #{zone}"}
+    cond do
+      String.starts_with?(zone, "POS") ->
+        {"→", "text-blue-600", "#{zone}"}
+      String.starts_with?(zone, "GATE") ->
+        {"→", "text-purple-500", "#{zone}"}
+      true ->
+        {"→", "text-gray-400", "#{zone}"}
     end
   end
 
   defp format_journey_event(%{"type" => "zone_exit"} = event) do
     zone = get_in(event, ["data", "zone"]) || "?"
     dwell = get_in(event, ["data", "dwell_ms"])
-    dwell_met = get_in(event, ["data", "dwell_met"])
     is_pos = String.starts_with?(zone, "POS")
-
-    dwell_str = if dwell, do: " (#{format_duration(dwell)})", else: ""
+    dwell_str = if dwell && dwell > 0, do: " #{format_duration(dwell)}", else: ""
 
     cond do
-      is_pos and dwell_met ->
-        {"←", "text-green-600", "POS stop at #{zone}#{dwell_str} ✓"}
+      is_pos and dwell && dwell >= 7000 ->
+        {"←", "text-green-600", "#{zone}#{dwell_str} ✓"}
       is_pos ->
-        {"←", "text-gray-500", "Exited #{zone}#{dwell_str}"}
+        {"←", "text-blue-500", "#{zone}#{dwell_str}"}
       true ->
-        {"←", "text-gray-500", "Exited #{zone}#{dwell_str}"}
+        {"←", "text-gray-400", "#{zone}#{dwell_str}"}
     end
   end
 
+  # ACC payment event from Rust backend
+  defp format_journey_event(%{"type" => "acc"} = event) do
+    zone = get_in(event, ["data", "zone"]) || "?"
+    zone_display = format_zone_name(zone)
+    kiosk = get_in(event, ["data", "kiosk"])
+    kiosk_str = if kiosk, do: " (kiosk #{String.split(kiosk, ".") |> List.last()})", else: ""
+    group = get_in(event, ["data", "group"])
+    group_str = if group && group > 1, do: " [group: #{group}]", else: ""
+    {"💳", "text-green-600", "Payment at #{zone_display}#{kiosk_str}#{group_str}"}
+  end
+
+  # Legacy payment event format
   defp format_journey_event(%{"type" => "payment"} = event) do
     zone = get_in(event, ["data", "zone"]) || "?"
+    zone_display = format_zone_name(zone)
     receipt_id = get_in(event, ["data", "receipt_id"])
     receipt_str = if receipt_id, do: " (#{String.slice(receipt_id, -8..-1)})", else: ""
-    {"💳", "text-green-600", "ACC Payment at #{zone}#{receipt_str}"}
+    {"💳", "text-green-600", "Payment at #{zone_display}#{receipt_str}"}
   end
 
   defp format_journey_event(%{"type" => "dwell_threshold"} = event) do
     zone = get_in(event, ["data", "zone"]) || "?"
-    {"⏱", "text-orange-500", "Dwell threshold met at #{zone}"}
+    zone_display = format_zone_name(zone)
+    {"⏱", "text-orange-500", "Dwell threshold at #{zone_display}"}
   end
 
   # Legacy support for old event format
   defp format_journey_event(%{"type" => "dwell_met"} = event) do
     zone = get_in(event, ["data", "zone"]) || "?"
-    {"⏱", "text-orange-500", "Dwell threshold at #{zone}"}
+    zone_display = format_zone_name(zone)
+    {"⏱", "text-orange-500", "Dwell threshold at #{zone_display}"}
   end
 
   defp format_journey_event(%{"type" => "state_change"} = event) do
@@ -1389,6 +1394,35 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     {"↗", "text-indigo-500", "Crossed #{line} (#{direction})"}
   end
 
+  # Entry line crossing
+  defp format_journey_event(%{"type" => "entry_cross"} = event) do
+    direction = get_in(event, ["data", "dir"]) || get_in(event, ["data", "direction"]) || ""
+    {"⊕", "text-green-600", "ENTRY #{direction}"}
+  end
+
+  # Exit line crossing
+  defp format_journey_event(%{"type" => "exit_cross"} = event) do
+    direction = get_in(event, ["data", "dir"]) || get_in(event, ["data", "direction"]) || ""
+    {"✓", "text-green-600", "EXIT #{direction}"}
+  end
+
+  # Approach line crossing
+  defp format_journey_event(%{"type" => "approach_cross"} = event) do
+    direction = get_in(event, ["data", "dir"]) || get_in(event, ["data", "direction"]) || ""
+    {"↗", "text-purple-500", "APPROACH #{direction}"}
+  end
+
+  # Track created
+  defp format_journey_event(%{"type" => "track_create"} = _event) do
+    {"○", "text-gray-500", "Track started"}
+  end
+
+  # Track pending stitch
+  defp format_journey_event(%{"type" => "pending"} = _event) do
+    {"◌", "text-yellow-500", "Pending stitch"}
+  end
+
+  # Legacy exit event format
   defp format_journey_event(%{"type" => "exit"} = event) do
     authorized = get_in(event, ["data", "authorized"])
     tailgated = get_in(event, ["data", "tailgated"])
@@ -1409,7 +1443,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
         {"⚠", "text-orange-600", "Tailgated exit#{opener_info}"}
       authorized ->
         opener = if gate_opened_by, do: " (#{gate_opened_by})", else: ""
-        {"✓", "text-green-600", "Authorized exit#{opener}"}
+        {"✓", "text-green-600", "Exited through gate#{opener}"}
       true ->
         {"✗", "text-red-600", "Unauthorized exit"}
     end
@@ -1419,14 +1453,33 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     {"↩", "text-blue-500", "Returned to store"}
   end
 
+  # Gate command sent - from Rust backend
+  defp format_journey_event(%{"type" => "gate_cmd"} = event) do
+    cmd_us = get_in(event, ["data", "cmd_us"])
+    e2e_us = get_in(event, ["data", "e2e_us"])
+    latency_str = cond do
+      e2e_us && e2e_us > 0 -> " (#{e2e_us}µs)"
+      cmd_us && cmd_us > 0 -> " (#{cmd_us}µs)"
+      true -> ""
+    end
+    {"🚪", "text-indigo-500", "Gate open command sent#{latency_str}"}
+  end
+
+  # Legacy gate_open_requested format
   defp format_journey_event(%{"type" => "gate_open_requested"} = event) do
     gate_id = get_in(event, ["data", "gate_id"])
     gate_str = if gate_id, do: " (Gate #{gate_id})", else: ""
-    {"🚪", "text-indigo-500", "Gate open requested#{gate_str}"}
+    {"🚪", "text-indigo-500", "Gate open command sent#{gate_str}"}
   end
 
+  # Gate opened confirmation (RS485)
+  defp format_journey_event(%{"type" => "gate_open"} = _event) do
+    {"✓", "text-green-500", "Gate opened (RS485 confirmed)"}
+  end
+
+  # Legacy gate_opened format
   defp format_journey_event(%{"type" => "gate_opened"} = event) do
-    source = get_in(event, ["data", "source"]) || "unknown"
+    source = get_in(event, ["data", "source"]) || "RS485"
     {"✓", "text-green-500", "Gate opened (#{source})"}
   end
 
@@ -1452,6 +1505,15 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     end
   end
   defp format_duration(_), do: "-"
+
+  # Format zone name for display (removes common prefixes)
+  defp format_zone_name(nil), do: "?"
+  defp format_zone_name(zone) when is_binary(zone) do
+    zone
+    |> String.replace(~r/^ZONE[-_]?/i, "")
+    |> String.replace("_", " ")
+  end
+  defp format_zone_name(zone), do: to_string(zone)
 
   # Site selector component
   defp site_selector(assigns) do

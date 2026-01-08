@@ -10,8 +10,9 @@ use smallvec::SmallVec;
 use std::time::Instant;
 use tracing::{debug, info};
 
-/// Maximum time window to correlate gate_open with gate_cmd (5 seconds)
-const MAX_GATE_CORRELATION_MS: u64 = 5000;
+/// Maximum time window to correlate gate_open with gate_cmd (10 seconds)
+/// Gate can take 5-9 seconds to fully open in some cases
+const MAX_GATE_CORRELATION_MS: u64 = 10000;
 
 /// Tracks recent gate commands for correlation
 #[derive(Debug, Clone)]
@@ -124,7 +125,8 @@ impl DoorCorrelator {
             );
 
             // Update journey with per-command door state
-            if let Some(journey) = journey_manager.get_mut(track_id) {
+            // Use get_mut_any to also check pending_egress (journey may have completed while door was opening)
+            if let Some(journey) = journey_manager.get_mut_any(track_id) {
                 journey.gate_opened_at = Some(now_ms);
                 journey.gate_was_open = cmd.door_was_open;
             }
@@ -276,10 +278,10 @@ mod tests {
         let mut correlator = DoorCorrelator::new();
         let mut jm = JourneyManager::new();
 
-        // Add a command with artificially old timestamp
+        // Add a command with artificially old timestamp (older than 2x correlation window)
         correlator.pending_cmds.push(PendingGateCmd {
             track_id: TrackId(100),
-            sent_at: Instant::now() - std::time::Duration::from_secs(15),
+            sent_at: Instant::now() - std::time::Duration::from_secs(25),
             _sent_at_ms: 0,
             door_was_open: false,
         });

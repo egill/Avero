@@ -6,6 +6,7 @@ const fs = require("fs")
 const path = require("path")
 
 module.exports = {
+  darkMode: 'class',
   content: [
     "./js/**/*.js",
     "../lib/avero_command_web.ex",
@@ -14,8 +15,28 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        brand: "#FD4F00",
-      }
+        brand: {
+          50: "#fff7ed",
+          100: "#ffedd5",
+          200: "#fed7aa",
+          300: "#fdba74",
+          400: "#fb923c",
+          500: "#FD4F00",
+          600: "#ea580c",
+          700: "#c2410c",
+          800: "#9a3412",
+          900: "#7c2d12",
+        },
+        dark: {
+          bg: "#1a1c23",
+          card: "#24262d",
+          border: "#374151",
+        }
+      },
+      zIndex: {
+        '9999': '9999',
+        '99999': '99999',
+      },
     },
   },
   plugins: [

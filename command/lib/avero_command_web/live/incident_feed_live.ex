@@ -202,7 +202,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
     <div class="incident-feed">
       <div class="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div class="flex items-center justify-between sm:justify-start space-x-4">
-          <h2 class="text-base sm:text-lg font-semibold text-gray-900">Active Incidents</h2>
+          <h2 class="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">Active Incidents</h2>
           <.site_selector
             available_sites={@available_sites}
             selected_sites={@selected_sites}
@@ -216,7 +216,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
             class={[
               "px-2 sm:px-3 py-1 rounded-md text-xs sm:text-sm font-medium",
               @filter == :all && "bg-blue-600 text-white",
-              @filter != :all && "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              @filter != :all && "bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
             ]}
           >
             All
@@ -227,7 +227,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
             class={[
               "px-2 sm:px-3 py-1 rounded-md text-xs sm:text-sm font-medium",
               @filter == :high && "bg-red-600 text-white",
-              @filter != :high && "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              @filter != :high && "bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
             ]}
           >
             High
@@ -238,7 +238,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
             class={[
               "px-2 sm:px-3 py-1 rounded-md text-xs sm:text-sm font-medium",
               @filter == :new && "bg-yellow-600 text-white",
-              @filter != :new && "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              @filter != :new && "bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
             ]}
           >
             New
@@ -276,9 +276,9 @@ defmodule AveroCommandWeb.IncidentFeedLive do
           </div>
         <% end %>
         <%= if Enum.empty?(@incidents) do %>
-          <div class="text-center py-12 bg-white rounded-lg shadow">
-            <p class="text-gray-500">No active incidents</p>
-            <p class="text-sm text-gray-400 mt-2">Incidents will appear here when detected</p>
+          <div class="text-center py-12 bg-white rounded-lg shadow dark:bg-gray-800">
+            <p class="text-gray-500 dark:text-gray-400">No active incidents</p>
+            <p class="text-sm text-gray-400 dark:text-gray-500 mt-2">Incidents will appear here when detected</p>
           </div>
         <% else %>
           <%= for incident <- @incidents do %>
@@ -311,7 +311,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
   defp incident_card(assigns) do
     ~H"""
     <div class={[
-      "bg-white shadow rounded-lg p-4 border-l-4",
+      "bg-white shadow rounded-lg p-4 border-l-4 dark:bg-gray-800",
       severity_border(@incident.severity)
     ]}>
       <div class="flex items-start justify-between">
@@ -320,17 +320,17 @@ defmodule AveroCommandWeb.IncidentFeedLive do
             <span class={["px-2 py-1 text-xs font-medium rounded", severity_badge(@incident.severity)]}>
               <%= String.upcase(@incident.severity) %>
             </span>
-            <span class="text-sm font-medium text-gray-900">
+            <span class="text-sm font-medium text-gray-900 dark:text-white">
               <%= format_type(@incident.type) %>
             </span>
-            <span class="text-sm text-gray-500">
+            <span class="text-sm text-gray-500 dark:text-gray-400">
               <%= @incident.site %>
             </span>
           </div>
-          <p class="mt-2 text-sm text-gray-600">
+          <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
             <%= format_context(@incident.context) %>
           </p>
-          <p class="mt-1 text-xs text-gray-400">
+          <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
             <%= format_time(@incident.created_at) %>
           </p>
         </div>
@@ -346,7 +346,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
           <% end %>
           <.link
             navigate={~p"/incidents/#{@incident.id}"}
-            class="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300"
+            class="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
           >
             Details
           </.link>
@@ -362,20 +362,20 @@ defmodule AveroCommandWeb.IncidentFeedLive do
     assigns = assign(assigns, :ctx, ctx)
     ~H"""
     <div class={[
-      "bg-white shadow rounded-lg overflow-hidden border-l-4",
+      "bg-white shadow rounded-lg overflow-hidden border-l-4 dark:bg-gray-800",
       severity_border(@incident.severity)
     ]}>
       <%!-- Header --%>
-      <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+      <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 dark:bg-gray-700/50 dark:border-gray-700">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2">
             <span class={["px-2 py-1 text-xs font-medium rounded", severity_badge(@incident.severity)]}>
               <%= String.upcase(@incident.severity) %>
             </span>
-            <span class="text-sm font-bold text-gray-900">TAILGATE DETECTED</span>
-            <span class="text-sm text-gray-500"><%= @incident.site %></span>
+            <span class="text-sm font-bold text-gray-900 dark:text-white">TAILGATE DETECTED</span>
+            <span class="text-sm text-gray-500 dark:text-gray-400"><%= @incident.site %></span>
           </div>
-          <span class="text-xs text-gray-400"><%= format_time(@incident.created_at) %></span>
+          <span class="text-xs text-gray-400 dark:text-gray-500"><%= format_time(@incident.created_at) %></span>
         </div>
       </div>
 
@@ -457,7 +457,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
         <% end %>
 
         <%!-- Gate Info --%>
-        <div class="flex items-center justify-between pt-2 border-t border-gray-100 text-xs text-gray-500">
+        <div class="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
           <span>Gate: <%= @ctx["gate_id"] || @incident.gate_id %></span>
           <%= if @ctx["gate_open_duration_ms"] do %>
             <span>Gate open: <%= Float.round(@ctx["gate_open_duration_ms"] / 1000, 1) %>s</span>
@@ -466,7 +466,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
       </div>
 
       <%!-- Actions --%>
-      <div class="px-4 py-2 bg-gray-50 border-t border-gray-200 flex justify-end space-x-2">
+      <div class="px-4 py-2 bg-gray-50 border-t border-gray-200 dark:bg-gray-700/50 dark:border-gray-700 flex justify-end space-x-2">
         <%= if @incident.status == "new" do %>
           <button
             phx-click="acknowledge"
@@ -478,7 +478,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
         <% end %>
         <.link
           navigate={~p"/incidents/#{@incident.id}"}
-          class="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300"
+          class="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300 dark:hover:bg-gray-500"
         >
           Details
         </.link>
@@ -512,20 +512,20 @@ defmodule AveroCommandWeb.IncidentFeedLive do
       <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
         <%!-- Background overlay --%>
         <div
-          class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+          class="fixed inset-0 bg-gray-500 bg-opacity-75 dark:bg-gray-900/80 transition-opacity"
           phx-click="close-journey-modal"
         ></div>
 
         <%!-- Modal panel --%>
-        <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-          <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+        <div class="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+          <div class="bg-white dark:bg-gray-800 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
             <div class="flex items-center justify-between mb-4">
-              <h3 class="text-lg font-medium text-gray-900" id="modal-title">
+              <h3 class="text-lg font-medium text-gray-900 dark:text-white" id="modal-title">
                 Journey: Person <%= @person_id %>
               </h3>
               <button
                 phx-click="close-journey-modal"
-                class="text-gray-400 hover:text-gray-500"
+                class="text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400"
               >
                 <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -539,67 +539,67 @@ defmodule AveroCommandWeb.IncidentFeedLive do
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                   <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                <span class="ml-2 text-gray-600">Loading journey...</span>
+                <span class="ml-2 text-gray-600 dark:text-gray-400">Loading journey...</span>
               </div>
             <% else %>
               <%= if @journey_data do %>
                 <div class="space-y-3">
                   <%!-- Journey Summary --%>
-                  <div class="bg-gray-50 rounded-lg p-3">
+                  <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                     <div class="grid grid-cols-2 gap-2 text-sm">
                       <div>
-                        <span class="text-gray-500">Session:</span>
-                        <span class="ml-1 font-mono text-xs"><%= String.slice(@session_id || "", 0..7) %>...</span>
+                        <span class="text-gray-500 dark:text-gray-400">Session:</span>
+                        <span class="ml-1 font-mono text-xs dark:text-gray-300"><%= String.slice(@session_id || "", 0..7) %>...</span>
                       </div>
                       <div>
-                        <span class="text-gray-500">State:</span>
-                        <span class="ml-1 font-medium"><%= @journey_data["state"] || "Unknown" %></span>
+                        <span class="text-gray-500 dark:text-gray-400">State:</span>
+                        <span class="ml-1 font-medium dark:text-white"><%= @journey_data["state"] || "Unknown" %></span>
                       </div>
                     </div>
                   </div>
 
                   <%!-- Events Timeline --%>
-                  <div class="border rounded-lg max-h-64 overflow-y-auto">
-                    <div class="px-3 py-2 bg-gray-50 border-b text-xs font-medium text-gray-500 uppercase">
+                  <div class="border dark:border-gray-700 rounded-lg max-h-64 overflow-y-auto">
+                    <div class="px-3 py-2 bg-gray-50 dark:bg-gray-700/50 border-b dark:border-gray-700 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                       Events Timeline
                     </div>
                     <%= if events = @journey_data["events"] do %>
-                      <div class="divide-y divide-gray-100">
+                      <div class="divide-y divide-gray-100 dark:divide-gray-700">
                         <%= for event <- events do %>
                           <div class="px-3 py-2 text-sm">
                             <div class="flex justify-between items-start">
                               <span class={["font-medium", journey_event_color(event["type"])]}>
                                 <%= event["type"] %>
                               </span>
-                              <span class="text-xs text-gray-400">
+                              <span class="text-xs text-gray-400 dark:text-gray-500">
                                 <%= format_journey_time(event["timestamp"]) %>
                               </span>
                             </div>
                             <%= if event["zone"] do %>
-                              <div class="text-xs text-gray-500">Zone: <%= event["zone"] %></div>
+                              <div class="text-xs text-gray-500 dark:text-gray-400">Zone: <%= event["zone"] %></div>
                             <% end %>
                           </div>
                         <% end %>
                       </div>
                     <% else %>
-                      <p class="p-3 text-sm text-gray-500">No events recorded</p>
+                      <p class="p-3 text-sm text-gray-500 dark:text-gray-400">No events recorded</p>
                     <% end %>
                   </div>
                 </div>
               <% else %>
                 <div class="text-center py-8">
-                  <p class="text-gray-500">No journey data available</p>
-                  <p class="text-sm text-gray-400 mt-1">Session ID may not be available or journey has expired</p>
+                  <p class="text-gray-500 dark:text-gray-400">No journey data available</p>
+                  <p class="text-sm text-gray-400 dark:text-gray-500 mt-1">Session ID may not be available or journey has expired</p>
                 </div>
               <% end %>
             <% end %>
           </div>
 
-          <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+          <div class="bg-gray-50 dark:bg-gray-700/50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
             <button
               type="button"
               phx-click="close-journey-modal"
-              class="w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm"
+              class="w-full inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 shadow-sm px-4 py-2 bg-white dark:bg-gray-700 text-base font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm"
             >
               Close
             </button>

@@ -1,35 +1,8 @@
-<header class="bg-white shadow">
-  <div class="mx-auto max-w-7xl px-3 sm:px-4 lg:px-8">
-    <div class="flex items-center justify-between py-2 sm:py-4">
-      <h1 class="text-base sm:text-xl lg:text-2xl font-bold tracking-tight text-gray-900 whitespace-nowrap">
-        Avero Command
-      </h1>
-      <nav class="flex items-center space-x-1 sm:space-x-2 md:space-x-4">
-        <.link navigate={~p"/"} class="text-gray-600 hover:text-gray-900 px-1.5 sm:px-2 md:px-3 py-1.5 text-xs sm:text-sm font-medium">
-          Incidents
-        </.link>
-        <.link navigate={~p"/journeys"} class="text-gray-600 hover:text-gray-900 px-1.5 sm:px-2 md:px-3 py-1.5 text-xs sm:text-sm font-medium">
-          Journeys
-        </.link>
-        <.link navigate={~p"/explorer"} class="text-gray-600 hover:text-gray-900 px-1.5 sm:px-2 md:px-3 py-1.5 text-xs sm:text-sm font-medium">
-          Explorer
-        </.link>
-        <.link navigate={~p"/debug"} class="text-gray-600 hover:text-gray-900 px-1.5 sm:px-2 md:px-3 py-1.5 text-xs sm:text-sm font-medium">
-          Debug
-        </.link>
-        <.link navigate={~p"/config"} class="text-gray-600 hover:text-gray-900 px-1.5 sm:px-2 md:px-3 py-1.5 text-xs sm:text-sm font-medium">
-          Config
-        </.link>
-        <.link href={~p"/logout"} method="delete" class="text-red-600 hover:text-red-800 px-1.5 sm:px-2 md:px-3 py-1.5 text-xs sm:text-sm font-medium">
-          Logout
-        </.link>
-      </nav>
-    </div>
-  </div>
-</header>
-<main class="py-4 sm:py-10">
-  <div class="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
-    <.flash_group flash={@flash} />
-    <%= @inner_content %>
-  </div>
-</main>
+<.dashboard_layout
+  current_path={@current_path}
+  sidebar_collapsed={assigns[:sidebar_collapsed] || false}
+  mobile_sidebar_open={assigns[:mobile_sidebar_open] || false}
+>
+  <.flash_group flash={@flash} />
+  <%= @inner_content %>
+</.dashboard_layout>
