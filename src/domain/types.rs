@@ -14,6 +14,17 @@ impl std::fmt::Display for TrackId {
     }
 }
 
+/// Newtype wrapper for geometry IDs to provide type safety
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(transparent)]
+pub struct GeometryId(pub i32);
+
+impl std::fmt::Display for GeometryId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Xovis message structure for parsing
 #[derive(Debug, Deserialize)]
 pub struct XovisMessage {
@@ -123,7 +134,7 @@ pub struct EventAttributes {
 pub struct ParsedEvent {
     pub event_type: EventType,
     pub track_id: TrackId,
-    pub geometry_id: Option<i32>,
+    pub geometry_id: Option<GeometryId>,
     pub direction: Option<String>,
     pub event_time: u64,
     pub received_at: Instant,
@@ -182,7 +193,7 @@ impl EventType {
 #[allow(dead_code)]
 pub struct Person {
     pub track_id: TrackId,
-    pub current_zone: Option<i32>,
+    pub current_zone: Option<GeometryId>,
     pub zone_entered_at: Option<Instant>,
     pub accumulated_dwell_ms: u64,
     pub authorized: bool,

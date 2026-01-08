@@ -1,7 +1,7 @@
 //! Tests for the Tracker module
 
 use super::*;
-use crate::domain::types::{EventType, TrackId};
+use crate::domain::types::{EventType, GeometryId, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
 use crate::services::gate::GateController;
@@ -26,7 +26,7 @@ fn create_event(event_type: EventType, track_id: i64, geometry_id: Option<i32>) 
     ParsedEvent {
         event_type,
         track_id: TrackId(track_id),
-        geometry_id,
+        geometry_id: geometry_id.map(GeometryId),
         direction: None,
         event_time: 1767617600000,
         received_at: Instant::now(),

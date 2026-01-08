@@ -5,7 +5,7 @@
 
 use super::Tracker;
 use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyOutcome};
-use crate::domain::types::{DoorStatus, ParsedEvent, Person, TrackId};
+use crate::domain::types::{DoorStatus, GeometryId, ParsedEvent, Person, TrackId};
 use crate::infra::metrics::{GATE_STATE_CLOSED, GATE_STATE_MOVING, GATE_STATE_OPEN};
 use crate::io::{
     AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload,
@@ -172,7 +172,8 @@ impl Tracker {
                 person.last_position = event.position;
             }
 
-            let last_zone = person.current_zone.map(|id| self.config.zone_name(id)).unwrap_or_default();
+            let last_zone =
+                person.current_zone.map(|id| self.config.zone_name(id)).unwrap_or_default();
 
             info!(
                 track_id = %track_id,
@@ -236,8 +237,8 @@ impl Tracker {
             return;
         }
 
-        let geometry_id = event.geometry_id.unwrap_or(0);
-        let zone = self.config.zone_name(geometry_id);
+        let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
+        let zone = self.config.zone_name(geometry_id.0);
         let ts = epoch_ms();
 
         debug!(
@@ -275,13 +276,13 @@ impl Tracker {
             });
         }
 
-        if self.config.is_pos_zone(geometry_id) {
+        if self.config.is_pos_zone(geometry_id.0) {
             person.zone_entered_at = Some(event.received_at);
             // Record POS entry for ACC matching
             self.acc_collector.record_pos_entry(track_id, &zone);
             // Update POS occupancy metric
-            self.metrics.pos_zone_enter(geometry_id);
-        } else if geometry_id == self.config.gate_zone() {
+            self.metrics.pos_zone_enter(geometry_id.0);
+        } else if geometry_id.0 == self.config.gate_zone() {
             // Gate zone - check authorization and send command or blocked event
             if authorized && !gate_already_opened {
                 self.send_gate_open_command(track_id, ts, "tracker", event.received_at)
@@ -317,8 +318,8 @@ impl Tracker {
             return;
         }
 
-        let geometry_id = event.geometry_id.unwrap_or(0);
-        let zone = self.config.zone_name(geometry_id);
+        let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
+        let zone = self.config.zone_name(geometry_id.0);
         let ts = epoch_ms();
 
         debug!(
@@ -333,7 +334,7 @@ impl Tracker {
         };
 
         // Calculate dwell time if exiting a POS zone
-        let zone_dwell_ms = if self.config.is_pos_zone(geometry_id) {
+        let zone_dwell_ms = if self.config.is_pos_zone(geometry_id.0) {
             if let Some(entered_at) = person.zone_entered_at.take() {
                 let dwell_ms = entered_at.elapsed().as_millis() as u64;
                 person.accumulated_dwell_ms += dwell_ms;
@@ -342,7 +343,7 @@ impl Tracker {
                 self.acc_collector
                     .record_pos_exit(track_id, &zone, dwell_ms);
                 // Update POS occupancy metric
-                self.metrics.pos_zone_exit(geometry_id);
+                self.metrics.pos_zone_exit(geometry_id.0);
 
                 // Update journey manager
                 self.journey_manager.add_event(
@@ -404,8 +405,8 @@ impl Tracker {
             return;
         }
 
-        let geometry_id = event.geometry_id.unwrap_or(0);
-        let line = self.config.zone_name(geometry_id);
+        let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
+        let line = self.config.zone_name(geometry_id.0);
         let ts = epoch_ms();
 
         debug!(
@@ -417,11 +418,11 @@ impl Tracker {
         );
 
         // Determine event type based on line
-        let event_type = if self.config.entry_line() == Some(geometry_id) {
+        let event_type = if self.config.entry_line() == Some(geometry_id.0) {
             "entry_cross"
-        } else if geometry_id == self.config.exit_line() {
+        } else if geometry_id.0 == self.config.exit_line() {
             "exit_cross"
-        } else if self.config.approach_line() == Some(geometry_id) {
+        } else if self.config.approach_line() == Some(geometry_id.0) {
             "approach_cross"
         } else {
             "line_cross"
@@ -434,7 +435,7 @@ impl Tracker {
         );
 
         // Mark crossed_entry if this is the entry line
-        if self.config.entry_line() == Some(geometry_id) && direction == "forward" {
+        if self.config.entry_line() == Some(geometry_id.0) && direction == "forward" {
             if let Some(journey) = self.journey_manager.get_mut(track_id) {
                 journey.crossed_entry = true;
             }
@@ -445,7 +446,7 @@ impl Tracker {
         };
 
         // Journey complete if crossing exit line forward
-        if geometry_id == self.config.exit_line() && direction == "forward" {
+        if geometry_id.0 == self.config.exit_line() && direction == "forward" {
             // Get journey info for logging
             let (gate_cmd_at, event_count, started_at) = self
                 .journey_manager
@@ -638,7 +639,7 @@ impl Tracker {
                 .persons
                 .get(&track_id)
                 .and_then(|p| p.current_zone)
-                .is_some_and(|z| z == gate_zone);
+                .is_some_and(|z| z.0 == gate_zone);
             let gate_already_opened =
                 self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
             if in_gate_zone && !gate_already_opened {
@@ -686,7 +687,7 @@ impl Tracker {
                     .iter()
                     .map(|(tid, p)| AccDebugTrack {
                         tid: tid.0,
-                        zone: p.current_zone.map(|z| self.config.zone_name(z)),
+                        zone: p.current_zone.map(|z| self.config.zone_name(z.0)),
                         dwell_ms: p.accumulated_dwell_ms,
                         auth: p.authorized,
                     })
