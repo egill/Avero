@@ -542,4 +542,265 @@ mod tests {
         let result = collector.process_acc("192.168.1.10", &mut jm, Some(&accumulated));
         assert_eq!(result, vec![100]);
     }
+
+    // ============================================================
+    // US-001: ACC Collector time boundary tests
+    // ============================================================
+
+    #[test]
+    fn test_group_window_boundary_within() {
+        // Test GROUP_WINDOW_MS boundary: 9.999s should still group
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+        jm.new_journey(200);
+
+        // First person enters
+        collector.record_pos_entry(100, "POS_1");
+
+        // Simulate 9.999s elapsed (just within GROUP_WINDOW_MS=10000)
+        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
+            group.last_entry = Instant::now() - std::time::Duration::from_millis(9999);
+        }
+
+        // Verify should_join returns true at 9.999s
+        assert!(
+            collector.pos_groups.get("POS_1").unwrap().should_join(),
+            "9.999s should be within GROUP_WINDOW_MS"
+        );
+
+        // Second person enters - should join group
+        collector.record_pos_entry(200, "POS_1");
+
+        let group = collector.pos_groups.get("POS_1").unwrap();
+        assert_eq!(
+            group.all_members().len(),
+            2,
+            "Second person should join group within 9.999s"
+        );
+    }
+
+    #[test]
+    fn test_group_window_boundary_outside() {
+        // Test GROUP_WINDOW_MS boundary: 10.001s should NOT group (timing wise)
+        // Note: In current implementation, members are still added but should_join returns false
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+        jm.new_journey(200);
+
+        // First person enters
+        collector.record_pos_entry(100, "POS_1");
+
+        // Simulate 10.001s elapsed (just outside GROUP_WINDOW_MS=10000)
+        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
+            group.last_entry = Instant::now() - std::time::Duration::from_millis(10001);
+        }
+
+        // Verify should_join returns false at 10.001s
+        assert!(
+            !collector.pos_groups.get("POS_1").unwrap().should_join(),
+            "10.001s should be outside GROUP_WINDOW_MS"
+        );
+    }
+
+    #[test]
+    fn test_recent_exit_boundary_within() {
+        // Test MAX_TIME_SINCE_EXIT boundary: 1.499s should match
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+
+        // Record exit with sufficient dwell
+        collector.record_pos_exit(100, "POS_1", 8000);
+
+        // Simulate 1.499s since exit (just within MAX_TIME_SINCE_EXIT=1500)
+        if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
+            if let Some(exit) = exits.first_mut() {
+                exit.exited_at = Instant::now() - std::time::Duration::from_millis(1499);
+            }
+        }
+
+        // Process ACC - should match
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+        assert!(
+            result.contains(&100),
+            "Exit within 1.499s should match ACC"
+        );
+    }
+
+    #[test]
+    fn test_recent_exit_boundary_outside() {
+        // Test MAX_TIME_SINCE_EXIT boundary: 1.501s should NOT match
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+
+        // Record exit with sufficient dwell
+        collector.record_pos_exit(100, "POS_1", 8000);
+
+        // Simulate 1.501s since exit (just outside MAX_TIME_SINCE_EXIT=1500)
+        if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
+            if let Some(exit) = exits.first_mut() {
+                exit.exited_at = Instant::now() - std::time::Duration::from_millis(1501);
+            }
+        }
+
+        // Process ACC - should NOT match
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+        assert!(
+            result.is_empty(),
+            "Exit after 1.501s should NOT match ACC"
+        );
+    }
+
+    #[test]
+    fn test_pos_occupied_blocks_recent_exit_match() {
+        // When POS is occupied, recent exits should NOT be matched
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+        jm.new_journey(200);
+
+        // Track 100 exits with sufficient dwell
+        collector.record_pos_exit(100, "POS_1", 8000);
+
+        // Track 200 enters (POS now occupied)
+        collector.record_pos_entry(200, "POS_1");
+
+        // Process ACC - should NOT match recent exit because POS is occupied
+        // (and 200 doesn't have sufficient dwell yet)
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+
+        // Current implementation: tries current group first, fails due to insufficient dwell
+        // Does NOT fall back to recent exits when POS is occupied
+        assert!(
+            result.is_empty(),
+            "Should not match recent exit when POS is currently occupied"
+        );
+    }
+
+    #[test]
+    fn test_newest_exit_selected() {
+        // When multiple recent exits exist, the newest one should be matched
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+        jm.new_journey(200);
+        jm.new_journey(300);
+
+        // Record multiple exits in sequence
+        collector.record_pos_exit(100, "POS_1", 8000);
+        collector.record_pos_exit(200, "POS_1", 8000);
+        collector.record_pos_exit(300, "POS_1", 8000);
+
+        // Make all exits within time window but with different ages
+        if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
+            // 100 exited 1.4s ago
+            exits[0].exited_at = Instant::now() - std::time::Duration::from_millis(1400);
+            // 200 exited 1.0s ago
+            exits[1].exited_at = Instant::now() - std::time::Duration::from_millis(1000);
+            // 300 exited 0.5s ago (newest)
+            exits[2].exited_at = Instant::now() - std::time::Duration::from_millis(500);
+        }
+
+        // Process ACC - should match newest exit (300)
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+        assert!(
+            result.contains(&300),
+            "Should match newest exit (track 300)"
+        );
+    }
+
+    #[test]
+    fn test_group_authorization_propagates_to_all_members() {
+        // When ACC matches, ALL group members should get acc_matched=true
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+        jm.new_journey(200);
+        jm.new_journey(300);
+
+        // Three people enter same POS (forming a group)
+        collector.record_pos_entry(100, "POS_1");
+        collector.record_pos_entry(200, "POS_1");
+        collector.record_pos_entry(300, "POS_1");
+
+        // Only first member has sufficient dwell
+        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
+            // Track 100: 8 seconds dwell (sufficient)
+            group.members[0].entered_at = Instant::now() - std::time::Duration::from_secs(8);
+            // Tracks 200, 300: just entered (insufficient individually)
+        }
+
+        // Process ACC - should match ALL group members
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+
+        assert_eq!(result.len(), 3, "All 3 group members should be matched");
+        assert!(result.contains(&100));
+        assert!(result.contains(&200));
+        assert!(result.contains(&300));
+
+        // Verify all journeys have acc_matched=true
+        assert!(
+            jm.get(100).unwrap().acc_matched,
+            "Track 100 should have acc_matched"
+        );
+        assert!(
+            jm.get(200).unwrap().acc_matched,
+            "Track 200 should have acc_matched"
+        );
+        assert!(
+            jm.get(300).unwrap().acc_matched,
+            "Track 300 should have acc_matched"
+        );
+    }
+
+    #[test]
+    fn test_group_window_exact_boundary_10000ms() {
+        // Test exactly at GROUP_WINDOW_MS=10000ms boundary
+        let mut collector = create_test_collector();
+
+        collector.record_pos_entry(100, "POS_1");
+
+        // Exactly at 10000ms - the condition is <= so this should pass
+        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
+            group.last_entry = Instant::now() - std::time::Duration::from_millis(10000);
+        }
+
+        assert!(
+            collector.pos_groups.get("POS_1").unwrap().should_join(),
+            "Exactly 10000ms should be within GROUP_WINDOW_MS (uses <=)"
+        );
+    }
+
+    #[test]
+    fn test_recent_exit_exact_boundary_1500ms() {
+        // Test exactly at MAX_TIME_SINCE_EXIT=1500ms boundary
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(100);
+        collector.record_pos_exit(100, "POS_1", 8000);
+
+        // Exactly at 1500ms - the condition is <= so this should pass
+        if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
+            if let Some(exit) = exits.first_mut() {
+                exit.exited_at = Instant::now() - std::time::Duration::from_millis(1500);
+            }
+        }
+
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+        assert!(
+            result.contains(&100),
+            "Exactly 1500ms should match (uses <=)"
+        );
+    }
 }
