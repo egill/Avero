@@ -1,3 +1,8 @@
+---
+name: build
+description: Build gateway-poc for different targets (macOS, Linux aarch64, Raspberry Pi). Use when building the Rust application for local development or cross-compilation.
+---
+
 # /build
 
 Build gateway-poc for different targets.

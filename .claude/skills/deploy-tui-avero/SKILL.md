@@ -1,3 +1,8 @@
+---
+name: deploy-tui-avero
+description: Deploy gateway-tui to Avero server (100.80.187.4). Use when deploying the TUI monitoring dashboard to Avero.
+---
+
 # /deploy-tui-avero
 
 Deploy gateway-tui to the Avero server.

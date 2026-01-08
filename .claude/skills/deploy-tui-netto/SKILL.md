@@ -1,3 +1,8 @@
+---
+name: deploy-tui-netto
+description: Deploy gateway-tui to Netto server (100.80.187.3). Use when deploying the TUI monitoring dashboard to Netto.
+---
+
 # /deploy-tui-netto
 
 Deploy gateway-tui to the Netto server.
