@@ -11,7 +11,7 @@ mod handlers;
 mod tests;
 
 use crate::domain::journey::Journey;
-use crate::domain::types::{EventType, ParsedEvent, Person};
+use crate::domain::types::{EventType, ParsedEvent, Person, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
 use crate::io::egress::Egress;
@@ -31,7 +31,7 @@ use tokio::time::{interval, Duration};
 /// Central event processor for person tracking and journey management
 pub struct Tracker {
     /// Active persons by track_id
-    pub(crate) persons: FxHashMap<i64, Person>,
+    pub(crate) persons: FxHashMap<TrackId, Person>,
     /// Handles track identity stitching across sensor gaps
     pub(crate) stitcher: Stitcher,
     /// Manages journey lifecycle and persistence

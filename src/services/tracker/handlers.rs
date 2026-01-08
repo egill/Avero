@@ -78,7 +78,7 @@ impl Tracker {
                 });
             }
 
-            self.persons.insert(track_id, person);
+            self.persons.insert(TrackId(track_id), person);
 
             // Stitch in journey manager (handles event recording)
             self.journey_manager
@@ -86,7 +86,7 @@ impl Tracker {
 
             if let Some(journey) = self.journey_manager.get_any(track_id) {
                 if journey.authorized {
-                    if let Some(p) = self.persons.get_mut(&track_id) {
+                    if let Some(p) = self.persons.get_mut(&TrackId(track_id)) {
                         p.authorized = true;
                     }
                 }
@@ -99,7 +99,7 @@ impl Tracker {
             debug!(track_id = %track_id, reentry = %reentry_match.is_some(), "track_created");
             let mut person = Person::new(TrackId(track_id));
             person.last_position = event.position;
-            self.persons.insert(track_id, person);
+            self.persons.insert(TrackId(track_id), person);
 
             // Create journey in journey manager (with parent if re-entry)
             if let Some(reentry) = reentry_match {
@@ -168,7 +168,7 @@ impl Tracker {
 
         let ts = epoch_ms();
 
-        if let Some(mut person) = self.persons.remove(&track_id) {
+        if let Some(mut person) = self.persons.remove(&TrackId(track_id)) {
             // Update last position from event if available
             if event.position.is_some() {
                 person.last_position = event.position;
@@ -331,7 +331,7 @@ impl Tracker {
             "zone_exit"
         );
 
-        let Some(person) = self.persons.get_mut(&track_id) else {
+        let Some(person) = self.persons.get_mut(&TrackId(track_id)) else {
             return;
         };
 
@@ -443,7 +443,7 @@ impl Tracker {
             }
         }
 
-        let Some(person) = self.persons.remove(&track_id) else {
+        let Some(person) = self.persons.remove(&TrackId(track_id)) else {
             return;
         };
 
@@ -484,7 +484,7 @@ impl Tracker {
                 .end_journey(track_id, JourneyOutcome::Completed);
         } else {
             // Put person back - not complete yet
-            self.persons.insert(track_id, person);
+            self.persons.insert(TrackId(track_id), person);
         }
     }
 
@@ -539,7 +539,7 @@ impl Tracker {
         // Build accumulated dwell map from persons for ACC matching
         // This ensures ACC uses total journey dwell, not just current POS session dwell
         let accumulated_dwells: std::collections::HashMap<i64, u64> =
-            self.persons.iter().map(|(&tid, p)| (tid, p.accumulated_dwell_ms)).collect();
+            self.persons.iter().map(|(tid, p)| (tid.0, p.accumulated_dwell_ms)).collect();
 
         // Try to match ACC to journeys using IP → POS lookup
         // Returns all group members if any member qualifies (sufficient dwell)
@@ -554,7 +554,7 @@ impl Tracker {
 
         // Authorize all matched group members
         for &track_id in &matched_tracks {
-            if let Some(person) = self.persons.get_mut(&track_id) {
+            if let Some(person) = self.persons.get_mut(&TrackId(track_id)) {
                 person.authorized = true;
             }
             if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
@@ -624,7 +624,7 @@ impl Tracker {
                                 tid: Some(track_id),
                                 dwell_ms: self
                                     .persons
-                                    .get(&track_id)
+                                    .get(&TrackId(track_id))
                                     .map(|p| p.accumulated_dwell_ms),
                                 gate_zone: Some(gate_zone_name.clone()),
                                 gate_entry_ts: Some(entry_ts),
@@ -640,7 +640,7 @@ impl Tracker {
 
             let in_gate_zone = self
                 .persons
-                .get(&track_id)
+                .get(&TrackId(track_id))
                 .and_then(|p| p.current_zone)
                 .is_some_and(|z| z == gate_zone);
             let gate_already_opened =
@@ -690,8 +690,8 @@ impl Tracker {
                 let debug_active: Vec<AccDebugTrack> = self
                     .persons
                     .iter()
-                    .map(|(&tid, p)| AccDebugTrack {
-                        tid,
+                    .map(|(tid, p)| AccDebugTrack {
+                        tid: tid.0,
                         zone: p.current_zone.map(|z| self.config.zone_name(z)),
                         dwell_ms: p.accumulated_dwell_ms,
                         auth: p.authorized,

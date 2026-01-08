@@ -1,7 +1,7 @@
 //! Tests for the Tracker module
 
 use super::*;
-use crate::domain::types::EventType;
+use crate::domain::types::{EventType, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
 use crate::services::gate::GateController;
@@ -55,7 +55,7 @@ async fn test_track_create() {
     tracker.process_event(event).await;
 
     assert_eq!(tracker.active_tracks(), 1);
-    assert!(tracker.persons.contains_key(&100));
+    assert!(tracker.persons.contains_key(&TrackId(100)));
 }
 
 #[tokio::test]
@@ -95,7 +95,7 @@ async fn test_dwell_accumulation() {
         .process_event(create_event(EventType::ZoneExit, 100, Some(1001)))
         .await;
 
-    let person = tracker.persons.get(&100).unwrap();
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
     assert!(person.accumulated_dwell_ms >= 100);
     // Not authorized yet (need 7000ms)
     assert!(!person.authorized);
@@ -122,7 +122,7 @@ async fn test_dwell_threshold_without_acc() {
         .process_event(create_event(EventType::ZoneExit, 100, Some(1001)))
         .await;
 
-    let person = tracker.persons.get(&100).unwrap();
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
     // Dwell is accumulated but person is NOT authorized (no ACC match)
     assert!(person.accumulated_dwell_ms >= 50);
     assert!(!person.authorized);
@@ -149,7 +149,7 @@ async fn test_accumulated_dwell_across_zones() {
         .process_event(create_event(EventType::ZoneExit, 100, Some(1001)))
         .await;
 
-    let person = tracker.persons.get(&100).unwrap();
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
     assert!(!person.authorized);
     assert!(person.accumulated_dwell_ms >= 50);
 
@@ -162,7 +162,7 @@ async fn test_accumulated_dwell_across_zones() {
         .process_event(create_event(EventType::ZoneExit, 100, Some(1002)))
         .await;
 
-    let person = tracker.persons.get(&100).unwrap();
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
     // Dwell accumulated but still not authorized (no ACC match)
     assert!(person.accumulated_dwell_ms >= 100);
     assert!(!person.authorized);
@@ -211,12 +211,12 @@ async fn test_stitch_transfers_state() {
 
     // Manually authorize (simulating ACC match) and set dwell
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
     }
 
-    let dwell = tracker.persons.get(&100).unwrap().accumulated_dwell_ms;
+    let dwell = tracker.persons.get(&TrackId(100)).unwrap().accumulated_dwell_ms;
 
     // Delete track (goes to stitch pending)
     tracker
@@ -231,7 +231,7 @@ async fn test_stitch_transfers_state() {
     assert_eq!(tracker.active_tracks(), 1);
 
     // New track should have inherited state
-    let new_person = tracker.persons.get(&200).unwrap();
+    let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(new_person.authorized);
     assert!(new_person.accumulated_dwell_ms >= dwell);
 }
@@ -245,7 +245,7 @@ async fn test_stitch_fails_too_late() {
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
         .await;
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
     }
@@ -265,7 +265,7 @@ async fn test_stitch_fails_too_late() {
         .await;
 
     // New track should be fresh (no inherited state)
-    let new_person = tracker.persons.get(&200).unwrap();
+    let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(!new_person.authorized);
     assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
@@ -279,7 +279,7 @@ async fn test_stitch_fails_too_far() {
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
         .await;
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
         person.accumulated_dwell_ms = 5000;
     }
@@ -295,7 +295,7 @@ async fn test_stitch_fails_too_far() {
         .await;
 
     // New track should be fresh
-    let new_person = tracker.persons.get(&200).unwrap();
+    let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(!new_person.authorized);
     assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
@@ -309,7 +309,7 @@ async fn test_no_stitch_without_new_track() {
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70])).await;
         .await;
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
     }
 
@@ -333,7 +333,7 @@ async fn test_absolutely_no_stitch() {
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [0.0, 0.0, 1.50])).await;
         .await;
     {
-        let person = tracker.persons.get_mut(&100).unwrap();
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
         person.accumulated_dwell_ms = 99999;
     }
@@ -352,7 +352,7 @@ async fn test_absolutely_no_stitch() {
         .await;
 
     // New track should be completely fresh - NO state transferred
-    let new_person = tracker.persons.get(&999).unwrap();
+    let new_person = tracker.persons.get(&TrackId(999)).unwrap();
     assert!(!new_person.authorized);
     assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
