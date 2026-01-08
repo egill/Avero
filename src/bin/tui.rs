@@ -549,24 +549,23 @@ impl ManualGateTest {
 
     fn on_moving(&mut self) {
         if self.active && self.moving_at.is_none() {
-            self.moving_at = Some(Instant::now());
+            let now = Instant::now();
+            self.moving_at = Some(now);
             if let Some(cmd) = self.cmd_sent {
-                self.last_cmd_to_moving =
-                    Some(self.moving_at.unwrap().duration_since(cmd).as_millis() as u64);
+                self.last_cmd_to_moving = Some(now.duration_since(cmd).as_millis() as u64);
             }
         }
     }
 
     fn on_open(&mut self) {
         if self.active && self.open_at.is_none() {
-            self.open_at = Some(Instant::now());
+            let now = Instant::now();
+            self.open_at = Some(now);
             if let Some(moving) = self.moving_at {
-                self.last_moving_to_open =
-                    Some(self.open_at.unwrap().duration_since(moving).as_millis() as u64);
+                self.last_moving_to_open = Some(now.duration_since(moving).as_millis() as u64);
             }
             if let Some(cmd) = self.cmd_sent {
-                self.last_total =
-                    Some(self.open_at.unwrap().duration_since(cmd).as_millis() as u64);
+                self.last_total = Some(now.duration_since(cmd).as_millis() as u64);
             }
             self.active = false;
         }
