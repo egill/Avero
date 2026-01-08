@@ -424,8 +424,8 @@
       "instructions": "In Cargo.toml [profile.release], change 'lto = true' to 'lto = \"fat\"'. Build with 'cargo build --release' and compare binary size. 'fat' LTO is more aggressive than 'thin'.",
       "priority": 5,
       "estimatedMinutes": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Binary sizes: gateway-poc 7.6MB, gateway-tui 3.7MB, gate_test 855KB"
     },
     {
       "id": "US-029",
@@ -456,7 +456,7 @@
       "instructions": "In domain/journey.rs:48, 't: String' stores event types. Create enum JourneyEventType { ZoneEntry, ZoneExit, LineCross, Stitch, Create, Delete, GateCmd, ... }. Use #[serde(rename = \"zone_entry\")] for JSON compatibility.",
       "priority": 4,
       "estimatedMinutes": 30,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -471,7 +471,7 @@
       "instructions": "In infra/metrics.rs, zone_index() acquires Mutex lock on every call (lines 221-224). Pre-compute the zone ID to index mapping during init and store in a non-locked HashMap or fixed array.",
       "priority": 4,
       "estimatedMinutes": 25,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -486,8 +486,8 @@
       "instructions": "Create tests/ directory. Add tests/config_test.rs that tests Config::from_file with a test config. Integration tests can test public API without #[cfg(test)] access.",
       "priority": 5,
       "estimatedMinutes": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created lib.rs to expose modules, added config_test.rs with 2 integration tests"
     },
     {
       "id": "US-033",
@@ -501,8 +501,8 @@
       "instructions": "Add documentation comments with runnable examples:\n/// Creates a new journey.\n/// ```\n/// let j = Journey::new(123);\n/// assert_eq!(j.current_track_id(), 123);\n/// ```",
       "priority": 5,
       "estimatedMinutes": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added 4 doc tests: Journey::new, Config::from_file (no_run), Config::is_pos_zone, Config::zone_name"
     },
     {
       "id": "US-034",
@@ -516,8 +516,8 @@
       "instructions": "In services/tracker/tests.rs, create_event() and create_event_with_pos() are verbose. Create ParsedEventBuilder with .with_track_id(), .with_geometry_id(), .with_position(), .build() methods.",
       "priority": 5,
       "estimatedMinutes": 25,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created builder with fluent API, legacy helpers delegate to builder"
     },
     {
       "id": "US-035",
@@ -532,8 +532,8 @@
       "instructions": "In io/egress.rs, Egress is a concrete struct. Create trait JourneyWriter { fn write_journey(&self, j: &Journey) -> bool; }. Implement for Egress. This enables mock implementations for testing.",
       "priority": 5,
       "estimatedMinutes": 30,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created JourneyWriter trait with Send+Sync bounds, default write_journeys implementation"
     },
     {
       "id": "US-036",
@@ -548,8 +548,8 @@
       "instructions": "In services/gate.rs, GateController uses #[cfg(test)] for mocking. Create async trait using async_trait crate. This is cleaner than cfg flags for test doubles.",
       "priority": 5,
       "estimatedMinutes": 35,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created GateCommand async trait with async-trait crate, MockGateController for tests"
     },
     {
       "id": "US-037",
@@ -563,7 +563,7 @@
       "instructions": "In bin/tui.rs lines 540,549,552, pattern is: check is_none, assign, then unwrap. Use 'if let Some(val) = &self.moving_at { ... }' instead. More idiomatic and safer.",
       "priority": 4,
       "estimatedMinutes": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -578,7 +578,7 @@
       "instructions": "In io/prometheus.rs, Response::builder()...unwrap() should use .expect() with a message. While unlikely to fail with static content, expect() documents the assumption.",
       "priority": 5,
       "estimatedMinutes": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -593,8 +593,8 @@
       "instructions": "Alternative to US-030 (enum). In domain/journey.rs, change 't: String' to 't: Cow<'static, str>'. In with_type(), use Cow::Borrowed(\"zone_entry\") for known types. Avoids allocation for common cases.",
       "priority": 5,
       "estimatedMinutes": 20,
-      "passes": false,
-      "notes": "Alternative approach to US-030 - choose one or the other"
+      "passes": true,
+      "notes": "Superseded by US-030 (enum approach was implemented instead)"
     },
     {
       "id": "US-040",
@@ -608,8 +608,8 @@
       "instructions": "In infra/metrics.rs report() method (lines 469-483), the pattern of swapping histogram buckets repeats multiple times. Extract to helper: fn swap_buckets(buckets: &[AtomicU64; N]) -> [u64; N].",
       "priority": 5,
       "estimatedMinutes": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created swap_buckets() for swap+reset and load_buckets() for read-only operations"
     },
     {
       "id": "US-041",
@@ -623,8 +623,8 @@
       "instructions": "In infra/metrics.rs lines 29-57, bucket_index functions use linear search through 10 elements. Use BUCKET_BOUNDS.binary_search() or .partition_point(). Minor optimization but cleaner code.",
       "priority": 5,
       "estimatedMinutes": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Used partition_point() which returns the index where predicate becomes false"
     },
     {
       "id": "US-042",
@@ -639,8 +639,8 @@
       "instructions": "In services/journey_manager.rs:73-86, stitch_journey() does linear scan through pending_egress. Add an index HashMap to enable O(1) lookup by track_id. Keep index updated when adding/removing.",
       "priority": 5,
       "estimatedMinutes": 30,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added pending_index FxHashMap<TrackId, usize> for O(1) lookup. Handle swap_remove index updates properly."
     },
     {
       "id": "US-043",
@@ -654,8 +654,8 @@
       "instructions": "Run 'cargo build 2>&1 | grep dead_code' to find unused items. Either remove them if truly unused, or add #[allow(dead_code)] with a comment explaining why kept.",
       "priority": 4,
       "estimatedMinutes": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already fixed - no dead_code warnings present"
     },
     {
       "id": "US-044",
@@ -668,6 +668,7 @@
       "instructions": "In domain/mod.rs:14, there are unused imports: JourneyEvent, JourneyOutcome, Journey, epoch_ms, new_uuid_v7. Remove them or use them.",
       "priority": 4,
       "estimatedMinutes": 5,
+<<<<<<< HEAD:scripts/ralph/prd.old
       "passes": false,
       "notes": ""
     },
@@ -888,6 +889,9 @@
       "estimatedMinutes": 35,
       "passes": false,
       "notes": "Chain stitching is common in production - sensor loses track multiple times"
+||||||| parent of 0bcd920 (chore: Mark US-036 complete and update progress):prd.json
+      "passes": false,
+      "notes": ""
     }
   ]
 }
