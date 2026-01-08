@@ -404,12 +404,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to CloudPlus
     investigator.connect_tcp(&args.tcp).await?;
 
-    let mut results: Vec<(&str, TestResult)> = Vec::new();
+    let mut results: Vec<(String, TestResult)> = Vec::new();
 
     // Test 1: Baseline - single open command
     println!("\n\n▶ PHASE 1: Baseline (single open command)");
     let r = investigator.run_test("Single Open (baseline)", &[]).await?;
-    results.push(("Single Open", r));
+    results.push(("Single Open".to_string(), r));
 
     if !args.fast {
         println!("\n  ⏳ Waiting 5s before next test...");
@@ -422,7 +422,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for interval in [500, 1000, 2000, 3000] {
         let name = format!("Double Open ({}ms interval)", interval);
         let r = investigator.run_test(&name, &[interval]).await?;
-        results.push((Box::leak(name.into_boxed_str()), r));
+        results.push((name, r));
 
         if !args.fast {
             println!("\n  ⏳ Waiting 5s before next test...");
@@ -435,7 +435,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r = investigator
         .run_test("Triple Open (1s intervals)", &[1000, 1000])
         .await?;
-    results.push(("Triple Open 1s", r));
+    results.push(("Triple Open 1s".to_string(), r));
 
     if !args.fast {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -446,7 +446,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r = investigator
         .run_test("Quad Open (1s intervals)", &[1000, 1000, 1000])
         .await?;
-    results.push(("Quad Open 1s", r));
+    results.push(("Quad Open 1s".to_string(), r));
 
     if !args.fast {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -457,7 +457,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r = investigator
         .run_test("Rapid Fire x5", &[500, 500, 500, 500])
         .await?;
-    results.push(("Rapid x5", r));
+    results.push(("Rapid x5".to_string(), r));
 
     // Print summary
     println!("\n\n╔══════════════════════════════════════════════════════════╗");
