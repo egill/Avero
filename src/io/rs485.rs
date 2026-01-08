@@ -6,8 +6,8 @@
 //! - Response frame: 18 bytes, starts with 0x7F
 //! - Checksum: sum all bytes, bitwise NOT
 
-use crate::infra::config::Config;
 use crate::domain::types::{DoorStatus, EventType, ParsedEvent};
+use crate::infra::config::Config;
 use std::io::ErrorKind;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -107,12 +107,20 @@ impl Rs485Monitor {
     /// Parse response frame and extract door status
     fn parse_response(&self, data: &[u8]) -> Option<DoorStatus> {
         if data.len() != RESPONSE_FRAME_LEN {
-            warn!(len = data.len(), expected = RESPONSE_FRAME_LEN, "rs485_invalid_response_length");
+            warn!(
+                len = data.len(),
+                expected = RESPONSE_FRAME_LEN,
+                "rs485_invalid_response_length"
+            );
             return None;
         }
 
         if data[0] != START_BYTE_RESPONSE {
-            warn!(byte = data[0], expected = START_BYTE_RESPONSE, "rs485_invalid_start_byte");
+            warn!(
+                byte = data[0],
+                expected = START_BYTE_RESPONSE,
+                "rs485_invalid_start_byte"
+            );
             return None;
         }
 
@@ -254,7 +262,8 @@ impl Rs485Monitor {
             if let Some(last_poll) = self.last_poll_time {
                 let actual_interval = last_poll.elapsed();
                 let expected_with_rtt = self.poll_interval + Duration::from_millis(20);
-                let drift_us = actual_interval.as_micros() as i64 - expected_with_rtt.as_micros() as i64;
+                let drift_us =
+                    actual_interval.as_micros() as i64 - expected_with_rtt.as_micros() as i64;
 
                 if drift_us.abs() > 50_000 {
                     warn!(

@@ -249,8 +249,10 @@ impl Metrics {
     /// This tracks the time from event received to gate command queued.
     #[inline]
     pub fn record_gate_latency(&self, latency_us: u64) {
-        self.gate_commands_since_report.fetch_add(1, Ordering::Relaxed);
-        self.gate_latency_sum_us.fetch_add(latency_us, Ordering::Relaxed);
+        self.gate_commands_since_report
+            .fetch_add(1, Ordering::Relaxed);
+        self.gate_latency_sum_us
+            .fetch_add(latency_us, Ordering::Relaxed);
 
         // Update histogram bucket
         let bucket = bucket_index(latency_us);
@@ -330,7 +332,8 @@ impl Metrics {
     pub fn record_stitch_distance(&self, dist_cm: u64) {
         let bucket = stitch_dist_bucket_index(dist_cm);
         self.stitch_distance_buckets[bucket].fetch_add(1, Ordering::Relaxed);
-        self.stitch_distance_sum.fetch_add(dist_cm, Ordering::Relaxed);
+        self.stitch_distance_sum
+            .fetch_add(dist_cm, Ordering::Relaxed);
     }
 
     /// Record stitch time in milliseconds (lock-free)
@@ -727,9 +730,9 @@ mod tests {
         let metrics = Metrics::new();
 
         // Record events in different buckets
-        metrics.record_event_processed(50);   // bucket 0 (≤100)
-        metrics.record_event_processed(150);  // bucket 1 (≤200)
-        metrics.record_event_processed(350);  // bucket 2 (≤400)
+        metrics.record_event_processed(50); // bucket 0 (≤100)
+        metrics.record_event_processed(150); // bucket 1 (≤200)
+        metrics.record_event_processed(350); // bucket 2 (≤400)
         metrics.record_event_processed(60000); // bucket 10 (overflow)
 
         let summary = metrics.report(0, 0);

@@ -8,14 +8,14 @@ use crate::domain::types::Person;
 use crate::infra::metrics::Metrics;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// Stitch criteria
-const MAX_TIME_MS: u64 = 4500;           // 4.5 seconds base grace time
-const MAX_TIME_POS_ZONE_MS: u64 = 8000;  // 8 seconds for tracks lost in POS zones
-const MAX_DISTANCE_CM: f64 = 180.0;      // 180cm
+const MAX_TIME_MS: u64 = 4500; // 4.5 seconds base grace time
+const MAX_TIME_POS_ZONE_MS: u64 = 8000; // 8 seconds for tracks lost in POS zones
+const MAX_DISTANCE_CM: f64 = 180.0; // 180cm
 const MAX_DISTANCE_SAME_ZONE_CM: f64 = 300.0; // 300cm if same zone context
-const MAX_HEIGHT_DIFF_CM: f64 = 10.0;    // ±10cm
+const MAX_HEIGHT_DIFF_CM: f64 = 10.0; // ±10cm
 
 /// Result of a successful stitch match
 #[derive(Debug)]
@@ -68,7 +68,12 @@ impl Stitcher {
     }
 
     /// Add a deleted track as pending for potential stitching
-    pub fn add_pending(&mut self, person: Person, position: Option<[f64; 3]>, last_zone: Option<String>) {
+    pub fn add_pending(
+        &mut self,
+        person: Person,
+        position: Option<[f64; 3]>,
+        last_zone: Option<String>,
+    ) {
         debug!(
             track_id = %person.track_id,
             authorized = %person.authorized,
@@ -97,7 +102,11 @@ impl Stitcher {
 
     /// Try to find a stitch candidate with optional zone context for matching
     /// If current_zone matches the pending track's last_zone, use extended distance
-    pub fn find_match_with_zone(&mut self, new_position: Option<[f64; 3]>, current_zone: Option<&str>) -> Option<StitchMatch> {
+    pub fn find_match_with_zone(
+        &mut self,
+        new_position: Option<[f64; 3]>,
+        current_zone: Option<&str>,
+    ) -> Option<StitchMatch> {
         // First, clean up expired entries
         self.cleanup_expired();
 
@@ -109,7 +118,11 @@ impl Stitcher {
         for (i, pending) in self.pending.iter().enumerate() {
             // Time check - use extended time for POS zones
             let age_ms = now.duration_since(pending.deleted_at).as_millis() as u64;
-            let max_time = if pending.last_zone.as_ref().is_some_and(|z| z.starts_with("POS_")) {
+            let max_time = if pending
+                .last_zone
+                .as_ref()
+                .is_some_and(|z| z.starts_with("POS_"))
+            {
                 MAX_TIME_POS_ZONE_MS
             } else {
                 MAX_TIME_MS
@@ -133,7 +146,11 @@ impl Stitcher {
             let distance_cm = (dx * dx + dy * dy).sqrt() * 100.0;
 
             let same_zone = current_zone.is_some() && pending.last_zone.as_deref() == current_zone;
-            let max_distance = if same_zone { MAX_DISTANCE_SAME_ZONE_CM } else { MAX_DISTANCE_CM };
+            let max_distance = if same_zone {
+                MAX_DISTANCE_SAME_ZONE_CM
+            } else {
+                MAX_DISTANCE_CM
+            };
 
             if distance_cm > max_distance {
                 continue;

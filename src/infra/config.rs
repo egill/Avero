@@ -412,7 +412,9 @@ impl Config {
             mqtt_egress_gate_topic: toml_config.mqtt_egress.gate_topic,
             mqtt_egress_tracks_topic: toml_config.mqtt_egress.tracks_topic,
             mqtt_egress_acc_topic: toml_config.mqtt_egress.acc_topic,
-            mqtt_egress_metrics_interval_secs: toml_config.mqtt_egress.metrics_publish_interval_secs,
+            mqtt_egress_metrics_interval_secs: toml_config
+                .mqtt_egress
+                .metrics_publish_interval_secs,
         })
     }
 

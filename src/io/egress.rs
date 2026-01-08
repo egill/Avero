@@ -60,10 +60,7 @@ impl Egress {
             }
         }
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
 
         writeln!(file, "{}", line)?;
         debug!(file = %self.file_path, bytes = %line.len(), "egress_written");
@@ -166,12 +163,14 @@ mod tests {
 
         let egress = Egress::new(file_str);
 
-        let journeys: Vec<Journey> = (0..5).map(|i| {
-            let mut j = Journey::new(100 + i);
-            j.crossed_entry = true;
-            j.complete(JourneyOutcome::Completed);
-            j
-        }).collect();
+        let journeys: Vec<Journey> = (0..5)
+            .map(|i| {
+                let mut j = Journey::new(100 + i);
+                j.crossed_entry = true;
+                j.complete(JourneyOutcome::Completed);
+                j
+            })
+            .collect();
 
         let count = egress.write_journeys(&journeys);
         assert_eq!(count, 5);

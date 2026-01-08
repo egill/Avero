@@ -5,10 +5,13 @@
 
 use super::Tracker;
 use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyOutcome};
-use crate::infra::metrics::{GATE_STATE_CLOSED, GATE_STATE_MOVING, GATE_STATE_OPEN};
-use crate::io::{AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload, ZoneEventPayload};
-use crate::services::stitcher::StitchMatch;
 use crate::domain::types::{DoorStatus, ParsedEvent, Person};
+use crate::infra::metrics::{GATE_STATE_CLOSED, GATE_STATE_MOVING, GATE_STATE_OPEN};
+use crate::io::{
+    AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload,
+    ZoneEventPayload,
+};
+use crate::services::stitcher::StitchMatch;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -35,7 +38,11 @@ impl Tracker {
 
         // Try to find a stitch candidate
         if let Some(stitch) = self.stitcher.find_match(event.position) {
-            let StitchMatch { mut person, time_ms, distance_cm } = stitch;
+            let StitchMatch {
+                mut person,
+                time_ms,
+                distance_cm,
+            } = stitch;
             self.metrics.record_stitch_matched();
             self.metrics.record_stitch_distance(distance_cm as u64);
             self.metrics.record_stitch_time(time_ms);
@@ -74,7 +81,8 @@ impl Tracker {
             self.persons.insert(track_id, person);
 
             // Stitch in journey manager (handles event recording)
-            self.journey_manager.stitch_journey(old_track_id, track_id, time_ms, distance_cm);
+            self.journey_manager
+                .stitch_journey(old_track_id, track_id, time_ms, distance_cm);
 
             if let Some(journey) = self.journey_manager.get_any(track_id) {
                 if journey.authorized {
@@ -96,7 +104,11 @@ impl Tracker {
             // Create journey in journey manager (with parent if re-entry)
             if let Some(reentry) = reentry_match {
                 // Re-entry detected - create journey with parent reference
-                self.journey_manager.new_journey_with_parent(track_id, &reentry.parent_jid, &reentry.parent_pid);
+                self.journey_manager.new_journey_with_parent(
+                    track_id,
+                    &reentry.parent_jid,
+                    &reentry.parent_pid,
+                );
                 self.journey_manager.add_event(
                     track_id,
                     JourneyEvent::new("track_create", ts)
@@ -120,7 +132,8 @@ impl Tracker {
                 }
             } else {
                 self.journey_manager.new_journey(track_id);
-                self.journey_manager.add_event(track_id, JourneyEvent::new("track_create", ts));
+                self.journey_manager
+                    .add_event(track_id, JourneyEvent::new("track_create", ts));
 
                 // Publish create event to MQTT
                 if let Some(ref sender) = self.egress_sender {
@@ -161,7 +174,10 @@ impl Tracker {
                 person.last_position = event.position;
             }
 
-            let last_zone = person.current_zone.map(|id| self.config.zone_name(id)).unwrap_or_default();
+            let last_zone = person
+                .current_zone
+                .map(|id| self.config.zone_name(id))
+                .unwrap_or_default();
 
             info!(
                 track_id = %track_id,
@@ -196,13 +212,22 @@ impl Tracker {
                 track_id,
                 JourneyEvent::new("pending", ts)
                     .with_zone(&last_zone)
-                    .with_extra(&format!("auth={},dwell={}", person.authorized, person.accumulated_dwell_ms)),
+                    .with_extra(&format!(
+                        "auth={},dwell={}",
+                        person.authorized, person.accumulated_dwell_ms
+                    )),
             );
-            self.journey_manager.end_journey(track_id, JourneyOutcome::Abandoned);
+            self.journey_manager
+                .end_journey(track_id, JourneyOutcome::Abandoned);
 
             // Add to stitcher for potential re-connection (with zone context)
-            let last_zone_name = if last_zone.is_empty() { None } else { Some(last_zone.clone()) };
-            self.stitcher.add_pending(person, event.position, last_zone_name);
+            let last_zone_name = if last_zone.is_empty() {
+                None
+            } else {
+                Some(last_zone.clone())
+            };
+            self.stitcher
+                .add_pending(person, event.position, last_zone_name);
         }
     }
 
@@ -231,7 +256,10 @@ impl Tracker {
         );
 
         // Get or create person
-        let person = self.persons.entry(track_id).or_insert_with(|| Person::new(track_id));
+        let person = self
+            .persons
+            .entry(track_id)
+            .or_insert_with(|| Person::new(track_id));
         person.current_zone = Some(geometry_id);
         let journey_authorized = self
             .journey_manager
@@ -246,7 +274,10 @@ impl Tracker {
             .is_some();
 
         // Add to journey manager
-        self.journey_manager.add_event(track_id, JourneyEvent::new("zone_entry", ts).with_zone(&zone));
+        self.journey_manager.add_event(
+            track_id,
+            JourneyEvent::new("zone_entry", ts).with_zone(&zone),
+        );
 
         // Publish zone event to MQTT
         if let Some(ref sender) = self.egress_sender {
@@ -271,7 +302,8 @@ impl Tracker {
         } else if geometry_id == self.config.gate_zone() {
             // Gate zone - check authorization and send command or blocked event
             if authorized && !gate_already_opened {
-                self.send_gate_open_command(track_id, ts, "tracker", event.received_at).await;
+                self.send_gate_open_command(track_id, ts, "tracker", event.received_at)
+                    .await;
             } else if !authorized {
                 // Emit gate blocked event for TUI visibility
                 info!(
@@ -325,7 +357,8 @@ impl Tracker {
                 person.accumulated_dwell_ms += dwell_ms;
 
                 // Record POS exit for ACC matching
-                self.acc_collector.record_pos_exit(track_id, &zone, dwell_ms);
+                self.acc_collector
+                    .record_pos_exit(track_id, &zone, dwell_ms);
                 // Update POS occupancy metric
                 self.metrics.pos_zone_exit(geometry_id);
 
@@ -434,10 +467,16 @@ impl Tracker {
         // Journey complete if crossing exit line forward
         if geometry_id == self.config.exit_line() && direction == "forward" {
             // Get journey info for logging
-            let (gate_cmd_at, event_count, started_at) = self.journey_manager.get(track_id)
+            let (gate_cmd_at, event_count, started_at) = self
+                .journey_manager
+                .get(track_id)
                 .map(|j| (j.gate_cmd_at, j.events.len(), j.started_at))
                 .unwrap_or((None, 0, 0));
-            let duration_ms = if started_at > 0 { epoch_ms().saturating_sub(started_at) } else { 0 };
+            let duration_ms = if started_at > 0 {
+                epoch_ms().saturating_sub(started_at)
+            } else {
+                0
+            };
 
             info!(
                 track_id = %track_id,
@@ -456,12 +495,14 @@ impl Tracker {
 
                 // Record exit for potential re-entry detection
                 let height = person.last_position.map(|p| p[2]);
-                self.reentry_detector.record_exit(&journey.jid, &journey.pid, height);
+                self.reentry_detector
+                    .record_exit(&journey.jid, &journey.pid, height);
 
                 // Record exit in Prometheus metrics
                 self.metrics.record_exit();
             }
-            self.journey_manager.end_journey(track_id, JourneyOutcome::Completed);
+            self.journey_manager
+                .end_journey(track_id, JourneyOutcome::Completed);
         } else {
             // Put person back - not complete yet
             self.persons.insert(track_id, person);
@@ -501,7 +542,8 @@ impl Tracker {
         }
 
         // Correlate door state with recent gate commands
-        self.door_correlator.process_door_state(status, &mut self.journey_manager);
+        self.door_correlator
+            .process_door_state(status, &mut self.journey_manager);
     }
 
     /// Handle an ACC (payment terminal) event
@@ -525,9 +567,11 @@ impl Tracker {
 
         // Try to match ACC to journeys using IP → POS lookup
         // Returns all group members if any member qualifies (sufficient dwell)
-        let matched_tracks = self
-            .acc_collector
-            .process_acc(ip, &mut self.journey_manager, Some(&accumulated_dwells));
+        let matched_tracks = self.acc_collector.process_acc(
+            ip,
+            &mut self.journey_manager,
+            Some(&accumulated_dwells),
+        );
 
         // Record ACC metric
         self.metrics.record_acc_event(!matched_tracks.is_empty());
@@ -575,7 +619,9 @@ impl Tracker {
                     .events
                     .iter()
                     .rev()
-                    .find(|e| e.t == "zone_entry" && e.z.as_deref() == Some(gate_zone_name.as_str()))
+                    .find(|e| {
+                        e.t == "zone_entry" && e.z.as_deref() == Some(gate_zone_name.as_str())
+                    })
                     .map(|e| e.ts);
                 if let Some(entry_ts) = gate_entry_ts {
                     let delta_ms = ts.saturating_sub(entry_ts);
@@ -600,7 +646,10 @@ impl Tracker {
                                 ip: ip.to_string(),
                                 pos: pos.clone(),
                                 tid: Some(track_id),
-                                dwell_ms: self.persons.get(&track_id).map(|p| p.accumulated_dwell_ms),
+                                dwell_ms: self
+                                    .persons
+                                    .get(&track_id)
+                                    .map(|p| p.accumulated_dwell_ms),
                                 gate_zone: Some(gate_zone_name.clone()),
                                 gate_entry_ts: Some(entry_ts),
                                 delta_ms: Some(delta_ms),
@@ -624,7 +673,8 @@ impl Tracker {
                 .and_then(|j| j.gate_cmd_at)
                 .is_some();
             if in_gate_zone && !gate_already_opened {
-                self.send_gate_open_command(track_id, ts, "acc", received_at).await;
+                self.send_gate_open_command(track_id, ts, "acc", received_at)
+                    .await;
             }
         }
 
@@ -643,7 +693,10 @@ impl Tracker {
             if !matched_tracks.is_empty() {
                 // Matched - send event for primary track (first in group)
                 let primary_track = matched_tracks[0];
-                let dwell_ms = self.persons.get(&primary_track).map(|p| p.accumulated_dwell_ms);
+                let dwell_ms = self
+                    .persons
+                    .get(&primary_track)
+                    .map(|p| p.accumulated_dwell_ms);
                 sender.send_acc_event(AccEventPayload {
                     site: None,
                     ts,
@@ -661,7 +714,9 @@ impl Tracker {
                 });
             } else {
                 // Unmatched (unknown IP or no one at POS) - include debug info
-                let debug_active: Vec<AccDebugTrack> = self.persons.iter()
+                let debug_active: Vec<AccDebugTrack> = self
+                    .persons
+                    .iter()
                     .map(|(&tid, p)| AccDebugTrack {
                         tid,
                         zone: p.current_zone.map(|z| self.config.zone_name(z)),
@@ -670,7 +725,9 @@ impl Tracker {
                     })
                     .collect();
 
-                let debug_pending: Vec<AccDebugPending> = self.stitcher.get_pending_info()
+                let debug_pending: Vec<AccDebugPending> = self
+                    .stitcher
+                    .get_pending_info()
                     .into_iter()
                     .map(|p| AccDebugPending {
                         tid: p.track_id,
@@ -701,8 +758,16 @@ impl Tracker {
                     gate_entry_ts: None,
                     delta_ms: None,
                     gate_cmd_at: None,
-                    debug_active: if debug_active.is_empty() { None } else { Some(debug_active) },
-                    debug_pending: if debug_pending.is_empty() { None } else { Some(debug_pending) },
+                    debug_active: if debug_active.is_empty() {
+                        None
+                    } else {
+                        Some(debug_active)
+                    },
+                    debug_pending: if debug_pending.is_empty() {
+                        None
+                    } else {
+                        Some(debug_pending)
+                    },
                 });
             }
         }
@@ -712,7 +777,13 @@ impl Tracker {
     ///
     /// `received_at` is when the triggering event was received (zone entry or ACC).
     /// This allows us to measure the full E2E latency from event reception to gate command.
-    async fn send_gate_open_command(&mut self, track_id: i64, ts: u64, src: &str, received_at: Instant) {
+    async fn send_gate_open_command(
+        &mut self,
+        track_id: i64,
+        ts: u64,
+        src: &str,
+        received_at: Instant,
+    ) {
         let cmd_latency_us = self.gate.send_open_command(track_id).await;
         self.metrics.record_gate_command();
 
@@ -725,7 +796,8 @@ impl Tracker {
         }
         self.journey_manager.add_event(
             track_id,
-            JourneyEvent::new("gate_cmd", ts).with_extra(&format!("cmd_us={cmd_latency_us},e2e_us={e2e_latency_us}")),
+            JourneyEvent::new("gate_cmd", ts)
+                .with_extra(&format!("cmd_us={cmd_latency_us},e2e_us={e2e_latency_us}")),
         );
 
         if let Some(ref sender) = self.egress_sender {

@@ -285,7 +285,10 @@ impl EgressSender {
 /// Returns (sender, receiver) where sender can be cloned and shared.
 /// Buffer size determines how many messages can be queued.
 /// site_id is included in journey payloads for downstream consumers.
-pub fn create_egress_channel(buffer_size: usize, site_id: String) -> (EgressSender, mpsc::Receiver<EgressMessage>) {
+pub fn create_egress_channel(
+    buffer_size: usize,
+    site_id: String,
+) -> (EgressSender, mpsc::Receiver<EgressMessage>) {
     let (tx, rx) = mpsc::channel(buffer_size);
     (EgressSender::new(tx, site_id), rx)
 }

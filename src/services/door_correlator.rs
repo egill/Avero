@@ -4,8 +4,8 @@
 //! changes from the RS485 monitor.
 
 use crate::domain::journey::{epoch_ms, JourneyEvent};
-use crate::services::journey_manager::JourneyManager;
 use crate::domain::types::DoorStatus;
+use crate::services::journey_manager::JourneyManager;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -17,7 +17,7 @@ const MAX_GATE_CORRELATION_MS: u64 = 5000;
 struct PendingGateCmd {
     track_id: i64,
     sent_at: Instant,
-    _sent_at_ms: u64, // epoch ms
+    _sent_at_ms: u64,    // epoch ms
     door_was_open: bool, // door state when command was sent
 }
 
@@ -96,7 +96,11 @@ impl DoorCorrelator {
 
         // Find the most recent (newest) gate command within window
         // Iterate from end to find the newest valid command
-        let cmd_idx = self.pending_cmds.iter().enumerate().rev()
+        let cmd_idx = self
+            .pending_cmds
+            .iter()
+            .enumerate()
+            .rev()
             .find(|(_, cmd)| {
                 let elapsed_ms = now.duration_since(cmd.sent_at).as_millis() as u64;
                 elapsed_ms <= MAX_GATE_CORRELATION_MS
@@ -127,8 +131,7 @@ impl DoorCorrelator {
             // Add event to journey
             journey_manager.add_event(
                 track_id,
-                JourneyEvent::new("gate_open", now_ms)
-                    .with_extra(&format!("delta_ms={delta_ms}")),
+                JourneyEvent::new("gate_open", now_ms).with_extra(&format!("delta_ms={delta_ms}")),
             );
 
             return Some(track_id);

@@ -15,7 +15,9 @@ mod io;
 mod services;
 
 use infra::{Config, GateMode, Metrics};
-use io::{create_egress_channel, start_acc_listener, AccListenerConfig, MqttPublisher, Rs485Monitor};
+use io::{
+    create_egress_channel, start_acc_listener, AccListenerConfig, MqttPublisher, Rs485Monitor,
+};
 use services::GateController;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
@@ -27,8 +29,7 @@ use tracing_subscriber::EnvFilter;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize structured logging with configurable level via RUST_LOG env var
     // Default: INFO, use RUST_LOG=debug for full event visibility
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -122,7 +123,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let prom_metrics = metrics.clone();
         let prom_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
-            if let Err(e) = io::prometheus::start_metrics_server(prometheus_port, prom_metrics, prom_shutdown).await {
+            if let Err(e) =
+                io::prometheus::start_metrics_server(prometheus_port, prom_metrics, prom_shutdown)
+                    .await
+            {
                 tracing::error!(error = %e, "Prometheus metrics server error");
             }
         });
@@ -157,7 +161,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let metrics_for_egress = metrics.clone();
         let egress_interval = config.mqtt_egress_metrics_interval_secs();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(egress_interval));
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(egress_interval));
             loop {
                 interval.tick().await;
                 let summary = metrics_for_egress.report(0, 0);

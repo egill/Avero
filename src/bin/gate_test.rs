@@ -228,7 +228,10 @@ impl GateInvestigator {
         }
     }
 
-    async fn wait_for_closed(&mut self, timeout: Duration) -> Result<bool, Box<dyn std::error::Error>> {
+    async fn wait_for_closed(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
             if let Some(status) = self.poll_door_status().await? {
@@ -242,7 +245,10 @@ impl GateInvestigator {
         Ok(false)
     }
 
-    async fn monitor_until_closed(&mut self, timeout: Duration) -> Result<(), Box<dyn std::error::Error>> {
+    async fn monitor_until_closed(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
             if let Some(status) = self.poll_door_status().await? {
@@ -304,7 +310,11 @@ impl GateInvestigator {
     ) -> Result<TestResult, Box<dyn std::error::Error>> {
         println!("\n{}", "=".repeat(60));
         println!("TEST: {}", name);
-        println!("  Open commands: {} with intervals {:?}ms", open_intervals_ms.len() + 1, open_intervals_ms);
+        println!(
+            "  Open commands: {} with intervals {:?}ms",
+            open_intervals_ms.len() + 1,
+            open_intervals_ms
+        );
         println!("{}", "=".repeat(60));
 
         // Ensure door is closed
@@ -422,7 +432,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 3: Triple opens
     println!("\n\n▶ PHASE 3: Triple opens");
-    let r = investigator.run_test("Triple Open (1s intervals)", &[1000, 1000]).await?;
+    let r = investigator
+        .run_test("Triple Open (1s intervals)", &[1000, 1000])
+        .await?;
     results.push(("Triple Open 1s", r));
 
     if !args.fast {
@@ -431,7 +443,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 4: Quad opens
     println!("\n\n▶ PHASE 4: Quad opens");
-    let r = investigator.run_test("Quad Open (1s intervals)", &[1000, 1000, 1000]).await?;
+    let r = investigator
+        .run_test("Quad Open (1s intervals)", &[1000, 1000, 1000])
+        .await?;
     results.push(("Quad Open 1s", r));
 
     if !args.fast {
@@ -440,29 +454,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 5: Rapid fire
     println!("\n\n▶ PHASE 5: Rapid fire (5 opens, 500ms apart)");
-    let r = investigator.run_test("Rapid Fire x5", &[500, 500, 500, 500]).await?;
+    let r = investigator
+        .run_test("Rapid Fire x5", &[500, 500, 500, 500])
+        .await?;
     results.push(("Rapid x5", r));
 
     // Print summary
     println!("\n\n╔══════════════════════════════════════════════════════════╗");
     println!("║                      SUMMARY                              ║");
     println!("╚══════════════════════════════════════════════════════════╝\n");
-    println!("{:<30} {:>6} {:>10} {:>12}", "Test", "Cmds", "Cmd→Open", "Open Duration");
+    println!(
+        "{:<30} {:>6} {:>10} {:>12}",
+        "Test", "Cmds", "Cmd→Open", "Open Duration"
+    );
     println!("{}", "-".repeat(60));
 
-    let baseline_open_duration = results.first()
+    let baseline_open_duration = results
+        .first()
         .and_then(|(_, r)| r.open_duration_ms)
         .unwrap_or(0);
 
     for (name, r) in &results {
-        let cmd_open = r.cmd_to_open_ms.map(|ms| format!("{}ms", ms)).unwrap_or("-".to_string());
-        let open_dur = r.open_duration_ms.map(|ms| {
-            let delta = ms as i64 - baseline_open_duration as i64;
-            let sign = if delta >= 0 { "+" } else { "" };
-            format!("{:.1}s ({}{}ms)", ms as f64 / 1000.0, sign, delta)
-        }).unwrap_or("-".to_string());
+        let cmd_open = r
+            .cmd_to_open_ms
+            .map(|ms| format!("{}ms", ms))
+            .unwrap_or("-".to_string());
+        let open_dur = r
+            .open_duration_ms
+            .map(|ms| {
+                let delta = ms as i64 - baseline_open_duration as i64;
+                let sign = if delta >= 0 { "+" } else { "" };
+                format!("{:.1}s ({}{}ms)", ms as f64 / 1000.0, sign, delta)
+            })
+            .unwrap_or("-".to_string());
 
-        println!("{:<30} {:>6} {:>10} {:>12}", name, r.total_open_cmds, cmd_open, open_dur);
+        println!(
+            "{:<30} {:>6} {:>10} {:>12}",
+            name, r.total_open_cmds, cmd_open, open_dur
+        );
     }
 
     println!("\n\n╔══════════════════════════════════════════════════════════╗");
@@ -470,13 +499,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╚══════════════════════════════════════════════════════════╝\n");
 
     // Analyze patterns
-    let durations: Vec<u64> = results.iter()
+    let durations: Vec<u64> = results
+        .iter()
         .filter_map(|(_, r)| r.open_duration_ms)
         .collect();
 
     if durations.len() >= 2 {
         let baseline = durations[0];
-        let extended: Vec<_> = durations[1..].iter()
+        let extended: Vec<_> = durations[1..]
+            .iter()
             .filter(|&&d| d > baseline + 500)
             .collect();
 
@@ -484,9 +515,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("FINDING: Additional OPEN commands do NOT extend the open duration.");
             println!("         The gate ignores subsequent opens while already processing.");
         } else {
-            let avg_extension = extended.iter().map(|&&d| d - baseline).sum::<u64>() / extended.len() as u64;
+            let avg_extension =
+                extended.iter().map(|&&d| d - baseline).sum::<u64>() / extended.len() as u64;
             println!("FINDING: Additional OPEN commands DO extend the open duration.");
-            println!("         Average extension: ~{}ms per additional command", avg_extension);
+            println!(
+                "         Average extension: ~{}ms per additional command",
+                avg_extension
+            );
         }
     }
 

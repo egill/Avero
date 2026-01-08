@@ -376,8 +376,14 @@ impl CloudPlusClient {
                 let write_timeout = self.config.write_timeout;
 
                 tokio::spawn(async move {
-                    Self::write_loop(write_half, outbound_rx, internal_rx, connected, write_timeout)
-                        .await
+                    Self::write_loop(
+                        write_half,
+                        outbound_rx,
+                        internal_rx,
+                        connected,
+                        write_timeout,
+                    )
+                    .await
                 })
             };
 
@@ -478,8 +484,13 @@ impl CloudPlusClient {
                             if !*request_mode.read().await {
                                 let hi = ((hb.oem_code >> 8) & 0xFF) as u8;
                                 let lo = (hb.oem_code & 0xFF) as u8;
-                                let resp =
-                                    build_frame_with_rand(CMD_HEARTBEAT, 0, 0, frame.rand, &[hi, lo]);
+                                let resp = build_frame_with_rand(
+                                    CMD_HEARTBEAT,
+                                    0,
+                                    0,
+                                    frame.rand,
+                                    &[hi, lo],
+                                );
 
                                 if internal_tx.try_send(resp).is_ok() {
                                     let mut ack = heartbeats_ack.write().await;
@@ -551,7 +562,11 @@ impl CloudPlusClient {
 
             match result {
                 Ok(Ok(_)) => {
-                    let hex: String = msg.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ");
+                    let hex: String = msg
+                        .iter()
+                        .map(|b| format!("{:02X}", b))
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     debug!(len = msg.len(), hex = %hex, "cloudplus_frame_sent");
                 }
                 Ok(Err(e)) => {
@@ -567,7 +582,10 @@ impl CloudPlusClient {
     }
 
     /// Send door open command
-    pub async fn send_open(&self, door_id: u8) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn send_open(
+        &self,
+        door_id: u8,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         if !self.is_connected().await {
             return Err("not connected".into());
         }
@@ -618,8 +636,8 @@ impl CloudPlusClient {
         }
 
         // Get current time components using time crate
-        let now = time::OffsetDateTime::now_local()
-            .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+        let now =
+            time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
 
         let data = [
             now.second(),

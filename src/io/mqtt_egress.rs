@@ -119,7 +119,12 @@ impl MqttPublisher {
                 // Use QoS 1 for journeys (at-least-once delivery)
                 if let Err(e) = self
                     .client
-                    .publish(&self.journeys_topic, QoS::AtLeastOnce, false, payload.json.as_bytes())
+                    .publish(
+                        &self.journeys_topic,
+                        QoS::AtLeastOnce,
+                        false,
+                        payload.json.as_bytes(),
+                    )
                     .await
                 {
                     error!(error = %e, "mqtt_egress_journey_failed");

@@ -1,7 +1,7 @@
 //! Gate control via HTTP or TCP (CloudPlus) commands
 
-use crate::io::cloudplus::{CloudPlusClient, CloudPlusConfig};
 use crate::infra::config::{Config, GateMode};
+use crate::io::cloudplus::{CloudPlusClient, CloudPlusConfig};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,7 +15,11 @@ fn log_tcp_client_not_initialized(track_id: i64) {
 
 /// Log TCP command error (cold path)
 #[cold]
-fn log_tcp_command_error(track_id: i64, latency_us: u64, e: &(dyn std::error::Error + Send + Sync)) {
+fn log_tcp_command_error(
+    track_id: i64,
+    latency_us: u64,
+    e: &(dyn std::error::Error + Send + Sync),
+) {
     error!(
         track_id = %track_id,
         latency_us = %latency_us,

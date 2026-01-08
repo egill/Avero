@@ -51,7 +51,12 @@ impl JourneyManager {
     }
 
     /// Create a new journey with parent reference (for re-entry)
-    pub fn new_journey_with_parent(&mut self, track_id: i64, parent_jid: &str, parent_pid: &str) -> &Journey {
+    pub fn new_journey_with_parent(
+        &mut self,
+        track_id: i64,
+        parent_jid: &str,
+        parent_pid: &str,
+    ) -> &Journey {
         let journey = Journey::new_with_parent(track_id, parent_jid, parent_pid);
         let pid = journey.pid.clone();
 
@@ -70,9 +75,17 @@ impl JourneyManager {
 
     /// Stitch a journey from old track to new track
     /// Returns true if stitch was successful
-    pub fn stitch_journey(&mut self, old_track_id: i64, new_track_id: i64, time_ms: u64, distance_cm: u32) -> bool {
+    pub fn stitch_journey(
+        &mut self,
+        old_track_id: i64,
+        new_track_id: i64,
+        time_ms: u64,
+        distance_cm: u32,
+    ) -> bool {
         // First try to find in pending_egress
-        let pending_idx = self.pending_egress.iter()
+        let pending_idx = self
+            .pending_egress
+            .iter()
             .position(|p| p.journey.current_track_id() == old_track_id);
 
         let journey = if let Some(idx) = pending_idx {
@@ -89,10 +102,9 @@ impl JourneyManager {
             let old_jid = journey.jid.clone();
 
             // Add stitch event
-            journey.add_event(
-                JourneyEvent::new("stitch", epoch_ms())
-                    .with_extra(&format!("from={old_track_id},time_ms={time_ms},dist_cm={distance_cm}"))
-            );
+            journey.add_event(JourneyEvent::new("stitch", epoch_ms()).with_extra(&format!(
+                "from={old_track_id},time_ms={time_ms},dist_cm={distance_cm}"
+            )));
 
             // Add new track ID to history
             journey.add_track_id(new_track_id);
@@ -270,7 +282,10 @@ mod tests {
         let mut manager = JourneyManager::new();
         manager.new_journey(100);
 
-        manager.add_event(100, JourneyEvent::new("zone_entry", 1000).with_zone("POS_1"));
+        manager.add_event(
+            100,
+            JourneyEvent::new("zone_entry", 1000).with_zone("POS_1"),
+        );
 
         let journey = manager.get(100).unwrap();
         assert_eq!(journey.events.len(), 1);

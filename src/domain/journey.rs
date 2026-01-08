@@ -21,8 +21,8 @@ pub fn epoch_ms() -> u64 {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum JourneyOutcome {
     InProgress,
-    Completed,  // crossed EXIT
-    Abandoned,  // track deleted, never crossed EXIT
+    Completed, // crossed EXIT
+    Abandoned, // track deleted, never crossed EXIT
 }
 
 impl JourneyOutcome {
@@ -38,10 +38,10 @@ impl JourneyOutcome {
 /// A single event in a journey
 #[derive(Debug, Clone)]
 pub struct JourneyEvent {
-    pub t: String,              // event type
-    pub z: Option<String>,      // zone or line name
-    pub ts: u64,                // epoch ms
-    pub extra: Option<String>,  // additional data
+    pub t: String,             // event type
+    pub z: Option<String>,     // zone or line name
+    pub ts: u64,               // epoch ms
+    pub extra: Option<String>, // additional data
 }
 
 impl JourneyEvent {
@@ -82,19 +82,19 @@ impl JourneyEvent {
 /// Complete journey for a tracked person
 #[derive(Debug, Clone)]
 pub struct Journey {
-    pub jid: String,                    // UUIDv7 journey ID
-    pub pid: String,                    // UUIDv7 person ID (stable across stitches)
-    pub tids: Vec<i64>,                 // Xovis track_ids (stitch history)
-    pub parent: Option<String>,         // Previous journey's jid (for re-entry)
+    pub jid: String,            // UUIDv7 journey ID
+    pub pid: String,            // UUIDv7 person ID (stable across stitches)
+    pub tids: Vec<i64>,         // Xovis track_ids (stitch history)
+    pub parent: Option<String>, // Previous journey's jid (for re-entry)
     pub outcome: JourneyOutcome,
     pub authorized: bool,
     pub total_dwell_ms: u64,
     pub acc_matched: bool,
-    pub gate_cmd_at: Option<u64>,       // epoch ms
-    pub gate_opened_at: Option<u64>,    // epoch ms from RS485
+    pub gate_cmd_at: Option<u64>,    // epoch ms
+    pub gate_opened_at: Option<u64>, // epoch ms from RS485
     pub gate_was_open: bool,
-    pub started_at: u64,                // epoch ms
-    pub ended_at: Option<u64>,          // epoch ms
+    pub started_at: u64,       // epoch ms
+    pub ended_at: Option<u64>, // epoch ms
     pub crossed_entry: bool,
     pub events: Vec<JourneyEvent>,
 }
@@ -167,40 +167,69 @@ impl Journey {
 
         // Include site_id if provided
         if let Some(site) = site_id {
-            obj.insert("site".to_string(), serde_json::Value::String(site.to_string()));
+            obj.insert(
+                "site".to_string(),
+                serde_json::Value::String(site.to_string()),
+            );
         }
 
-        obj.insert("jid".to_string(), serde_json::Value::String(self.jid.clone()));
-        obj.insert("pid".to_string(), serde_json::Value::String(self.pid.clone()));
+        obj.insert(
+            "jid".to_string(),
+            serde_json::Value::String(self.jid.clone()),
+        );
+        obj.insert(
+            "pid".to_string(),
+            serde_json::Value::String(self.pid.clone()),
+        );
         obj.insert("tids".to_string(), serde_json::json!(self.tids));
 
         if let Some(parent) = &self.parent {
-            obj.insert("parent".to_string(), serde_json::Value::String(parent.clone()));
+            obj.insert(
+                "parent".to_string(),
+                serde_json::Value::String(parent.clone()),
+            );
         } else {
             obj.insert("parent".to_string(), serde_json::Value::Null);
         }
 
-        obj.insert("out".to_string(), serde_json::Value::String(self.outcome.as_str().to_string()));
+        obj.insert(
+            "out".to_string(),
+            serde_json::Value::String(self.outcome.as_str().to_string()),
+        );
         obj.insert("auth".to_string(), serde_json::Value::Bool(self.authorized));
-        obj.insert("dwell".to_string(), serde_json::Value::Number(self.total_dwell_ms.into()));
+        obj.insert(
+            "dwell".to_string(),
+            serde_json::Value::Number(self.total_dwell_ms.into()),
+        );
         obj.insert("acc".to_string(), serde_json::Value::Bool(self.acc_matched));
 
         if let Some(gate_cmd) = self.gate_cmd_at {
-            obj.insert("gate_cmd".to_string(), serde_json::Value::Number(gate_cmd.into()));
+            obj.insert(
+                "gate_cmd".to_string(),
+                serde_json::Value::Number(gate_cmd.into()),
+            );
         }
         if let Some(gate_open) = self.gate_opened_at {
-            obj.insert("gate_open".to_string(), serde_json::Value::Number(gate_open.into()));
+            obj.insert(
+                "gate_open".to_string(),
+                serde_json::Value::Number(gate_open.into()),
+            );
         }
-        obj.insert("gate_was_open".to_string(), serde_json::Value::Bool(self.gate_was_open));
+        obj.insert(
+            "gate_was_open".to_string(),
+            serde_json::Value::Bool(self.gate_was_open),
+        );
 
-        obj.insert("t0".to_string(), serde_json::Value::Number(self.started_at.into()));
+        obj.insert(
+            "t0".to_string(),
+            serde_json::Value::Number(self.started_at.into()),
+        );
         if let Some(ended) = self.ended_at {
             obj.insert("t1".to_string(), serde_json::Value::Number(ended.into()));
         }
 
-        let events: Vec<serde_json::Value> = self.events.iter()
-            .map(|e| e.to_json_value())
-            .collect();
+        let events: Vec<serde_json::Value> =
+            self.events.iter().map(|e| e.to_json_value()).collect();
         obj.insert("ev".to_string(), serde_json::Value::Array(events));
 
         serde_json::Value::Object(obj).to_string()
@@ -269,14 +298,11 @@ mod tests {
         journey.gate_opened_at = Some(1736012345890);
 
         journey.add_event(JourneyEvent::new("entry_cross", 1736012340000));
-        journey.add_event(
-            JourneyEvent::new("zone_entry", 1736012341000)
-                .with_zone("POS_1")
-        );
+        journey.add_event(JourneyEvent::new("zone_entry", 1736012341000).with_zone("POS_1"));
         journey.add_event(
             JourneyEvent::new("zone_exit", 1736012348500)
                 .with_zone("POS_1")
-                .with_extra("dwell=7500")
+                .with_extra("dwell=7500"),
         );
 
         journey.complete(JourneyOutcome::Completed);

@@ -68,7 +68,10 @@ impl PosGroup {
 
     /// Get all track_ids of members with sufficient dwell
     /// Uses accumulated dwell from tracker if provided, otherwise falls back to time since entry
-    fn members_with_sufficient_dwell(&self, accumulated_dwells: Option<&HashMap<i64, u64>>) -> Vec<i64> {
+    fn members_with_sufficient_dwell(
+        &self,
+        accumulated_dwells: Option<&HashMap<i64, u64>>,
+    ) -> Vec<i64> {
         self.members
             .iter()
             .filter(|m| {
@@ -154,8 +157,10 @@ impl AccCollector {
         }
         // No group exists - start new group
         debug!(track_id = %track_id, pos = %pos_zone, "acc_pos_entry_new_group");
-        self.pos_groups
-            .insert(pos_zone.to_string(), PosGroup::new(track_id, self.min_dwell_for_acc));
+        self.pos_groups.insert(
+            pos_zone.to_string(),
+            PosGroup::new(track_id, self.min_dwell_for_acc),
+        );
     }
 
     /// Record that a track exited a POS zone
@@ -187,7 +192,10 @@ impl AccCollector {
         let exits = self.recent_exits.entry(pos_zone.to_string()).or_default();
         exits.push(RecentExit {
             track_id,
-            group_members: group_members.into_iter().filter(|&id| id != track_id).collect(),
+            group_members: group_members
+                .into_iter()
+                .filter(|&id| id != track_id)
+                .collect(),
             exited_at: Instant::now(),
             dwell_ms,
         });
@@ -227,7 +235,8 @@ impl AccCollector {
         if let Some(group) = self.pos_groups.get(pos) {
             let all_members = group.all_members();
             // Show both session dwell and accumulated dwell for debugging
-            let member_dwells: Vec<(i64, u64, Option<u64>)> = group.members
+            let member_dwells: Vec<(i64, u64, Option<u64>)> = group
+                .members
                 .iter()
                 .map(|m| {
                     let session_dwell = m.entered_at.elapsed().as_millis() as u64;
@@ -326,7 +335,10 @@ impl AccCollector {
                             tid,
                             JourneyEvent::new("acc", ts)
                                 .with_zone(pos)
-                                .with_extra(&format!("kiosk={kiosk_str},group={}", all_members.len())),
+                                .with_extra(&format!(
+                                    "kiosk={kiosk_str},group={}",
+                                    all_members.len()
+                                )),
                         );
                     }
 
@@ -447,8 +459,14 @@ mod tests {
     fn test_pos_for_ip() {
         let collector = create_test_collector();
 
-        assert_eq!(collector.pos_for_ip("192.168.1.10"), Some(&"POS_1".to_string()));
-        assert_eq!(collector.pos_for_ip("192.168.1.11"), Some(&"POS_2".to_string()));
+        assert_eq!(
+            collector.pos_for_ip("192.168.1.10"),
+            Some(&"POS_1".to_string())
+        );
+        assert_eq!(
+            collector.pos_for_ip("192.168.1.11"),
+            Some(&"POS_2".to_string())
+        );
         assert_eq!(collector.pos_for_ip("192.168.1.99"), None);
     }
 

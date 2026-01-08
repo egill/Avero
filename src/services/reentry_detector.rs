@@ -120,9 +120,8 @@ impl ReentryDetector {
     /// Cleanup exits older than the matching window
     fn cleanup_old_exits(&mut self) {
         let now = Instant::now();
-        self.recent_exits.retain(|exit| {
-            now.duration_since(exit.exited_at) <= MAX_REENTRY_WINDOW * 2
-        });
+        self.recent_exits
+            .retain(|exit| now.duration_since(exit.exited_at) <= MAX_REENTRY_WINDOW * 2);
     }
 
     /// Number of pending exits for matching

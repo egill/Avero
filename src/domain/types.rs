@@ -116,7 +116,7 @@ pub struct ParsedEvent {
     pub direction: Option<String>,
     pub event_time: u64,
     pub received_at: Instant,
-    pub position: Option<[f64; 3]>,  // [x, y, height] for stitching
+    pub position: Option<[f64; 3]>, // [x, y, height] for stitching
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,7 +150,6 @@ impl std::str::FromStr for EventType {
 }
 
 impl EventType {
-
     #[allow(dead_code)]
     pub fn as_str(&self) -> &str {
         match self {
@@ -176,7 +175,7 @@ pub struct Person {
     pub zone_entered_at: Option<Instant>,
     pub accumulated_dwell_ms: u64,
     pub authorized: bool,
-    pub last_position: Option<[f64; 3]>,  // [x, y, height] for stitching
+    pub last_position: Option<[f64; 3]>, // [x, y, height] for stitching
 }
 
 impl Person {
@@ -218,8 +217,17 @@ mod tests {
 
     #[test]
     fn test_event_type_from_str() {
-        assert_eq!("ZONE_ENTRY".parse::<EventType>().unwrap(), EventType::ZoneEntry);
-        assert_eq!("TRACK_DELETE".parse::<EventType>().unwrap(), EventType::TrackDelete);
-        assert!(matches!("UNKNOWN_TYPE".parse::<EventType>().unwrap(), EventType::Unknown(_)));
+        assert_eq!(
+            "ZONE_ENTRY".parse::<EventType>().unwrap(),
+            EventType::ZoneEntry
+        );
+        assert_eq!(
+            "TRACK_DELETE".parse::<EventType>().unwrap(),
+            EventType::TrackDelete
+        );
+        assert!(matches!(
+            "UNKNOWN_TYPE".parse::<EventType>().unwrap(),
+            EventType::Unknown(_)
+        ));
     }
 }

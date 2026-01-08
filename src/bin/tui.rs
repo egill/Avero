@@ -20,7 +20,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, BarChart},
+    widgets::{BarChart, Block, Borders, List, ListItem, Paragraph},
     Frame, Terminal,
 };
 use rumqttc::{AsyncClient, Event as MqttEvent, MqttOptions, Packet, QoS};
@@ -43,8 +43,8 @@ const MAX_ISSUES: usize = 10;
 const MAX_LATENCY_SAMPLES: usize = 500;
 
 // Zone timing thresholds (in ms)
-const POS_WARNING_THRESHOLD_MS: u64 = 60_000;   // 60s - show warning
-const POS_OVERDUE_THRESHOLD_MS: u64 = 120_000;  // 120s - show overdue
+const POS_WARNING_THRESHOLD_MS: u64 = 60_000; // 60s - show warning
+const POS_OVERDUE_THRESHOLD_MS: u64 = 120_000; // 120s - show overdue
 
 // ============================================================================
 // View Mode
@@ -321,8 +321,8 @@ struct StitchingStats {
     success_count: u64,
     lost_count: u64,
     pending_count: u64,
-    stitch_distance: LatencyStats,  // cm
-    stitch_time: LatencyStats,      // ms
+    stitch_distance: LatencyStats, // cm
+    stitch_time: LatencyStats,     // ms
 }
 
 impl StitchingStats {
@@ -375,7 +375,8 @@ impl ThroughputStats {
         if self.events_per_sec_samples.is_empty() {
             0.0
         } else {
-            self.events_per_sec_samples.iter().sum::<f64>() / self.events_per_sec_samples.len() as f64
+            self.events_per_sec_samples.iter().sum::<f64>()
+                / self.events_per_sec_samples.len() as f64
         }
     }
 
@@ -395,28 +396,44 @@ impl ThroughputStats {
 // Zone Status Tracking
 // ============================================================================
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 enum ZoneStatus {
     #[default]
     Empty,
-    Pending { tid: i64, dwell_ms: u64 },
-    Authorized { tid: i64, _dwell_ms: u64 },
-    Waiting { tid: i64, dwell_ms: u64 },
-    Overdue { tid: i64, dwell_ms: u64 },
+    Pending {
+        tid: i64,
+        dwell_ms: u64,
+    },
+    Authorized {
+        tid: i64,
+        _dwell_ms: u64,
+    },
+    Waiting {
+        tid: i64,
+        dwell_ms: u64,
+    },
+    Overdue {
+        tid: i64,
+        dwell_ms: u64,
+    },
 }
 
-
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 enum GateZoneStatus {
     #[default]
     Empty,
-    Authorized { tid: i64, door_state: String },
-    Blocked { tid: i64 },
-    Exiting { tid: i64, door_state: String },
+    Authorized {
+        tid: i64,
+        door_state: String,
+    },
+    Blocked {
+        tid: i64,
+    },
+    Exiting {
+        tid: i64,
+        door_state: String,
+    },
 }
-
 
 #[derive(Debug, Clone, Default)]
 struct ZoneState {
@@ -436,7 +453,10 @@ impl ZoneState {
                 let dwell_ms = self.live_dwell_ms();
 
                 if self.occupant_auth {
-                    ZoneStatus::Authorized { tid, _dwell_ms: dwell_ms }
+                    ZoneStatus::Authorized {
+                        tid,
+                        _dwell_ms: dwell_ms,
+                    }
                 } else if dwell_ms > POS_OVERDUE_THRESHOLD_MS {
                     ZoneStatus::Overdue { tid, dwell_ms }
                 } else if dwell_ms > POS_WARNING_THRESHOLD_MS {
@@ -531,7 +551,8 @@ impl ManualGateTest {
         if self.active && self.moving_at.is_none() {
             self.moving_at = Some(Instant::now());
             if let Some(cmd) = self.cmd_sent {
-                self.last_cmd_to_moving = Some(self.moving_at.unwrap().duration_since(cmd).as_millis() as u64);
+                self.last_cmd_to_moving =
+                    Some(self.moving_at.unwrap().duration_since(cmd).as_millis() as u64);
             }
         }
     }
@@ -540,10 +561,12 @@ impl ManualGateTest {
         if self.active && self.open_at.is_none() {
             self.open_at = Some(Instant::now());
             if let Some(moving) = self.moving_at {
-                self.last_moving_to_open = Some(self.open_at.unwrap().duration_since(moving).as_millis() as u64);
+                self.last_moving_to_open =
+                    Some(self.open_at.unwrap().duration_since(moving).as_millis() as u64);
             }
             if let Some(cmd) = self.cmd_sent {
-                self.last_total = Some(self.open_at.unwrap().duration_since(cmd).as_millis() as u64);
+                self.last_total =
+                    Some(self.open_at.unwrap().duration_since(cmd).as_millis() as u64);
             }
             self.active = false;
         }
@@ -654,7 +677,10 @@ impl Default for DashboardState {
         let mut state = Self {
             view_mode: ViewMode::Activity,
             pos_zones: HashMap::new(),
-            gate_zone: ZoneState { name: "GATE".to_string(), ..Default::default() },
+            gate_zone: ZoneState {
+                name: "GATE".to_string(),
+                ..Default::default()
+            },
             gate_zone_status: GateZoneStatus::Empty,
             last_gate_state: "closed".to_string(),
             track_events: VecDeque::new(),
@@ -670,7 +696,10 @@ impl Default for DashboardState {
             track_processing: TrackProcessingStats::default(),
             acc_stats: AccStats::default(),
             stitching_stats: StitchingStats::default(),
-            throughput: ThroughputStats { session_start: Some(Instant::now()), ..Default::default() },
+            throughput: ThroughputStats {
+                session_start: Some(Instant::now()),
+                ..Default::default()
+            },
             counters: SessionCounters::default(),
             metrics: Metrics::default(),
             journeys_completed: 0,
@@ -687,10 +716,13 @@ impl Default for DashboardState {
         // Initialize 5 POS zones
         for i in 1..=5 {
             let name = format!("POS_{}", i);
-            state.pos_zones.insert(name.clone(), ZoneState {
-                name,
-                ..Default::default()
-            });
+            state.pos_zones.insert(
+                name.clone(),
+                ZoneState {
+                    name,
+                    ..Default::default()
+                },
+            );
         }
 
         state
@@ -728,7 +760,9 @@ impl DashboardState {
         // Track network latency if available
         if let (Some(event_time), Some(received_time)) = (event.event_time, event.received_time) {
             if received_time > event_time {
-                self.track_processing.network_latency.add(received_time - event_time);
+                self.track_processing
+                    .network_latency
+                    .add(received_time - event_time);
             }
         }
 
@@ -784,7 +818,10 @@ impl DashboardState {
 
                         // Update gate zone status
                         self.gate_zone_status = if event.auth {
-                            GateZoneStatus::Authorized { tid: event.tid, door_state: self.last_gate_state.clone() }
+                            GateZoneStatus::Authorized {
+                                tid: event.tid,
+                                door_state: self.last_gate_state.clone(),
+                            }
                         } else {
                             GateZoneStatus::Blocked { tid: event.tid }
                         };
@@ -802,11 +839,13 @@ impl DashboardState {
             }
 
             // Track EXIT line crossing
-            if zone_name == "EXIT_1" && event.t == "line_cross"
-                && self.current_gate_flow.tid == Some(event.tid) {
-                    self.current_gate_flow.exit_ts = Some(event.ts);
-                    self.current_gate_flow.exit_received = Some(now);
-                }
+            if zone_name == "EXIT_1"
+                && event.t == "line_cross"
+                && self.current_gate_flow.tid == Some(event.tid)
+            {
+                self.current_gate_flow.exit_ts = Some(event.ts);
+                self.current_gate_flow.exit_received = Some(now);
+            }
         }
 
         self.last_message = Some(now);
@@ -868,7 +907,11 @@ impl DashboardState {
                 self.stitching_stats.lost_count += 1;
                 self.add_issue(
                     IssueSeverity::Error,
-                    format!("TRACK LOST T{} dwell:{:.1}s", event.tid, event.dwell_ms as f64 / 1000.0)
+                    format!(
+                        "TRACK LOST T{} dwell:{:.1}s",
+                        event.tid,
+                        event.dwell_ms as f64 / 1000.0
+                    ),
                 );
 
                 // Remove from zones
@@ -929,7 +972,10 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let Some(tid) = event.tid.or(self.gate_zone.occupant_tid) {
-                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "cmd_sent".to_string() };
+                    self.gate_zone_status = GateZoneStatus::Exiting {
+                        tid,
+                        door_state: "cmd_sent".to_string(),
+                    };
                 }
             }
             "moving" => {
@@ -939,7 +985,10 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let GateZoneStatus::Exiting { tid, .. } = self.gate_zone_status {
-                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "moving".to_string() };
+                    self.gate_zone_status = GateZoneStatus::Exiting {
+                        tid,
+                        door_state: "moving".to_string(),
+                    };
                 }
             }
             "open" => {
@@ -950,13 +999,17 @@ impl DashboardState {
 
                 // Update gate zone status
                 if let GateZoneStatus::Exiting { tid, .. } = self.gate_zone_status {
-                    self.gate_zone_status = GateZoneStatus::Exiting { tid, door_state: "open".to_string() };
+                    self.gate_zone_status = GateZoneStatus::Exiting {
+                        tid,
+                        door_state: "open".to_string(),
+                    };
                 }
             }
             "closed" => {
                 // Complete gate flow
-                if self.current_gate_flow.cmd_sent_received.is_some() ||
-                   self.current_gate_flow.gate_entry_received.is_some() {
+                if self.current_gate_flow.cmd_sent_received.is_some()
+                    || self.current_gate_flow.gate_entry_received.is_some()
+                {
                     self.complete_gate_flow();
                     self.current_gate_flow = GateFlow::default();
                 }
@@ -964,7 +1017,10 @@ impl DashboardState {
                 // If someone still in gate zone, update status
                 if let Some(tid) = self.gate_zone.occupant_tid {
                     self.gate_zone_status = if self.gate_zone.occupant_auth {
-                        GateZoneStatus::Authorized { tid, door_state: "closed".to_string() }
+                        GateZoneStatus::Authorized {
+                            tid,
+                            door_state: "closed".to_string(),
+                        }
                     } else {
                         GateZoneStatus::Blocked { tid }
                     };
@@ -976,7 +1032,7 @@ impl DashboardState {
                 if let Some(tid) = event.tid {
                     self.add_issue(
                         IssueSeverity::Warning,
-                        format!("Unauthorized exit T{}", tid)
+                        format!("Unauthorized exit T{}", tid),
                     );
                 }
             }
@@ -1020,8 +1076,14 @@ impl DashboardState {
                 // Show candidate tracks if available
                 if let Some(ref active) = event.debug_active {
                     if !active.is_empty() {
-                        let candidates: Vec<String> = active.iter()
-                            .filter(|t| t.zone.as_ref().map(|z| z.starts_with("POS")).unwrap_or(false))
+                        let candidates: Vec<String> = active
+                            .iter()
+                            .filter(|t| {
+                                t.zone
+                                    .as_ref()
+                                    .map(|z| z.starts_with("POS"))
+                                    .unwrap_or(false)
+                            })
                             .take(3)
                             .map(|t| format!("T{}@{}", t.tid, t.zone.as_deref().unwrap_or("?")))
                             .collect();
@@ -1038,8 +1100,11 @@ impl DashboardState {
                 if let Some(delta) = event.delta_ms {
                     self.add_issue(
                         IssueSeverity::Warning,
-                        format!("ACC LATE {} - {}ms after gate",
-                            event.pos.as_deref().unwrap_or("-"), delta)
+                        format!(
+                            "ACC LATE {} - {}ms after gate",
+                            event.pos.as_deref().unwrap_or("-"),
+                            delta
+                        ),
                     );
                 }
             }
@@ -1074,7 +1139,10 @@ impl DashboardState {
     }
 
     fn pos_occupancy_count(&self) -> usize {
-        self.pos_zones.values().filter(|z| z.occupant_tid.is_some()).count()
+        self.pos_zones
+            .values()
+            .filter(|z| z.occupant_tid.is_some())
+            .count()
     }
 }
 
@@ -1140,21 +1208,23 @@ fn load_config(path: &str) -> Option<TuiConfig> {
 
     // Extract mqtt section
     let mqtt = value.get("mqtt").map(|m| TuiMqttConfig {
-            host: m.get("host").and_then(|v| v.as_str().map(String::from)),
-            port: m.get("port").and_then(|v| v.as_integer().map(|p| p as u16)),
-            username: m.get("username").and_then(|v| v.as_str().map(String::from)),
-            password: m.get("password").and_then(|v| v.as_str().map(String::from)),
-            _topic: m.get("topic").and_then(|v| v.as_str().map(String::from)),
-        });
+        host: m.get("host").and_then(|v| v.as_str().map(String::from)),
+        port: m.get("port").and_then(|v| v.as_integer().map(|p| p as u16)),
+        username: m.get("username").and_then(|v| v.as_str().map(String::from)),
+        password: m.get("password").and_then(|v| v.as_str().map(String::from)),
+        _topic: m.get("topic").and_then(|v| v.as_str().map(String::from)),
+    });
 
     // Extract gate section (for gate_host used in manual test)
     let gate = value.get("gate").map(|g| TuiGateConfig {
-            host: g.get("host").and_then(|v| v.as_str().map(String::from)),
-            _mode: g.get("mode").and_then(|v| v.as_str().map(String::from)),
-            tcp_addr: g.get("tcp_addr").and_then(|v| v.as_str().map(String::from)),
-            _http_url: g.get("http_url").and_then(|v| v.as_str().map(String::from)),
-            _timeout_ms: g.get("timeout_ms").and_then(|v| v.as_integer().map(|t| t as u64)),
-        });
+        host: g.get("host").and_then(|v| v.as_str().map(String::from)),
+        _mode: g.get("mode").and_then(|v| v.as_str().map(String::from)),
+        tcp_addr: g.get("tcp_addr").and_then(|v| v.as_str().map(String::from)),
+        _http_url: g.get("http_url").and_then(|v| v.as_str().map(String::from)),
+        _timeout_ms: g
+            .get("timeout_ms")
+            .and_then(|v| v.as_integer().map(|t| t as u64)),
+    });
 
     Some(TuiConfig { mqtt, gate })
 }
@@ -1210,7 +1280,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mqtt = config.mqtt.unwrap_or_default();
             // For gate host, use tcp_addr (e.g., "10.120.48.9:8000") -> extract host part
             let gate_host = config.gate.and_then(|g| {
-                g.tcp_addr.map(|addr| addr.split(':').next().unwrap_or(&addr).to_string())
+                g.tcp_addr
+                    .map(|addr| addr.split(':').next().unwrap_or(&addr).to_string())
             });
             (
                 mqtt.host.unwrap_or_else(|| "localhost".to_string()),
@@ -1222,7 +1293,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             // Positional args mode (backward compatible)
             (
-                args.get(1).cloned().unwrap_or_else(|| "localhost".to_string()),
+                args.get(1)
+                    .cloned()
+                    .unwrap_or_else(|| "localhost".to_string()),
                 args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1883),
                 args.get(3).cloned(),
                 args.get(4).cloned(),
@@ -1266,7 +1339,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 // MQTT Subscriber
 // ============================================================================
 
-async fn run_mqtt_subscriber(host: &str, port: u16, username: Option<String>, password: Option<String>, state: SharedState) {
+async fn run_mqtt_subscriber(
+    host: &str,
+    port: u16,
+    username: Option<String>,
+    password: Option<String>,
+    state: SharedState,
+) {
     let client_id = format!("gateway-tui-{}", std::process::id());
     let mut mqttoptions = MqttOptions::new(client_id, host, port);
     mqttoptions.set_keep_alive(Duration::from_secs(30));
@@ -1375,7 +1454,8 @@ async fn run_ui(
                                 drop(s);
                                 // Send HTTP request to gate controller
                                 tokio::spawn(async move {
-                                    let _ = reqwest::get(format!("http://{}:8080/open", host)).await;
+                                    let _ =
+                                        reqwest::get(format!("http://{}:8080/open", host)).await;
                                 });
                             }
                         }
@@ -1410,11 +1490,11 @@ fn draw_activity_view(f: &mut Frame, state: &DashboardState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),   // Header
-            Constraint::Length(4),   // Zone status
-            Constraint::Length(3),   // Live counters
-            Constraint::Min(10),     // Event feeds
-            Constraint::Length(6),   // Issues panel
+            Constraint::Length(3), // Header
+            Constraint::Length(4), // Zone status
+            Constraint::Length(3), // Live counters
+            Constraint::Min(10),   // Event feeds
+            Constraint::Length(6), // Issues panel
         ])
         .split(f.area());
 
@@ -1433,11 +1513,11 @@ fn draw_performance_view(f: &mut Frame, state: &DashboardState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),   // Header
-            Constraint::Length(10),  // Gate timing
-            Constraint::Length(8),   // Track processing + ACC
-            Constraint::Length(6),   // Stitching + Throughput
-            Constraint::Length(4),   // Zone status
+            Constraint::Length(3),  // Header
+            Constraint::Length(10), // Gate timing
+            Constraint::Length(8),  // Track processing + ACC
+            Constraint::Length(6),  // Stitching + Throughput
+            Constraint::Length(4),  // Zone status
         ])
         .split(f.area());
 
@@ -1453,10 +1533,19 @@ fn draw_performance_view(f: &mut Frame, state: &DashboardState) {
 // ============================================================================
 
 fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
-    let status_color = if state.connected { Color::Green } else { Color::Red };
-    let status_text = if state.connected { "CONNECTED" } else { "DISCONNECTED" };
+    let status_color = if state.connected {
+        Color::Green
+    } else {
+        Color::Red
+    };
+    let status_text = if state.connected {
+        "CONNECTED"
+    } else {
+        "DISCONNECTED"
+    };
 
-    let last_msg = state.last_message
+    let last_msg = state
+        .last_message
         .map(|t| format!("{}s ago", t.elapsed().as_secs()))
         .unwrap_or_else(|| "never".to_string());
 
@@ -1466,9 +1555,19 @@ fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
     };
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled("Gateway TUI ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Gateway TUI ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("| "),
-        Span::styled(format!("[{}]", view_text), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("[{}]", view_text),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" | "),
         Span::styled(status_text, Style::default().fg(status_color)),
         Span::raw(" | Last: "),
@@ -1490,7 +1589,12 @@ fn draw_header(f: &mut Frame, area: Rect, state: &DashboardState) {
 
 fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
     // Build zone status row: POS1-5 + GATE
-    let mut cells: Vec<Span> = vec![Span::styled("ZONES ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))];
+    let mut cells: Vec<Span> = vec![Span::styled(
+        "ZONES ",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )];
 
     // Sort POS zones
     let mut zones: Vec<_> = state.pos_zones.values().collect();
@@ -1499,22 +1603,51 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
     for zone in zones {
         let (icon, color, detail) = match zone.status() {
             ZoneStatus::Empty => ("○", Color::DarkGray, zone.name.replace("POS_", "P")),
-            ZoneStatus::Pending { tid, dwell_ms } => {
-                ("?", Color::Yellow, format!("{}:T{} {:.0}s", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
-            }
-            ZoneStatus::Authorized { tid, .. } => {
-                ("✓", Color::Green, format!("{}:T{}", zone.name.replace("POS_", "P"), tid))
-            }
-            ZoneStatus::Waiting { tid, dwell_ms } => {
-                ("⚠", Color::Yellow, format!("{}:T{} {:.0}s!", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
-            }
-            ZoneStatus::Overdue { tid, dwell_ms } => {
-                ("✗", Color::Red, format!("{}:T{} {:.0}s!!", zone.name.replace("POS_", "P"), tid, dwell_ms as f64 / 1000.0))
-            }
+            ZoneStatus::Pending { tid, dwell_ms } => (
+                "?",
+                Color::Yellow,
+                format!(
+                    "{}:T{} {:.0}s",
+                    zone.name.replace("POS_", "P"),
+                    tid,
+                    dwell_ms as f64 / 1000.0
+                ),
+            ),
+            ZoneStatus::Authorized { tid, .. } => (
+                "✓",
+                Color::Green,
+                format!("{}:T{}", zone.name.replace("POS_", "P"), tid),
+            ),
+            ZoneStatus::Waiting { tid, dwell_ms } => (
+                "⚠",
+                Color::Yellow,
+                format!(
+                    "{}:T{} {:.0}s!",
+                    zone.name.replace("POS_", "P"),
+                    tid,
+                    dwell_ms as f64 / 1000.0
+                ),
+            ),
+            ZoneStatus::Overdue { tid, dwell_ms } => (
+                "✗",
+                Color::Red,
+                format!(
+                    "{}:T{} {:.0}s!!",
+                    zone.name.replace("POS_", "P"),
+                    tid,
+                    dwell_ms as f64 / 1000.0
+                ),
+            ),
         };
 
-        cells.push(Span::styled(format!("{} ", icon), Style::default().fg(color)));
-        cells.push(Span::styled(format!("{} ", detail), Style::default().fg(color)));
+        cells.push(Span::styled(
+            format!("{} ", icon),
+            Style::default().fg(color),
+        ));
+        cells.push(Span::styled(
+            format!("{} ", detail),
+            Style::default().fg(color),
+        ));
         cells.push(Span::raw(" "));
     }
 
@@ -1524,38 +1657,60 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
         GateZoneStatus::Authorized { tid, door_state } => {
             ("✓", Color::Green, format!("GATE:T{} {}", tid, door_state))
         }
-        GateZoneStatus::Blocked { tid } => {
-            ("⚠", Color::Red, format!("T{} UNAUTH", tid))
-        }
+        GateZoneStatus::Blocked { tid } => ("⚠", Color::Red, format!("T{} UNAUTH", tid)),
         GateZoneStatus::Exiting { tid, door_state } => {
             ("→", Color::Cyan, format!("GATE:T{} {}", tid, door_state))
         }
     };
 
-    cells.push(Span::styled(format!("{} ", gate_icon), Style::default().fg(gate_color)));
+    cells.push(Span::styled(
+        format!("{} ", gate_icon),
+        Style::default().fg(gate_color),
+    ));
     cells.push(Span::styled(gate_detail, Style::default().fg(gate_color)));
 
-    let zones_para = Paragraph::new(Line::from(cells))
-        .block(Block::default()
+    let zones_para = Paragraph::new(Line::from(cells)).block(
+        Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)));
+            .border_style(Style::default().fg(Color::Blue)),
+    );
 
     f.render_widget(zones_para, area);
 }
 
 fn draw_live_counters(f: &mut Frame, area: Rect, state: &DashboardState) {
     let counters = Paragraph::new(Line::from(vec![
-        Span::styled("LIVE ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "LIVE ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("│ Entries: "),
-        Span::styled(format!("{}", state.counters.entries), Style::default().fg(Color::Green)),
+        Span::styled(
+            format!("{}", state.counters.entries),
+            Style::default().fg(Color::Green),
+        ),
         Span::raw(" │ Exits: "),
-        Span::styled(format!("{}", state.counters.exits), Style::default().fg(Color::Yellow)),
+        Span::styled(
+            format!("{}", state.counters.exits),
+            Style::default().fg(Color::Yellow),
+        ),
         Span::raw(" │ Gate Opens: "),
-        Span::styled(format!("{}", state.counters.gate_opens), Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!("{}", state.counters.gate_opens),
+            Style::default().fg(Color::Cyan),
+        ),
         Span::raw(" │ POS Occ: "),
-        Span::styled(format!("{}", state.pos_occupancy_count()), Style::default().fg(Color::Magenta)),
+        Span::styled(
+            format!("{}", state.pos_occupancy_count()),
+            Style::default().fg(Color::Magenta),
+        ),
         Span::raw(" │ Events/s: "),
-        Span::styled(format!("{:.1}", state.throughput.current()), Style::default().fg(Color::Blue)),
+        Span::styled(
+            format!("{:.1}", state.throughput.current()),
+            Style::default().fg(Color::Blue),
+        ),
     ]))
     .block(Block::default().borders(Borders::ALL));
 
@@ -1566,10 +1721,10 @@ fn draw_event_feeds(f: &mut Frame, area: Rect, state: &DashboardState) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(25),  // Track
-            Constraint::Percentage(25),  // Gate
-            Constraint::Percentage(25),  // ACC
-            Constraint::Percentage(25),  // Stitch/Lost
+            Constraint::Percentage(25), // Track
+            Constraint::Percentage(25), // Gate
+            Constraint::Percentage(25), // ACC
+            Constraint::Percentage(25), // Stitch/Lost
         ])
         .split(area);
 
@@ -1580,31 +1735,43 @@ fn draw_event_feeds(f: &mut Frame, area: Rect, state: &DashboardState) {
 }
 
 fn draw_track_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
-    let items: Vec<ListItem> = state.track_events.iter().map(|e| {
-        let (icon, color) = match e.t.as_str() {
-            "create" => ("+", Color::Green),
-            "stitch" => ("↔", Color::Cyan),
-            "pending" => ("?", Color::Yellow),
-            "reentry" => ("↩", Color::Magenta),
-            "lost" => ("✗", Color::Red),
-            _ => ("·", Color::White),
-        };
+    let items: Vec<ListItem> = state
+        .track_events
+        .iter()
+        .map(|e| {
+            let (icon, color) = match e.t.as_str() {
+                "create" => ("+", Color::Green),
+                "stitch" => ("↔", Color::Cyan),
+                "pending" => ("?", Color::Yellow),
+                "reentry" => ("↩", Color::Magenta),
+                "lost" => ("✗", Color::Red),
+                _ => ("·", Color::White),
+            };
 
-        let auth_icon = if e.auth { "A" } else { " " };
+            let auth_icon = if e.auth { "A" } else { " " };
 
-        ListItem::new(Line::from(vec![
-            Span::styled(icon, Style::default().fg(color)),
-            Span::raw(format!(" T{:<4} ", e.tid)),
-            Span::styled(auth_icon, Style::default().fg(if e.auth { Color::Green } else { Color::DarkGray })),
-            Span::raw(format!(" {:.1}s", e.dwell_ms as f64 / 1000.0)),
-        ]))
-    }).collect();
+            ListItem::new(Line::from(vec![
+                Span::styled(icon, Style::default().fg(color)),
+                Span::raw(format!(" T{:<4} ", e.tid)),
+                Span::styled(
+                    auth_icon,
+                    Style::default().fg(if e.auth {
+                        Color::Green
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+                Span::raw(format!(" {:.1}s", e.dwell_ms as f64 / 1000.0)),
+            ]))
+        })
+        .collect();
 
-    let list = List::new(items)
-        .block(Block::default()
+    let list = List::new(items).block(
+        Block::default()
             .title(" Track Feed ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)));
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
 
     f.render_widget(list, area);
 }
@@ -1614,8 +1781,8 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),  // Timing
-            Constraint::Min(0),     // Events
+            Constraint::Length(5), // Timing
+            Constraint::Min(0),    // Events
         ])
         .split(area);
 
@@ -1623,24 +1790,35 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
     let flow = if state.current_gate_flow.cmd_sent_received.is_some() {
         &state.current_gate_flow
     } else if let Some(ref last) = state.last_gate_flow {
-        if last.cmd_sent_received.is_some() { last } else { &state.current_gate_flow }
+        if last.cmd_sent_received.is_some() {
+            last
+        } else {
+            &state.current_gate_flow
+        }
     } else {
         &state.current_gate_flow
     };
 
-    let tid_str = flow.tid.map(|t| format!("T{}", t)).unwrap_or("-".to_string());
+    let tid_str = flow
+        .tid
+        .map(|t| format!("T{}", t))
+        .unwrap_or("-".to_string());
 
     // Build timing breakdown lines
-    let entry_to_cmd = flow.entry_to_cmd_ms()
+    let entry_to_cmd = flow
+        .entry_to_cmd_ms()
         .map(|ms| format!("{}ms", ms))
         .unwrap_or("-".to_string());
-    let cmd_to_moving = flow.cmd_to_moving_ms()
+    let cmd_to_moving = flow
+        .cmd_to_moving_ms()
         .map(|ms| format!("{}ms", ms))
         .unwrap_or("-".to_string());
-    let moving_to_open = flow.moving_to_open_ms()
+    let moving_to_open = flow
+        .moving_to_open_ms()
         .map(|ms| format!("{}ms", ms))
         .unwrap_or("-".to_string());
-    let total = flow.total_entry_to_open_ms()
+    let total = flow
+        .total_entry_to_open_ms()
         .map(|ms| format!("{}ms", ms))
         .unwrap_or("-".to_string());
 
@@ -1662,39 +1840,56 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
             Span::styled(moving_to_open, Style::default().fg(Color::Green)),
         ]),
         Line::from(vec![
-            Span::styled("TOTAL: ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-            Span::styled(total, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "TOTAL: ",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                total,
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
     ])
-    .block(Block::default()
-        .title(format!(" Gate: {} ", state.last_gate_state.to_uppercase()))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta)));
+    .block(
+        Block::default()
+            .title(format!(" Gate: {} ", state.last_gate_state.to_uppercase()))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
 
     f.render_widget(timing, chunks[0]);
 
     // Gate events
-    let events: Vec<ListItem> = state.gate_events.iter().map(|e| {
-        let color = match e.state.as_str() {
-            "open" => Color::Green,
-            "closed" => Color::DarkGray,
-            "moving" => Color::Yellow,
-            "cmd_sent" => Color::Cyan,
-            "blocked" => Color::Red,
-            _ => Color::White,
-        };
-        let tid = e.tid.map(|t| format!("T{}", t)).unwrap_or("-".to_string());
+    let events: Vec<ListItem> = state
+        .gate_events
+        .iter()
+        .map(|e| {
+            let color = match e.state.as_str() {
+                "open" => Color::Green,
+                "closed" => Color::DarkGray,
+                "moving" => Color::Yellow,
+                "cmd_sent" => Color::Cyan,
+                "blocked" => Color::Red,
+                _ => Color::White,
+            };
+            let tid = e.tid.map(|t| format!("T{}", t)).unwrap_or("-".to_string());
 
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("{:<8}", e.state), Style::default().fg(color)),
-            Span::raw(tid),
-        ]))
-    }).collect();
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:<8}", e.state), Style::default().fg(color)),
+                Span::raw(tid),
+            ]))
+        })
+        .collect();
 
-    let list = List::new(events)
-        .block(Block::default()
+    let list = List::new(events).block(
+        Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Magenta)));
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
 
     f.render_widget(list, chunks[1]);
 }
@@ -1704,116 +1899,145 @@ fn draw_acc_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Stats
-            Constraint::Min(0),     // Events
+            Constraint::Length(3), // Stats
+            Constraint::Min(0),    // Events
         ])
         .split(area);
 
     // ACC stats
     let stats = Paragraph::new(Line::from(vec![
         Span::styled("✓", Style::default().fg(Color::Green)),
-        Span::styled(format!("{} ", state.acc_stats.matched_count), Style::default().fg(Color::Green)),
+        Span::styled(
+            format!("{} ", state.acc_stats.matched_count),
+            Style::default().fg(Color::Green),
+        ),
         Span::styled("✗", Style::default().fg(Color::Red)),
-        Span::styled(format!("{} ", state.acc_stats.orphaned_count), Style::default().fg(Color::Red)),
+        Span::styled(
+            format!("{} ", state.acc_stats.orphaned_count),
+            Style::default().fg(Color::Red),
+        ),
         Span::raw(format!("({:.0}%)", state.acc_stats.match_rate())),
     ]))
-    .block(Block::default()
-        .title(" ACC ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow)));
+    .block(
+        Block::default()
+            .title(" ACC ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
 
     f.render_widget(stats, chunks[0]);
 
     // ACC events
-    let events: Vec<ListItem> = state.acc_events.iter().map(|e| {
-        let (icon, color) = match e.t.as_str() {
-            "matched" => ("✓", Color::Green),
-            "unmatched" => ("✗", Color::Red),
-            "late_after_gate" => ("!", Color::Yellow),
-            "matched_no_journey" => ("?", Color::Magenta),
-            _ => ("·", Color::White),
-        };
+    let events: Vec<ListItem> = state
+        .acc_events
+        .iter()
+        .map(|e| {
+            let (icon, color) = match e.t.as_str() {
+                "matched" => ("✓", Color::Green),
+                "unmatched" => ("✗", Color::Red),
+                "late_after_gate" => ("!", Color::Yellow),
+                "matched_no_journey" => ("?", Color::Magenta),
+                _ => ("·", Color::White),
+            };
 
-        let pos = e.pos.as_deref().unwrap_or("-");
-        let tid = e.tid.map(|t| format!("T{}", t)).unwrap_or("-".to_string());
+            let pos = e.pos.as_deref().unwrap_or("-");
+            let tid = e.tid.map(|t| format!("T{}", t)).unwrap_or("-".to_string());
 
-        ListItem::new(Line::from(vec![
-            Span::styled(icon, Style::default().fg(color)),
-            Span::raw(format!(" {} {}", pos, tid)),
-        ]))
-    }).collect();
+            ListItem::new(Line::from(vec![
+                Span::styled(icon, Style::default().fg(color)),
+                Span::raw(format!(" {} {}", pos, tid)),
+            ]))
+        })
+        .collect();
 
-    let list = List::new(events)
-        .block(Block::default()
+    let list = List::new(events).block(
+        Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow)));
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
 
     f.render_widget(list, chunks[1]);
 }
 
 fn draw_stitch_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
-    let items: Vec<ListItem> = state.stitch_events.iter().map(|e| {
-        let (icon, color) = match e.t.as_str() {
-            "stitch" => ("↔", Color::Cyan),
-            "pending" => ("?", Color::Yellow),
-            "lost" => ("✗", Color::Red),
-            _ => ("·", Color::DarkGray),
-        };
+    let items: Vec<ListItem> = state
+        .stitch_events
+        .iter()
+        .map(|e| {
+            let (icon, color) = match e.t.as_str() {
+                "stitch" => ("↔", Color::Cyan),
+                "pending" => ("?", Color::Yellow),
+                "lost" => ("✗", Color::Red),
+                _ => ("·", Color::DarkGray),
+            };
 
-        let extra = match e.t.as_str() {
-            "stitch" => {
-                let prev = e.prev_tid.map(|p| format!("←T{}", p)).unwrap_or_default();
-                let dist = e.stitch_dist_cm.map(|d| format!(" {}cm", d)).unwrap_or_default();
-                format!("{}{}", prev, dist)
-            }
-            "lost" | "pending" => {
-                format!("{:.1}s", e.dwell_ms as f64 / 1000.0)
-            }
-            _ => String::new(),
-        };
+            let extra = match e.t.as_str() {
+                "stitch" => {
+                    let prev = e.prev_tid.map(|p| format!("←T{}", p)).unwrap_or_default();
+                    let dist = e
+                        .stitch_dist_cm
+                        .map(|d| format!(" {}cm", d))
+                        .unwrap_or_default();
+                    format!("{}{}", prev, dist)
+                }
+                "lost" | "pending" => {
+                    format!("{:.1}s", e.dwell_ms as f64 / 1000.0)
+                }
+                _ => String::new(),
+            };
 
-        ListItem::new(Line::from(vec![
-            Span::styled(icon, Style::default().fg(color)),
-            Span::raw(format!(" T{:<4} ", e.tid)),
-            Span::styled(extra, Style::default().fg(Color::DarkGray)),
-        ]))
-    }).collect();
+            ListItem::new(Line::from(vec![
+                Span::styled(icon, Style::default().fg(color)),
+                Span::raw(format!(" T{:<4} ", e.tid)),
+                Span::styled(extra, Style::default().fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
 
-    let list = List::new(items)
-        .block(Block::default()
+    let list = List::new(items).block(
+        Block::default()
             .title(" Stitch/Lost ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Magenta)));
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
 
     f.render_widget(list, area);
 }
 
 fn draw_issues_panel(f: &mut Frame, area: Rect, state: &DashboardState) {
-    let items: Vec<ListItem> = state.issues.iter().map(|issue| {
-        let (icon, color) = match issue.severity {
-            IssueSeverity::Warning => ("⚠", Color::Yellow),
-            IssueSeverity::Error => ("✗", Color::Red),
-        };
+    let items: Vec<ListItem> = state
+        .issues
+        .iter()
+        .map(|issue| {
+            let (icon, color) = match issue.severity {
+                IssueSeverity::Warning => ("⚠", Color::Yellow),
+                IssueSeverity::Error => ("✗", Color::Red),
+            };
 
-        let age = issue.timestamp.elapsed().as_secs();
-        let age_str = if age < 60 {
-            format!("{}s", age)
-        } else {
-            format!("{}m", age / 60)
-        };
+            let age = issue.timestamp.elapsed().as_secs();
+            let age_str = if age < 60 {
+                format!("{}s", age)
+            } else {
+                format!("{}m", age / 60)
+            };
 
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("{} ", icon), Style::default().fg(color)),
-            Span::styled(format!("{:>4} ", age_str), Style::default().fg(Color::DarkGray)),
-            Span::styled(&issue.message, Style::default().fg(color)),
-        ]))
-    }).collect();
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{} ", icon), Style::default().fg(color)),
+                Span::styled(
+                    format!("{:>4} ", age_str),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(&issue.message, Style::default().fg(color)),
+            ]))
+        })
+        .collect();
 
-    let list = List::new(items)
-        .block(Block::default()
+    let list = List::new(items).block(
+        Block::default()
             .title(" Issues ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Red)));
+            .border_style(Style::default().fg(Color::Red)),
+    );
 
     f.render_widget(list, area);
 }
@@ -1833,25 +2057,61 @@ fn draw_gate_timing_panel(f: &mut Frame, area: Rect, state: &DashboardState) {
         ])
         .split(area);
 
-    draw_latency_histogram(f, chunks[0], "Entry→Cmd", &state.gate_timing.entry_to_cmd, "ms", Color::Cyan);
-    draw_latency_histogram(f, chunks[1], "Cmd→Moving", &state.gate_timing.cmd_to_moving, "ms", Color::Yellow);
-    draw_latency_histogram(f, chunks[2], "Moving→Open", &state.gate_timing.moving_to_open, "ms", Color::Green);
-    draw_latency_histogram(f, chunks[3], "TOTAL", &state.gate_timing.total_entry_to_open, "ms", Color::Magenta);
+    draw_latency_histogram(
+        f,
+        chunks[0],
+        "Entry→Cmd",
+        &state.gate_timing.entry_to_cmd,
+        "ms",
+        Color::Cyan,
+    );
+    draw_latency_histogram(
+        f,
+        chunks[1],
+        "Cmd→Moving",
+        &state.gate_timing.cmd_to_moving,
+        "ms",
+        Color::Yellow,
+    );
+    draw_latency_histogram(
+        f,
+        chunks[2],
+        "Moving→Open",
+        &state.gate_timing.moving_to_open,
+        "ms",
+        Color::Green,
+    );
+    draw_latency_histogram(
+        f,
+        chunks[3],
+        "TOTAL",
+        &state.gate_timing.total_entry_to_open,
+        "ms",
+        Color::Magenta,
+    );
 }
 
-fn draw_latency_histogram(f: &mut Frame, area: Rect, title: &str, stats: &LatencyStats, unit: &str, color: Color) {
+fn draw_latency_histogram(
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    stats: &LatencyStats,
+    unit: &str,
+    color: Color,
+) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(4),      // Histogram
-            Constraint::Length(4),   // Stats
+            Constraint::Min(4),    // Histogram
+            Constraint::Length(4), // Stats
         ])
         .split(area);
 
     // Draw histogram
     let histogram = stats.histogram(8);
 
-    let data: Vec<(&str, u64)> = histogram.iter()
+    let data: Vec<(&str, u64)> = histogram
+        .iter()
         .enumerate()
         .map(|(i, &v)| {
             // We need static strings for the labels
@@ -1861,10 +2121,12 @@ fn draw_latency_histogram(f: &mut Frame, area: Rect, title: &str, stats: &Latenc
         .collect();
 
     let bar_chart = BarChart::default()
-        .block(Block::default()
-            .title(format!(" {} ", title))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(color)))
+        .block(
+            Block::default()
+                .title(format!(" {} ", title))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(color)),
+        )
         .data(&data)
         .bar_width(2)
         .bar_gap(1)
@@ -1874,17 +2136,33 @@ fn draw_latency_histogram(f: &mut Frame, area: Rect, title: &str, stats: &Latenc
     f.render_widget(bar_chart, chunks[0]);
 
     // Draw stats
-    let min_str = stats.min.map(|v| format!("{}", v)).unwrap_or("-".to_string());
-    let max_str = stats.max.map(|v| format!("{}", v)).unwrap_or("-".to_string());
-    let avg_str = stats.avg().map(|v| format!("{:.0}", v)).unwrap_or("-".to_string());
-    let p95_str = stats.p95().map(|v| format!("{}", v)).unwrap_or("-".to_string());
+    let min_str = stats
+        .min
+        .map(|v| format!("{}", v))
+        .unwrap_or("-".to_string());
+    let max_str = stats
+        .max
+        .map(|v| format!("{}", v))
+        .unwrap_or("-".to_string());
+    let avg_str = stats
+        .avg()
+        .map(|v| format!("{:.0}", v))
+        .unwrap_or("-".to_string());
+    let p95_str = stats
+        .p95()
+        .map(|v| format!("{}", v))
+        .unwrap_or("-".to_string());
 
     let stats_text = Paragraph::new(vec![
         Line::from(format!("min:{} max:{}", min_str, max_str)),
         Line::from(format!("avg:{} p95:{} {}", avg_str, p95_str, unit)),
         Line::from(format!("n={}", stats.count())),
     ])
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
 
     f.render_widget(stats_text, chunks[1]);
 }
@@ -1893,37 +2171,61 @@ fn draw_processing_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50),  // Track processing
-            Constraint::Percentage(50),  // ACC correlation
+            Constraint::Percentage(50), // Track processing
+            Constraint::Percentage(50), // ACC correlation
         ])
         .split(area);
 
     // Track processing panel
     let track_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(chunks[0]);
 
-    draw_latency_histogram(f, track_chunks[0], "Network", &state.track_processing.network_latency, "ms", Color::Blue);
-    draw_latency_histogram(f, track_chunks[1], "Process", &state.track_processing.processing_latency, "ms", Color::Cyan);
+    draw_latency_histogram(
+        f,
+        track_chunks[0],
+        "Network",
+        &state.track_processing.network_latency,
+        "ms",
+        Color::Blue,
+    );
+    draw_latency_histogram(
+        f,
+        track_chunks[1],
+        "Process",
+        &state.track_processing.processing_latency,
+        "ms",
+        Color::Cyan,
+    );
 
     // ACC correlation panel
     let acc_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(60),  // Histogram
-            Constraint::Percentage(40),  // Stats box
+            Constraint::Percentage(60), // Histogram
+            Constraint::Percentage(40), // Stats box
         ])
         .split(chunks[1]);
 
-    draw_latency_histogram(f, acc_chunks[0], "ACC Match", &state.acc_stats.match_latency, "ms", Color::Yellow);
+    draw_latency_histogram(
+        f,
+        acc_chunks[0],
+        "ACC Match",
+        &state.acc_stats.match_latency,
+        "ms",
+        Color::Yellow,
+    );
 
     // ACC stats box
     let match_rate = state.acc_stats.match_rate();
-    let rate_color = if match_rate > 90.0 { Color::Green } else if match_rate > 70.0 { Color::Yellow } else { Color::Red };
+    let rate_color = if match_rate > 90.0 {
+        Color::Green
+    } else if match_rate > 70.0 {
+        Color::Yellow
+    } else {
+        Color::Red
+    };
 
     let acc_stats = Paragraph::new(vec![
         Line::from(vec![
@@ -1940,13 +2242,18 @@ fn draw_processing_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
         ]),
         Line::from(vec![
             Span::raw("Rate: "),
-            Span::styled(format!("{:.1}%", match_rate), Style::default().fg(rate_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:.1}%", match_rate),
+                Style::default().fg(rate_color).add_modifier(Modifier::BOLD),
+            ),
         ]),
     ])
-    .block(Block::default()
-        .title(" ACC Status ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow)));
+    .block(
+        Block::default()
+            .title(" ACC Status ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
 
     f.render_widget(acc_stats, acc_chunks[1]);
 }
@@ -1955,19 +2262,31 @@ fn draw_bottom_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(40),  // Stitching
-            Constraint::Percentage(60),  // Throughput
+            Constraint::Percentage(40), // Stitching
+            Constraint::Percentage(60), // Throughput
         ])
         .split(area);
 
     // Stitching panel
     let success_rate = state.stitching_stats.success_rate();
-    let rate_color = if success_rate > 80.0 { Color::Green } else if success_rate > 60.0 { Color::Yellow } else { Color::Red };
+    let rate_color = if success_rate > 80.0 {
+        Color::Green
+    } else if success_rate > 60.0 {
+        Color::Yellow
+    } else {
+        Color::Red
+    };
 
-    let avg_dist = state.stitching_stats.stitch_distance.avg()
+    let avg_dist = state
+        .stitching_stats
+        .stitch_distance
+        .avg()
         .map(|v| format!("{:.1}cm", v))
         .unwrap_or("-".to_string());
-    let avg_time = state.stitching_stats.stitch_time.avg()
+    let avg_time = state
+        .stitching_stats
+        .stitch_time
+        .avg()
         .map(|v| format!("{:.1}s", v / 1000.0))
         .unwrap_or("-".to_string());
 
@@ -1981,14 +2300,19 @@ fn draw_bottom_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
         ]),
         Line::from(vec![
             Span::raw("Success: "),
-            Span::styled(format!("{:.0}%", success_rate), Style::default().fg(rate_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:.0}%", success_rate),
+                Style::default().fg(rate_color).add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(format!("Avg dist: {}  time: {}", avg_dist, avg_time)),
     ])
-    .block(Block::default()
-        .title(" Stitching ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta)));
+    .block(
+        Block::default()
+            .title(" Stitching ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
 
     f.render_widget(stitch_stats, chunks[0]);
 
@@ -2004,10 +2328,12 @@ fn draw_bottom_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
 
     // Manual test results
     let manual_test_str = if state.manual_test.last_total.is_some() {
-        format!("Manual: cmd→mov:{}ms mov→opn:{}ms TOTAL:{}ms",
+        format!(
+            "Manual: cmd→mov:{}ms mov→opn:{}ms TOTAL:{}ms",
             state.manual_test.last_cmd_to_moving.unwrap_or(0),
             state.manual_test.last_moving_to_open.unwrap_or(0),
-            state.manual_test.last_total.unwrap_or(0))
+            state.manual_test.last_total.unwrap_or(0)
+        )
     } else {
         "Manual: press 'o' to test".to_string()
     };
@@ -2015,18 +2341,31 @@ fn draw_bottom_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
     let throughput_stats = Paragraph::new(vec![
         Line::from(vec![
             Span::raw("Events/s: "),
-            Span::styled(format!("{:.1}", state.throughput.current()), Style::default().fg(Color::Cyan)),
-            Span::raw(format!("  avg:{:.1}  peak:{:.1}", state.throughput.avg(), state.throughput.peak_events_per_sec)),
+            Span::styled(
+                format!("{:.1}", state.throughput.current()),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::raw(format!(
+                "  avg:{:.1}  peak:{:.1}",
+                state.throughput.avg(),
+                state.throughput.peak_events_per_sec
+            )),
         ]),
-        Line::from(format!("Session: {}  Total: {} events", session_str, state.throughput.total_events)),
-        Line::from(vec![
-            Span::styled(manual_test_str, Style::default().fg(Color::Yellow)),
-        ]),
+        Line::from(format!(
+            "Session: {}  Total: {} events",
+            session_str, state.throughput.total_events
+        )),
+        Line::from(vec![Span::styled(
+            manual_test_str,
+            Style::default().fg(Color::Yellow),
+        )]),
     ])
-    .block(Block::default()
-        .title(" Throughput ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Blue)));
+    .block(
+        Block::default()
+            .title(" Throughput ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
 
     f.render_widget(throughput_stats, chunks[1]);
 }

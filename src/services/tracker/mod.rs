@@ -10,18 +10,18 @@ mod handlers;
 #[cfg(test)]
 mod tests;
 
+use crate::domain::journey::Journey;
+use crate::domain::types::{EventType, ParsedEvent, Person};
 use crate::infra::config::Config;
-use crate::services::acc_collector::AccCollector;
-use crate::services::door_correlator::DoorCorrelator;
+use crate::infra::metrics::Metrics;
 use crate::io::egress::Egress;
 use crate::io::EgressSender;
+use crate::services::acc_collector::AccCollector;
+use crate::services::door_correlator::DoorCorrelator;
 use crate::services::gate::GateController;
-use crate::domain::journey::Journey;
 use crate::services::journey_manager::JourneyManager;
-use crate::infra::metrics::Metrics;
 use crate::services::reentry_detector::ReentryDetector;
 use crate::services::stitcher::Stitcher;
-use crate::domain::types::{EventType, ParsedEvent, Person};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use std::time::Instant;
