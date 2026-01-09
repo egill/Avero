@@ -8,7 +8,8 @@ defmodule AveroCommandWeb.DashboardLive do
   alias AveroCommand.Journeys
 
   @refresh_interval 1000
-  @pos_zone_ids ["POS_1", "POS_2", "POS_3", "POS_4", "POS_5"]
+  # Zone IDs as used by the gateway (Xovis camera zone IDs)
+  @pos_zone_ids ["1001", "1002", "1003", "1004", "1005"]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -96,7 +97,9 @@ defmodule AveroCommandWeb.DashboardLive do
       if zone.id == zone_id do
         case type do
           :zone_entry -> %{zone | occupied: true, count: zone.count + 1}
-          :zone_exit -> %{zone | occupied: zone.count > 1, count: max(0, zone.count - 1)}
+          :zone_exit ->
+            new_count = max(0, zone.count - 1)
+            %{zone | occupied: new_count > 0, count: new_count, paid: if(new_count == 0, do: false, else: zone.paid)}
           :payment -> %{zone | paid: true}
           _ -> zone
         end
@@ -450,7 +453,11 @@ defmodule AveroCommandWeb.DashboardLive do
   attr :zone, :map, required: true
 
   defp pos_zone(assigns) do
-    zone_num = assigns.zone.id |> String.replace("POS_", "")
+    # Extract zone number: "1001" -> "1", "1002" -> "2", etc.
+    zone_num = case assigns.zone.id do
+      "100" <> n -> n
+      id -> id
+    end
     assigns = assign(assigns, :zone_num, zone_num)
 
     ~H"""

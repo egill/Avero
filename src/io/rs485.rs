@@ -9,12 +9,17 @@
 use crate::domain::types::{DoorStatus, EventType, ParsedEvent, TrackId};
 use crate::infra::config::Config;
 use std::io::ErrorKind;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::time::interval;
 use tokio_serial::SerialPortBuilderExt;
 use tracing::{error, info, warn};
+
+#[inline]
+fn epoch_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
 
 // Protocol constants
 const START_BYTE_COMMAND: u8 = 0x7E;
@@ -146,22 +151,20 @@ impl Rs485Monitor {
     /// Synchronize read buffer to start with START_BYTE_RESPONSE (0x7F).
     /// Discards any bytes before the start byte.
     fn synchronize_buffer(&mut self) {
-        if self.read_buffer.is_empty() || self.read_buffer[0] == START_BYTE_RESPONSE {
+        if self.read_buffer.first() == Some(&START_BYTE_RESPONSE) {
             return;
         }
 
-        // Find the start byte
-        if let Some(start_idx) = self.read_buffer.iter().position(|&b| b == START_BYTE_RESPONSE) {
-            if start_idx > 0 {
+        match self.read_buffer.iter().position(|&b| b == START_BYTE_RESPONSE) {
+            Some(start_idx) => {
                 tracing::debug!(discarded = start_idx, "rs485_sync_discarded_bytes");
                 self.read_buffer.drain(..start_idx);
             }
-        } else {
-            // No start byte found, clear buffer
-            if !self.read_buffer.is_empty() {
+            None if !self.read_buffer.is_empty() => {
                 tracing::debug!(discarded = self.read_buffer.len(), "rs485_sync_no_start_byte");
                 self.read_buffer.clear();
             }
+            None => {}
         }
     }
 
@@ -194,27 +197,15 @@ impl Rs485Monitor {
             match tokio::time::timeout(Duration::from_millis(50), port.read(&mut temp_buf)).await {
                 Ok(Ok(n)) if n > 0 => {
                     self.read_buffer.extend_from_slice(&temp_buf[..n]);
-                    // Re-synchronize after new data
                     self.synchronize_buffer();
-
-                    // Check if we now have enough
-                    if self.read_buffer.len() >= RESPONSE_FRAME_LEN {
-                        break;
-                    }
                 }
-                Ok(Ok(_)) => {
-                    // Zero bytes read, continue
-                }
-                Ok(Err(e)) if e.kind() == ErrorKind::TimedOut => {
-                    // Timeout, continue trying
-                }
+                Ok(Ok(_)) => {}                                     // Zero bytes read
+                Ok(Err(e)) if e.kind() == ErrorKind::TimedOut => {} // Serial timeout
                 Ok(Err(e)) => {
                     warn!(error = %e, "rs485_read_error");
                     return None;
                 }
-                Err(_) => {
-                    // Timeout from tokio::time::timeout, continue
-                }
+                Err(_) => {} // Tokio timeout
             }
         }
 
@@ -248,26 +239,16 @@ impl Rs485Monitor {
             "rs485_monitor_started"
         );
 
-        // Try to open the serial port
-        let port_result = tokio_serial::new(&self.device, self.baud)
+        let mut port = tokio_serial::new(&self.device, self.baud)
             .timeout(Duration::from_millis(100))
-            .open_native_async();
-
-        let mut port = match port_result {
-            Ok(p) => {
-                info!(device = %self.device, "rs485_port_opened");
-                Some(p)
-            }
-            Err(e) => {
-                error!(device = %self.device, error = %e, "rs485_port_open_failed");
-                None
-            }
-        };
+            .open_native_async()
+            .inspect(|_| info!(device = %self.device, "rs485_port_opened"))
+            .inspect_err(|e| error!(device = %self.device, error = %e, "rs485_port_open_failed"))
+            .ok();
 
         let mut poll_timer = interval(self.poll_interval);
 
         loop {
-            // Check for shutdown signal
             tokio::select! {
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
@@ -280,26 +261,22 @@ impl Rs485Monitor {
 
             let poll_start = Instant::now();
 
-            let status = if let Some(ref mut p) = port {
-                // Send query command
-                let cmd = self.build_query_command();
-                if let Err(e) = p.write_all(&cmd).await {
-                    warn!(error = %e, "rs485_write_error");
-                    self.last_status
-                } else {
-                    // Read response using persistent buffer
-                    // This handles chunked responses (e.g., 16 bytes + 2 bytes)
-                    self.read_frame(p).await.unwrap_or(self.last_status)
+            let status = match port.as_mut() {
+                Some(p) => {
+                    let cmd = self.build_query_command();
+                    if let Err(e) = p.write_all(&cmd).await {
+                        warn!(error = %e, "rs485_write_error");
+                        self.last_status
+                    } else {
+                        self.read_frame(p).await.unwrap_or(self.last_status)
+                    }
                 }
-            } else {
-                DoorStatus::Unknown
+                None => DoorStatus::Unknown,
             };
 
             let poll_duration_us = poll_start.elapsed().as_micros() as u64;
 
-            // Check poll timing accuracy
-            // Expected interval includes RS485 round-trip (~20ms at 19200 baud)
-            // Only warn if drift exceeds 50ms (significant scheduling delay)
+            // Warn if poll drift exceeds 50ms (includes ~20ms RS485 round-trip)
             if let Some(last_poll) = self.last_poll_time {
                 let actual_interval = last_poll.elapsed();
                 let expected_with_rtt = self.poll_interval + Duration::from_millis(20);
@@ -315,10 +292,8 @@ impl Rs485Monitor {
                     );
                 }
             }
-
             self.last_poll_time = Some(poll_start);
 
-            // Log status changes and send event
             if status != self.last_status {
                 info!(
                     door = %status.as_str(),
@@ -326,17 +301,13 @@ impl Rs485Monitor {
                     "rs485_status"
                 );
 
-                // Send door state change event
                 if let Some(ref tx) = self.event_tx {
                     let event = ParsedEvent {
                         event_type: EventType::DoorStateChange(status),
-                        track_id: TrackId(0), // Not applicable for door events
+                        track_id: TrackId(0),
                         geometry_id: None,
                         direction: None,
-                        event_time: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64,
+                        event_time: epoch_ms(),
                         received_at: Instant::now(),
                         position: None,
                     };
@@ -347,8 +318,6 @@ impl Rs485Monitor {
 
                 self.last_status = status;
             } else {
-                // Use trace level for routine polling to avoid log spam
-                // State changes are logged at info level above
                 tracing::trace!(
                     door = %status.as_str(),
                     poll_duration_us = %poll_duration_us,

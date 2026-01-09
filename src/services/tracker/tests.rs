@@ -1,24 +1,32 @@
 //! Tests for the Tracker module
 
 use super::*;
+use crate::domain::journey::JourneyOutcome;
 use crate::domain::types::{EventType, GeometryId, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
 use crate::services::gate::GateController;
 use std::collections::HashMap;
+use tokio::time::Duration;
 
-/// Create a test tracker with default configuration
 fn create_test_tracker() -> Tracker {
-    let config = Config::default();
-    let gate = Arc::new(GateController::new(config.clone()));
-    let metrics = Arc::new(Metrics::new());
-    Tracker::new(config, gate, metrics, None)
+    create_test_tracker_with_config(Config::default())
 }
 
 fn create_test_tracker_with_config(config: Config) -> Tracker {
     let gate = Arc::new(GateController::new(config.clone()));
     let metrics = Arc::new(Metrics::new());
     Tracker::new(config, gate, metrics, None)
+}
+
+fn millis(ms: u64) -> Duration {
+    Duration::from_millis(ms)
+}
+
+fn acc_ip_mapping() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    map.insert("127.0.0.1".to_string(), "POS_1".to_string());
+    map
 }
 
 /// Builder for creating test ParsedEvent instances
@@ -62,7 +70,6 @@ impl ParsedEventBuilder {
     }
 }
 
-/// Create a test event with basic fields (legacy helper, delegates to builder)
 fn create_event(event_type: EventType, track_id: i64, geometry_id: Option<i32>) -> ParsedEvent {
     let mut builder = ParsedEventBuilder::new(event_type).with_track_id(track_id);
     if let Some(gid) = geometry_id {
@@ -71,7 +78,6 @@ fn create_event(event_type: EventType, track_id: i64, geometry_id: Option<i32>) 
     builder.build()
 }
 
-/// Create a test event with position data (legacy helper, delegates to builder)
 fn create_event_with_pos(event_type: EventType, track_id: i64, position: [f64; 3]) -> ParsedEvent {
     ParsedEventBuilder::new(event_type).with_track_id(track_id).with_position(position).build()
 }
@@ -109,7 +115,7 @@ async fn test_dwell_accumulation() {
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001))).await;
 
     // Simulate time passing
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(millis(100)).await;
 
     // Exit POS zone
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001))).await;
@@ -124,15 +130,11 @@ async fn test_dwell_accumulation() {
 async fn test_dwell_threshold_without_acc() {
     // Dwell alone no longer grants authorization - ACC match is required
     let config = Config::default().with_min_dwell_ms(50);
-    let gate = Arc::new(GateController::new(config.clone()));
-    let metrics = Arc::new(Metrics::new());
-    let mut tracker = Tracker::new(config, gate, metrics, None);
+    let mut tracker = create_test_tracker_with_config(config);
 
     tracker.process_event(create_event(EventType::TrackCreate, 100, None)).await;
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001))).await;
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
-
+    tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001))).await;
 
     let person = tracker.persons.get(&TrackId(100)).unwrap();
@@ -145,15 +147,13 @@ async fn test_dwell_threshold_without_acc() {
 async fn test_accumulated_dwell_across_zones() {
     // Dwell accumulates across POS zones, but authorization requires ACC match
     let config = Config::default().with_min_dwell_ms(100);
-    let gate = Arc::new(GateController::new(config.clone()));
-    let metrics = Arc::new(Metrics::new());
-    let mut tracker = Tracker::new(config, gate, metrics, None);
+    let mut tracker = create_test_tracker_with_config(config);
 
     tracker.process_event(create_event(EventType::TrackCreate, 100, None)).await;
 
     // First POS zone visit
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001))).await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
+    tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001))).await;
 
     let person = tracker.persons.get(&TrackId(100)).unwrap();
@@ -162,7 +162,7 @@ async fn test_accumulated_dwell_across_zones() {
 
     // Second POS zone visit
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1002))).await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
+    tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1002))).await;
 
     let person = tracker.persons.get(&TrackId(100)).unwrap();
@@ -174,16 +174,13 @@ async fn test_accumulated_dwell_across_zones() {
 #[tokio::test]
 async fn test_journey_complete_on_exit_line() {
     let config = Config::default().with_min_dwell_ms(10);
-    let gate = Arc::new(GateController::new(config.clone()));
-    let metrics = Arc::new(Metrics::new());
-    let mut tracker = Tracker::new(config, gate, metrics, None);
+    let mut tracker = create_test_tracker_with_config(config);
 
     tracker.process_event(create_event(EventType::TrackCreate, 100, None)).await;
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001))).await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    tokio::time::sleep(millis(20)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001))).await;
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1007))).await;
-
     assert_eq!(tracker.active_tracks(), 1);
 
     // Cross EXIT_1 line
@@ -193,6 +190,83 @@ async fn test_journey_complete_on_exit_line() {
 
     // Person should be removed (journey complete)
     assert_eq!(tracker.active_tracks(), 0);
+}
+
+#[tokio::test]
+async fn test_exit_inferred_when_lost_in_exit_corridor() {
+    // When a track crosses approach forward, enters gate zone, then disappears
+    // before crossing the exit line, we infer the exit rather than marking as lost.
+    let config = Config::default().with_min_dwell_ms(10).with_approach_line(1008);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker
+        .process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70]))
+        .await;
+
+    // Enter POS zone for dwell
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001))).await;
+    tokio::time::sleep(millis(20)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001))).await;
+
+    // Manually authorize (simulating ACC match) - authorization comes from ACC, not dwell
+    {
+        let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
+        person.authorized = true;
+    }
+
+    // Cross APPROACH line forward
+    let mut approach_event = create_event(EventType::LineCrossForward, 100, Some(1008));
+    approach_event.direction = Some("forward".to_string());
+    tracker.process_event(approach_event).await;
+
+    // Enter GATE zone
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1007))).await;
+
+    // Exit GATE zone (still in exit corridor, before exit line)
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1007))).await;
+
+    // Track deleted - simulating sensor loss in exit corridor
+    // Person should still be in gate area (last zone is GATE_1)
+    // Set current zone back to gate to simulate being in gate area when deleted
+    tracker.persons.get_mut(&TrackId(100)).unwrap().current_zone = Some(GeometryId(1007));
+
+    tracker
+        .process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]))
+        .await;
+
+    // Track should be gone (pending for stitch)
+    assert_eq!(tracker.active_tracks(), 0);
+
+    // Check journey - should have exit_inferred=true and Completed outcome
+    // Journey is in pending_egress, accessible via get_any
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Completed);
+    assert!(journey.exit_inferred, "Expected exit_inferred to be true");
+    assert!(journey.authorized);
+}
+
+#[tokio::test]
+async fn test_no_exit_inferred_without_approach_cross() {
+    // Exit is NOT inferred if person didn't cross approach line
+    let config = Config::default().with_min_dwell_ms(10).with_approach_line(1008);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker
+        .process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70]))
+        .await;
+
+    // Enter GATE zone directly (no approach cross)
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1007))).await;
+
+    // Track deleted in gate area
+    tracker
+        .process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]))
+        .await;
+
+    // Should be marked as Lost (no approach cross = uncertain exit)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Lost);
+    assert!(!journey.exit_inferred);
 }
 
 #[tokio::test]
@@ -252,7 +326,7 @@ async fn test_stitch_fails_too_late() {
     assert_eq!(tracker.active_tracks(), 0);
 
     // Wait beyond stitch window (4.5s)
-    tokio::time::sleep(tokio::time::Duration::from_millis(4600)).await;
+    tokio::time::sleep(millis(4600)).await;
 
     // New track nearby - should NOT stitch (too late)
     tracker
@@ -354,16 +428,13 @@ async fn test_absolutely_no_stitch() {
 
 #[tokio::test]
 async fn test_gate_opens_when_acc_after_gate_entry() {
-    let mut ip_to_pos = HashMap::new();
-    ip_to_pos.insert("127.0.0.1".to_string(), "POS_1".to_string());
-    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(ip_to_pos);
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
     let mut tracker = create_test_tracker_with_config(config);
 
     tracker.process_event(create_event(EventType::TrackCreate, 100, None)).await;
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001))).await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
+    tokio::time::sleep(millis(80)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001))).await;
-
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1007))).await;
 
     tracker
@@ -377,16 +448,14 @@ async fn test_gate_opens_when_acc_after_gate_entry() {
 
 #[tokio::test]
 async fn test_acc_authorization_survives_pending_and_stitch() {
-    let mut ip_to_pos = HashMap::new();
-    ip_to_pos.insert("127.0.0.1".to_string(), "POS_1".to_string());
-    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(ip_to_pos);
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
     let mut tracker = create_test_tracker_with_config(config);
 
     tracker
         .process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70]))
         .await;
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001))).await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
+    tokio::time::sleep(millis(80)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001))).await;
 
     tracker
@@ -400,7 +469,6 @@ async fn test_acc_authorization_survives_pending_and_stitch() {
     tracker
         .process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71]))
         .await;
-
     tracker.process_event(create_event(EventType::ZoneEntry, 200, Some(1007))).await;
 
     let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());

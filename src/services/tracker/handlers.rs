@@ -828,10 +828,7 @@ impl Tracker {
                     && e.extra.as_ref().is_some_and(|x| x.contains("dir=forward"))
             });
 
-            let has_exit_cross = journey
-                .events
-                .iter()
-                .any(|e| e.t == JourneyEventType::ExitCross);
+            let has_exit_cross = journey.events.iter().any(|e| e.t == JourneyEventType::ExitCross);
 
             let in_gate_area = last_zone.to_uppercase().contains("GATE");
 

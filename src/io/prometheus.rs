@@ -68,14 +68,8 @@ fn format_prometheus_metrics(
     // Sum and count (approximate sum from avg * count)
     let count = summary.lat_buckets.iter().sum::<u64>();
     let sum = summary.avg_process_latency_us * count;
-    output.push_str(&format!(
-        "gateway_event_latency_us_sum{{site=\"{}\"}} {}\n",
-        site_id, sum
-    ));
-    output.push_str(&format!(
-        "gateway_event_latency_us_count{{site=\"{}\"}} {}\n",
-        site_id, count
-    ));
+    output.push_str(&format!("gateway_event_latency_us_sum{{site=\"{}\"}} {}\n", site_id, sum));
+    output.push_str(&format!("gateway_event_latency_us_count{{site=\"{}\"}} {}\n", site_id, count));
 
     // Percentiles as gauges (easier to graph)
     output.push_str("# HELP gateway_event_latency_p50_us 50th percentile event latency\n");
@@ -127,10 +121,7 @@ fn format_prometheus_metrics(
 
     let gate_count = summary.gate_lat_buckets.iter().sum::<u64>();
     let gate_sum = summary.gate_lat_avg_us * gate_count;
-    output.push_str(&format!(
-        "gateway_gate_latency_us_sum{{site=\"{}\"}} {}\n",
-        site_id, gate_sum
-    ));
+    output.push_str(&format!("gateway_gate_latency_us_sum{{site=\"{}\"}} {}\n", site_id, gate_sum));
     output.push_str(&format!(
         "gateway_gate_latency_us_count{{site=\"{}\"}} {}\n",
         site_id, gate_count
@@ -168,10 +159,8 @@ fn format_prometheus_metrics(
     // Gate state (0=closed, 1=moving, 2=open)
     output.push_str("# HELP gateway_gate_state Current gate state (0=closed, 1=moving, 2=open)\n");
     output.push_str("# TYPE gateway_gate_state gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_state{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_state
-    ));
+    output
+        .push_str(&format!("gateway_gate_state{{site=\"{}\"}} {}\n", site_id, summary.gate_state));
 
     // Exits counter
     output.push_str("# HELP gateway_exits_total Total exits through gate\n");

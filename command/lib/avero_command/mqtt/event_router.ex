@@ -232,6 +232,10 @@ defmodule AveroCommand.MQTT.EventRouter do
   defp normalize_for_scenarios("events", event, data) do
     case data["t"] do
       "zone_entry" ->
+        # Broadcast zone event for dashboard POS zones
+        zone_id = to_string(data["z"])
+        Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gateway:events", {:zone_event, %{zone_id: zone_id, event_type: :zone_entry}})
+
         %{event |
           event_type: "sensors",
           data: Map.merge(event.data, %{
@@ -242,6 +246,10 @@ defmodule AveroCommand.MQTT.EventRouter do
         }
 
       "zone_exit" ->
+        # Broadcast zone event for dashboard POS zones
+        zone_id = to_string(data["z"])
+        Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gateway:events", {:zone_event, %{zone_id: zone_id, event_type: :zone_exit}})
+
         %{event |
           event_type: "sensors",
           data: Map.merge(event.data, %{
@@ -287,6 +295,13 @@ defmodule AveroCommand.MQTT.EventRouter do
   defp normalize_for_scenarios("acc", event, data) do
     case data["t"] do
       "matched" ->
+        # Broadcast payment event for dashboard POS zones
+        pos_zone = data["pos"]
+        if pos_zone do
+          zone_id = to_string(pos_zone)
+          Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gateway:events", {:zone_event, %{zone_id: zone_id, event_type: :payment}})
+        end
+
         %{event |
           event_type: "people",
           data: Map.merge(event.data, %{
