@@ -20,6 +20,8 @@ use tracing::{debug, error, info, warn};
 pub struct MqttPublisher {
     client: AsyncClient,
     rx: mpsc::Receiver<EgressMessage>,
+    host: String,
+    port: u16,
     journeys_topic: String,
     events_topic: String,
     metrics_topic: String,
@@ -31,10 +33,12 @@ pub struct MqttPublisher {
 impl MqttPublisher {
     /// Create a new MQTT publisher
     ///
-    /// Connects to the broker at the configured MQTT host/port.
+    /// Connects to the broker at the configured MQTT egress host/port.
+    /// Falls back to main MQTT host/port if egress-specific settings not configured.
     pub fn new(config: &Config, rx: mpsc::Receiver<EgressMessage>) -> Self {
         let client_id = format!("gateway-egress-{}", std::process::id());
-        let mut mqttoptions = MqttOptions::new(client_id, config.mqtt_host(), config.mqtt_port());
+        let mut mqttoptions =
+            MqttOptions::new(client_id, config.mqtt_egress_host(), config.mqtt_egress_port());
         mqttoptions.set_keep_alive(Duration::from_secs(30));
         mqttoptions.set_clean_session(true);
 
@@ -69,6 +73,8 @@ impl MqttPublisher {
         Self {
             client,
             rx,
+            host: config.mqtt_egress_host().to_string(),
+            port: config.mqtt_egress_port(),
             journeys_topic: config.mqtt_egress_journeys_topic().to_string(),
             events_topic: config.mqtt_egress_events_topic().to_string(),
             metrics_topic: config.mqtt_egress_metrics_topic().to_string(),
@@ -84,6 +90,8 @@ impl MqttPublisher {
     /// Runs until shutdown signal is received.
     pub async fn run(mut self, mut shutdown: watch::Receiver<bool>) {
         info!(
+            host = %self.host,
+            port = %self.port,
             journeys = %self.journeys_topic,
             events = %self.events_topic,
             metrics = %self.metrics_topic,

@@ -28,7 +28,7 @@ echo "📦 Copying binary to server..."
 scp "$BINARY" "$HOST:/tmp/gateway-poc"
 
 echo "🔄 Deploying..."
-ssh "$HOST" "sudo systemctl stop gateway-poc && sleep 2 && sudo cp /tmp/gateway-poc /opt/avero/gateway-poc/target/release/ && sudo systemctl start gateway-poc"
+ssh "$HOST" "sudo systemctl stop gateway-poc && sleep 2 && sudo cp /tmp/gateway-poc /opt/avero/gateway-poc-bin && sudo systemctl start gateway-poc"
 
 echo "✅ Checking status..."
 ssh "$HOST" "sudo systemctl status gateway-poc --no-pager"

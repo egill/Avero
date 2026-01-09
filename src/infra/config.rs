@@ -121,6 +121,10 @@ pub struct MqttEgressConfig {
     /// Enable MQTT egress publishing
     #[serde(default = "default_mqtt_egress_enabled")]
     pub enabled: bool,
+    /// MQTT broker host for egress (defaults to mqtt.host if not set)
+    pub host: Option<String>,
+    /// MQTT broker port for egress (defaults to mqtt.port if not set)
+    pub port: Option<u16>,
     /// Topic for completed journey JSONs (QoS 1)
     #[serde(default = "default_journeys_topic")]
     pub journeys_topic: String,
@@ -264,6 +268,8 @@ pub struct Config {
     broker_port: u16,
     // MQTT Egress config
     mqtt_egress_enabled: bool,
+    mqtt_egress_host: Option<String>,
+    mqtt_egress_port: Option<u16>,
     mqtt_egress_journeys_topic: String,
     mqtt_egress_events_topic: String,
     mqtt_egress_metrics_topic: String,
@@ -307,6 +313,8 @@ impl Default for Config {
             broker_bind_address: "0.0.0.0".to_string(),
             broker_port: 1883,
             mqtt_egress_enabled: true,
+            mqtt_egress_host: None,
+            mqtt_egress_port: None,
             mqtt_egress_journeys_topic: "gateway/journeys".to_string(),
             mqtt_egress_events_topic: "gateway/events".to_string(),
             mqtt_egress_metrics_topic: "gateway/metrics".to_string(),
@@ -423,6 +431,8 @@ impl Config {
             broker_bind_address: toml_config.broker.bind_address,
             broker_port: toml_config.broker.port,
             mqtt_egress_enabled: toml_config.mqtt_egress.enabled,
+            mqtt_egress_host: toml_config.mqtt_egress.host,
+            mqtt_egress_port: toml_config.mqtt_egress.port,
             mqtt_egress_journeys_topic: toml_config.mqtt_egress.journeys_topic,
             mqtt_egress_events_topic: toml_config.mqtt_egress.events_topic,
             mqtt_egress_metrics_topic: toml_config.mqtt_egress.metrics_topic,
@@ -615,6 +625,16 @@ impl Config {
     // MQTT Egress getters
     pub fn mqtt_egress_enabled(&self) -> bool {
         self.mqtt_egress_enabled
+    }
+
+    /// Get MQTT egress host, falling back to main mqtt host if not set
+    pub fn mqtt_egress_host(&self) -> &str {
+        self.mqtt_egress_host.as_deref().unwrap_or(&self.mqtt_host)
+    }
+
+    /// Get MQTT egress port, falling back to main mqtt port if not set
+    pub fn mqtt_egress_port(&self) -> u16 {
+        self.mqtt_egress_port.unwrap_or(self.mqtt_port)
     }
 
     pub fn mqtt_egress_journeys_topic(&self) -> &str {

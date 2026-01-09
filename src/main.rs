@@ -67,6 +67,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mqtt_host = %config.mqtt_host(),
         mqtt_port = %config.mqtt_port(),
         mqtt_topic = %config.mqtt_topic(),
+        mqtt_egress_host = %config.mqtt_egress_host(),
+        mqtt_egress_port = %config.mqtt_egress_port(),
         gate_mode = %gate_mode_str,
         gate_tcp_addr = %config.gate_tcp_addr(),
         min_dwell_ms = %config.min_dwell_ms(),

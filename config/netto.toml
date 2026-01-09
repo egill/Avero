@@ -62,3 +62,5 @@ listener_port = 25803
 
 [mqtt_egress]
 enabled = true
+host = "100.112.14.22"  # VerneMQ on e18n.net via Tailscale
+port = 1883
