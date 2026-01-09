@@ -211,8 +211,15 @@ impl Tracker {
 
             // Determine journey outcome based on last zone and events
             // ReturnedToStore: went back into store (POS zone, STORE, or backward entry cross)
-            // Lost: disappeared near gate/exit area
-            let outcome = self.determine_journey_outcome(track_id, &person, &last_zone);
+            // Completed: exit inferred (track lost in exit corridor after approach cross)
+            // Lost: disappeared near gate/exit area without clear exit signal
+            let (outcome, exit_inferred) =
+                self.determine_journey_outcome(track_id, &person, &last_zone);
+            if exit_inferred {
+                if let Some(journey) = self.journey_manager.get_mut(track_id) {
+                    journey.exit_inferred = true;
+                }
+            }
             self.journey_manager.end_journey(track_id, outcome);
 
             // Add to stitcher for potential re-connection (with zone context)
@@ -783,15 +790,20 @@ impl Tracker {
 
     /// Determine the journey outcome when a track is deleted
     ///
-    /// Returns:
+    /// Returns a tuple of:
+    /// - `JourneyOutcome`: The outcome classification
+    /// - `bool`: Whether the exit was inferred (track lost in exit corridor)
+    ///
+    /// Outcomes:
     /// - `ReturnedToStore` if person went back into store (POS zone, STORE zone, or backward entry cross)
-    /// - `Lost` if person disappeared near gate/exit area
+    /// - `Completed` if person was in exit corridor (approach cross + gate zone exit, no exit cross)
+    /// - `Lost` if person disappeared near gate/exit area without clear exit signal
     fn determine_journey_outcome(
         &self,
         track_id: TrackId,
         person: &Person,
         last_zone: &str,
-    ) -> JourneyOutcome {
+    ) -> (JourneyOutcome, bool) {
         // Check journey events for backward entry line crossing
         if let Some(journey) = self.journey_manager.get_any(track_id) {
             // Look for backward entry line crossing - strong signal they returned to store
@@ -803,10 +815,34 @@ impl Tracker {
                                 track_id = %track_id,
                                 "journey_returned_backward_entry"
                             );
-                            return JourneyOutcome::ReturnedToStore;
+                            return (JourneyOutcome::ReturnedToStore, false);
                         }
                     }
                 }
+            }
+
+            // Check for exit corridor: approach forward + gate zone + no exit cross yet
+            // This indicates person was heading to exit and got lost in the corridor
+            let has_approach_forward = journey.events.iter().any(|e| {
+                e.t == JourneyEventType::ApproachCross
+                    && e.extra.as_ref().is_some_and(|x| x.contains("dir=forward"))
+            });
+
+            let has_exit_cross = journey
+                .events
+                .iter()
+                .any(|e| e.t == JourneyEventType::ExitCross);
+
+            let in_gate_area = last_zone.to_uppercase().contains("GATE");
+
+            if has_approach_forward && in_gate_area && !has_exit_cross {
+                info!(
+                    track_id = %track_id,
+                    zone = %last_zone,
+                    authorized = %person.authorized,
+                    "journey_exit_inferred"
+                );
+                return (JourneyOutcome::Completed, true);
             }
         }
 
@@ -818,7 +854,7 @@ impl Tracker {
                     zone = %last_zone,
                     "journey_returned_pos_zone"
                 );
-                return JourneyOutcome::ReturnedToStore;
+                return (JourneyOutcome::ReturnedToStore, false);
             }
         }
 
@@ -830,7 +866,7 @@ impl Tracker {
                 zone = %last_zone,
                 "journey_returned_store_zone"
             );
-            return JourneyOutcome::ReturnedToStore;
+            return (JourneyOutcome::ReturnedToStore, false);
         }
 
         // If near gate/exit or unknown, consider it lost
@@ -839,6 +875,6 @@ impl Tracker {
             zone = %last_zone,
             "journey_lost"
         );
-        JourneyOutcome::Lost
+        (JourneyOutcome::Lost, false)
     }
 }

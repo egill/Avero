@@ -658,6 +658,14 @@ impl Config {
         self.acc_ip_to_pos = ip_to_pos;
         self
     }
+
+    /// Builder method for tests to set approach_line
+    #[cfg(test)]
+    pub fn with_approach_line(mut self, line_id: i32) -> Self {
+        self.approach_line = Some(line_id);
+        self.zone_names.insert(line_id, "APPROACH_1".to_string());
+        self
+    }
 }
 
 #[cfg(test)]

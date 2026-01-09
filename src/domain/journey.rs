@@ -131,6 +131,7 @@ pub struct Journey {
     pub started_at: u64,       // epoch ms
     pub ended_at: Option<u64>, // epoch ms
     pub crossed_entry: bool,
+    pub exit_inferred: bool, // true if exit was inferred (track lost in exit corridor)
     pub events: Vec<JourneyEvent>,
 }
 
@@ -167,6 +168,7 @@ impl Journey {
             started_at: now,
             ended_at: None,
             crossed_entry: false,
+            exit_inferred: false,
             events: Vec::with_capacity(16),
         }
     }
@@ -272,6 +274,9 @@ impl Journey {
             obj.insert("gate_open".to_string(), serde_json::Value::Number(gate_open.into()));
         }
         obj.insert("gate_was_open".to_string(), serde_json::Value::Bool(self.gate_was_open));
+        if self.exit_inferred {
+            obj.insert("exit_inferred".to_string(), serde_json::Value::Bool(true));
+        }
 
         obj.insert("t0".to_string(), serde_json::Value::Number(self.started_at.into()));
         if let Some(ended) = self.ended_at {
