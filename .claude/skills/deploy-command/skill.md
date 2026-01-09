@@ -18,7 +18,8 @@ Deploy Avero Command Phoenix app to e18n.net production server.
 ## Command
 
 ```bash
-./scripts/deploy-command.sh
+# Run from gateway-poc directory (not command/)
+cd /Users/egill/Documents/GitHub/Avero-inspect/gateway-poc && ./scripts/deploy-command.sh
 ```
 
 ## Manual Deploy
@@ -26,17 +27,20 @@ Deploy Avero Command Phoenix app to e18n.net production server.
 ```bash
 HOST="root@e18n.net"
 REMOTE_DIR="/opt/avero/command"
+COMMAND_DIR="/Users/egill/Documents/GitHub/Avero-inspect/gateway-poc/command"
 
-# Sync code
+# Sync code (IMPORTANT: exclude .env to preserve server config)
 rsync -avz --delete \
     --exclude '_build' \
     --exclude 'deps' \
     --exclude 'node_modules' \
     --exclude '.elixir_ls' \
-    command/ "$HOST:$REMOTE_DIR/"
+    --exclude '.env' \
+    --exclude '*.log' \
+    "$COMMAND_DIR/" "$HOST:$REMOTE_DIR/"
 
 # Build and restart
-ssh "$HOST" "cd $REMOTE_DIR && docker build -t avero-command:latest -f Dockerfile.dev . && docker stop avero-command || true && docker rm avero-command || true && docker run -d --name avero-command --restart unless-stopped -p 127.0.0.1:4000:4000 --env-file .env avero-command:latest"
+ssh "$HOST" "cd $REMOTE_DIR && docker build -t avero-command:latest -f Dockerfile.dev . && docker stop avero-command || true && docker rm avero-command || true && docker run -d --name avero-command --restart unless-stopped --network avero -p 127.0.0.1:4000:4000 --env-file .env avero-command:latest"
 ```
 
 ## Verify

@@ -172,6 +172,71 @@ defmodule AveroCommand.Store do
       0
   end
 
+  @doc """
+  Get gate timing statistics for a site and date.
+
+  Returns a map with:
+  - total_cycles: number of gate.closed events
+  - min_ms, max_ms, avg_ms: gate open duration statistics
+  - long_openings: count of openings > 30s
+  - by_gate: map of gate_id => %{cycles, avg_ms}
+  """
+  def get_gate_timing_stats(site, %Date{} = date) do
+    start_dt = DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+    end_dt = DateTime.new!(Date.add(date, 1), ~T[00:00:00], "Etc/UTC")
+
+    # Get all gate.closed events (these contain open_duration_ms)
+    gate_events =
+      from(e in Event,
+        where: e.site == ^site,
+        where: e.time >= ^start_dt and e.time < ^end_dt,
+        where: e.event_type == "gates"
+      )
+      |> Repo.all()
+      |> Enum.filter(fn e -> e.data["type"] == "gate.closed" end)
+
+    # Extract durations from events (duration_ms field or data.open_duration_ms)
+    durations =
+      gate_events
+      |> Enum.map(fn e -> e.duration_ms || e.data["open_duration_ms"] || 0 end)
+      |> Enum.reject(&(&1 == 0))
+
+    # Calculate stats
+    {min_ms, max_ms, avg_ms} =
+      if length(durations) > 0 do
+        {Enum.min(durations), Enum.max(durations), Enum.sum(durations) / length(durations)}
+      else
+        {0, 0, 0.0}
+      end
+
+    long_openings = Enum.count(durations, &(&1 > 30_000))
+
+    # Per-gate breakdown
+    by_gate =
+      gate_events
+      |> Enum.group_by(& &1.gate_id)
+      |> Enum.map(fn {gate_id, events} ->
+        durs = Enum.map(events, fn e -> e.duration_ms || e.data["open_duration_ms"] || 0 end)
+        valid_durs = Enum.reject(durs, &(&1 == 0))
+        avg = if length(valid_durs) > 0, do: Enum.sum(valid_durs) / length(valid_durs), else: 0.0
+        {gate_id, %{cycles: length(events), avg_ms: round(avg)}}
+      end)
+      |> Map.new()
+
+    %{
+      total_cycles: length(gate_events),
+      min_ms: min_ms,
+      max_ms: max_ms,
+      avg_ms: round(avg_ms),
+      long_openings: long_openings,
+      by_gate: by_gate
+    }
+  rescue
+    e ->
+      Logger.warning("Store.get_gate_timing_stats failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      %{total_cycles: 0, min_ms: 0, max_ms: 0, avg_ms: 0, long_openings: 0, by_gate: %{}}
+  end
+
   # ============================================
   # Site Configs
   # ============================================

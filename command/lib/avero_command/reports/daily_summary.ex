@@ -2,19 +2,19 @@ defmodule AveroCommand.Reports.DailySummary do
   @moduledoc """
   Report #34: Daily Summary
 
-  Generates a comprehensive daily summary including:
-  - Total exits and revenue
-  - Peak hours
-  - Gate utilization
+  Generates a brief, factual daily summary including:
+  - Traffic metrics with day-over-day comparison
+  - Gate performance with min/max/avg timing
+  - Issues to explore (gate faults, long openings, tailgating)
   - Incident summary
-  - Comparison to previous days
 
-  Trigger: End of day (configurable)
+  Trigger: End of day (midnight UTC)
   Type: Info incident
   """
   require Logger
 
   alias AveroCommand.Store
+  alias AveroCommand.Journeys
   alias AveroCommand.Incidents
   alias AveroCommand.Incidents.Manager
 
@@ -46,105 +46,190 @@ defmodule AveroCommand.Reports.DailySummary do
   defp generate_summary(site) do
     # Query yesterday's data since this runs at midnight
     yesterday = Date.utc_today() |> Date.add(-1)
-    yesterday_start = DateTime.new!(yesterday, ~T[00:00:00], "Etc/UTC")
-    yesterday_end = DateTime.new!(Date.utc_today(), ~T[00:00:00], "Etc/UTC")
-    events = get_events_in_range(site, yesterday_start, yesterday_end)
+    day_before = Date.utc_today() |> Date.add(-2)
 
-    # Calculate daily metrics
-    stats = calculate_daily_stats(events)
+    # Collect data for both days
+    today_journeys = Journeys.get_daily_stats(site, yesterday)
+    prev_journeys = Journeys.get_daily_stats(site, day_before)
 
-    # Get incident counts
-    incident_stats = get_incident_stats(site)
+    today_gates = Store.get_gate_timing_stats(site, yesterday)
+    prev_gates = Store.get_gate_timing_stats(site, day_before)
 
-    # Create daily summary incident
-    create_incident(site, stats, incident_stats)
+    today_incidents = Incidents.get_daily_incident_stats(site, yesterday)
+
+    # Build sections
+    traffic = build_traffic_section(today_journeys, prev_journeys)
+    gates = build_gates_section(today_gates, prev_gates)
+    issues = build_issues_section(today_gates, today_incidents, today_journeys)
+    incidents = build_incidents_section(today_incidents)
+
+    # Generate brief message
+    message = generate_message(site, yesterday, traffic, gates, issues, incidents)
+
+    # Create incident
+    create_incident(site, yesterday, traffic, gates, issues, incidents, message)
   end
 
-  defp get_events_in_range(site, from_time, to_time) do
-    Store.get_events_in_range(site, from_time, to_time, 5000)
-  rescue
-    _ -> []
-  end
+  # ============================================
+  # Section Builders
+  # ============================================
 
-  defp calculate_daily_stats(events) do
-    exits = Enum.filter(events, fn e ->
-      e.event_type == "exits" && e.data["type"] == "exit.confirmed"
-    end)
+  defp build_traffic_section(today, prev) do
+    total = today.total_exits
+    yesterday_total = prev.total_exits
 
-    # Hourly breakdown
-    hourly_exits =
-      exits
-      |> Enum.group_by(fn e -> e.time.hour end)
-      |> Enum.map(fn {hour, events} -> {hour, length(events)} end)
-      |> Map.new()
+    change_pct =
+      if yesterday_total > 0 do
+        Float.round((total - yesterday_total) / yesterday_total * 100, 1)
+      else
+        0.0
+      end
 
-    peak_hour =
-      hourly_exits
-      |> Enum.max_by(fn {_, count} -> count end, fn -> {0, 0} end)
-      |> elem(0)
-
-    # Gate stats
-    gate_cycles = Enum.count(events, fn e ->
-      e.event_type == "gates" && e.data["type"] == "gate.closed"
-    end)
-
-    payments = Enum.count(events, fn e ->
-      e.event_type == "payments" && e.data["type"] == "payment.received"
-    end)
-
-    barcodes = Enum.count(events, fn e ->
-      e.event_type == "barcodes" && e.data["type"] == "barcode.validated"
-    end)
+    paid_pct = if total > 0, do: Float.round(today.paid_exits / total * 100, 1), else: 0.0
+    unpaid_pct = if total > 0, do: Float.round(today.unpaid_exits / total * 100, 1), else: 0.0
 
     %{
-      total_exits: length(exits),
-      total_gate_cycles: gate_cycles,
-      total_payments: payments,
-      total_barcodes: barcodes,
-      hourly_exits: hourly_exits,
-      peak_hour: peak_hour,
-      peak_exits: Map.get(hourly_exits, peak_hour, 0),
-      event_count: length(events)
+      total: total,
+      yesterday: yesterday_total,
+      change_pct: change_pct,
+      paid: today.paid_exits,
+      paid_pct: paid_pct,
+      unpaid: today.unpaid_exits,
+      unpaid_pct: unpaid_pct,
+      lost: today.tracking_lost,
+      peak_hour: today.peak_hour,
+      peak_count: today.peak_count,
+      hourly_exits: today.hourly_exits
     }
   end
 
-  defp get_incident_stats(site) do
-    yesterday = Date.utc_today() |> Date.add(-1)
-
-    incidents = Incidents.list_active()
-    |> Enum.filter(fn inc ->
-      inc.site == site &&
-        DateTime.to_date(inc.created_at) == yesterday
-    end)
-
-    by_severity =
-      incidents
-      |> Enum.group_by(& &1.severity)
-      |> Enum.map(fn {sev, incs} -> {sev, length(incs)} end)
-      |> Map.new()
-
-    by_type =
-      incidents
-      |> Enum.group_by(& &1.type)
-      |> Enum.map(fn {type, incs} -> {type, length(incs)} end)
-      |> Map.new()
-
+  defp build_gates_section(today, prev) do
     %{
-      total: length(incidents),
-      by_severity: by_severity,
-      by_type: by_type,
-      critical: Map.get(by_severity, "critical", 0),
-      high: Map.get(by_severity, "high", 0),
-      medium: Map.get(by_severity, "medium", 0),
-      low: Map.get(by_severity, "low", 0)
+      total_cycles: today.total_cycles,
+      min_ms: today.min_ms,
+      max_ms: today.max_ms,
+      avg_ms: today.avg_ms,
+      yesterday_avg_ms: prev.avg_ms,
+      long_openings: today.long_openings,
+      by_gate: today.by_gate
     }
-  rescue
-    _ -> %{total: 0, by_severity: %{}, by_type: %{}, critical: 0, high: 0, medium: 0, low: 0}
   end
 
-  defp create_incident(site, stats, incident_stats) do
-    yesterday = Date.utc_today() |> Date.add(-1)
+  defp build_issues_section(gates, incidents, journeys) do
+    # ACC mismatch: journeys with ACC match but we want to track if there's a mismatch
+    # For now, we just highlight if there are tailgating incidents
+    %{
+      gate_faults: incidents.gate_faults,
+      long_openings: gates.long_openings,
+      tailgating: incidents.tailgating,
+      tailgated_journeys: journeys.tailgated_count
+    }
+  end
 
+  defp build_incidents_section(incidents) do
+    %{
+      total: incidents.total,
+      high: incidents.high,
+      medium: incidents.medium,
+      info: incidents.info,
+      top_types: incidents.top_types,
+      by_type: incidents.by_type
+    }
+  end
+
+  # ============================================
+  # Message Generation
+  # ============================================
+
+  defp generate_message(site, date, traffic, gates, issues, incidents) do
+    date_str = Calendar.strftime(date, "%b %d")
+
+    # Traffic summary
+    change_str = format_change(traffic.change_pct)
+
+    traffic_part = "#{traffic.total} exits#{change_str}"
+
+    # Gates summary
+    gates_part =
+      if gates.total_cycles > 0 do
+        ", #{gates.total_cycles} gate cycles (avg #{format_duration(gates.avg_ms)})"
+      else
+        ""
+      end
+
+    # Issues part - only mention if there are issues
+    issues_parts = []
+
+    issues_parts =
+      if issues.gate_faults > 0 do
+        issues_parts ++ ["#{issues.gate_faults} gate fault#{plural(issues.gate_faults)}"]
+      else
+        issues_parts
+      end
+
+    issues_parts =
+      if issues.long_openings > 0 do
+        issues_parts ++ ["#{issues.long_openings} long opening#{plural(issues.long_openings)}"]
+      else
+        issues_parts
+      end
+
+    issues_parts =
+      if issues.tailgating > 0 do
+        issues_parts ++ ["#{issues.tailgating} tailgating incident#{plural(issues.tailgating)}"]
+      else
+        issues_parts
+      end
+
+    issues_str =
+      if length(issues_parts) > 0 do
+        ". " <> Enum.join(issues_parts, ", ")
+      else
+        ""
+      end
+
+    # Incidents summary
+    incidents_str =
+      if incidents.total > 0 do
+        severity_parts =
+          [
+            if(incidents.high > 0, do: "#{incidents.high} high"),
+            if(incidents.medium > 0, do: "#{incidents.medium} medium")
+          ]
+          |> Enum.reject(&is_nil/1)
+
+        severity_str =
+          if length(severity_parts) > 0 do
+            " (#{Enum.join(severity_parts, ", ")})"
+          else
+            ""
+          end
+
+        ". #{incidents.total} incident#{plural(incidents.total)}#{severity_str}"
+      else
+        ""
+      end
+
+    "#{format_site(site)} #{date_str}: #{traffic_part}#{gates_part}#{issues_str}#{incidents_str}"
+  end
+
+  defp format_change(pct) when pct > 0, do: " (up #{abs(pct)}%)"
+  defp format_change(pct) when pct < 0, do: " (down #{abs(pct)}%)"
+  defp format_change(_), do: ""
+
+  defp format_duration(ms) when ms >= 1000, do: "#{Float.round(ms / 1000, 1)}s"
+  defp format_duration(ms), do: "#{ms}ms"
+
+  defp format_site(site), do: site |> String.split("-") |> List.first() |> String.capitalize()
+
+  defp plural(1), do: ""
+  defp plural(_), do: "s"
+
+  # ============================================
+  # Incident Creation
+  # ============================================
+
+  defp create_incident(site, date, traffic, gates, issues, incidents, message) do
     incident_attrs = %{
       type: "daily_summary",
       severity: "info",
@@ -152,26 +237,20 @@ defmodule AveroCommand.Reports.DailySummary do
       site: site,
       gate_id: 0,
       context: %{
-        date: yesterday,
-        total_exits: stats.total_exits,
-        total_gate_cycles: stats.total_gate_cycles,
-        total_payments: stats.total_payments,
-        total_barcodes: stats.total_barcodes,
-        peak_hour: stats.peak_hour,
-        peak_exits: stats.peak_exits,
-        hourly_exits: stats.hourly_exits,
-        event_count: stats.event_count,
-        incidents: incident_stats,
-        message: "Daily summary: #{stats.total_exits} exits, #{stats.total_payments} payments, peak at #{stats.peak_hour}:00 (#{stats.peak_exits} exits), #{incident_stats.total} incidents"
+        date: Date.to_iso8601(date),
+        message: message,
+        traffic: traffic,
+        gates: gates,
+        issues: issues,
+        incidents: incidents
       },
       suggested_actions: [
         %{"id" => "view_dashboard", "label" => "View Dashboard", "auto" => false},
-        %{"id" => "export_report", "label" => "Export Report", "auto" => false},
         %{"id" => "acknowledge", "label" => "Acknowledge", "auto" => true}
       ]
     }
 
     Manager.create_incident(incident_attrs)
-    Logger.info("DailySummary: #{site} - #{stats.total_exits} exits, #{incident_stats.total} incidents")
+    Logger.info("DailySummary: #{message}")
   end
 end

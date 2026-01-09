@@ -127,6 +127,81 @@ defmodule AveroCommand.Journeys do
     _ -> []
   end
 
+  @doc """
+  Get aggregated daily journey statistics for a site and date.
+
+  Returns a map with:
+  - total_exits: total confirmed exits
+  - paid_exits: exits with authorized=true
+  - unpaid_exits: exits with authorized=false
+  - tracking_lost: journeys with exit_type=tracking_lost
+  - tailgated_count: journeys flagged as tailgated
+  - acc_count: journeys with ACC match
+  - hourly_exits: map of hour => exit count
+  - peak_hour: hour with most exits
+  - peak_count: exit count at peak hour
+  """
+  def get_daily_stats(site, %Date{} = date) do
+    start_dt = DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+    end_dt = DateTime.new!(Date.add(date, 1), ~T[00:00:00], "Etc/UTC")
+
+    # Get all journeys for the day
+    journeys =
+      from(j in Journey,
+        where: j.site == ^site,
+        where: j.time >= ^start_dt and j.time < ^end_dt
+      )
+      |> Repo.all()
+
+    # Calculate stats
+    confirmed_exits = Enum.filter(journeys, &(&1.exit_type == "exit_confirmed"))
+    paid = Enum.count(confirmed_exits, & &1.authorized)
+    unpaid = length(confirmed_exits) - paid
+    lost = Enum.count(journeys, &(&1.exit_type == "tracking_lost"))
+    tailgated = Enum.count(journeys, & &1.tailgated)
+    acc_matched = Enum.count(journeys, & &1.acc_matched)
+
+    # Hourly breakdown for confirmed exits
+    hourly_exits =
+      confirmed_exits
+      |> Enum.group_by(&(&1.time.hour))
+      |> Enum.map(fn {hour, exits} -> {hour, length(exits)} end)
+      |> Map.new()
+
+    {peak_hour, peak_count} =
+      if map_size(hourly_exits) > 0 do
+        Enum.max_by(hourly_exits, fn {_h, c} -> c end)
+      else
+        {0, 0}
+      end
+
+    %{
+      total_exits: length(confirmed_exits),
+      paid_exits: paid,
+      unpaid_exits: unpaid,
+      tracking_lost: lost,
+      tailgated_count: tailgated,
+      acc_count: acc_matched,
+      hourly_exits: hourly_exits,
+      peak_hour: peak_hour,
+      peak_count: peak_count
+    }
+  rescue
+    e ->
+      Logger.warning("Failed to get daily stats: #{inspect(e)}")
+      %{
+        total_exits: 0,
+        paid_exits: 0,
+        unpaid_exits: 0,
+        tracking_lost: 0,
+        tailgated_count: 0,
+        acc_count: 0,
+        hourly_exits: %{},
+        peak_hour: 0,
+        peak_count: 0
+      }
+  end
+
   # Query composition helpers
 
   defp apply_site_filter(query, nil), do: query

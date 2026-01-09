@@ -163,6 +163,72 @@ defmodule AveroCommand.Incidents do
     _ -> nil
   end
 
+  @doc """
+  Get daily incident statistics for a site and date.
+
+  Returns a map with:
+  - total: total incidents
+  - high, medium, info: counts by severity
+  - gate_faults: count of gate_fault + gate_stuck incidents
+  - tailgating: count of tailgating incidents
+  - by_type: map of type => count
+  - top_types: list of {type, count} sorted by count descending
+  """
+  def get_daily_incident_stats(site, %Date{} = date) do
+    incidents =
+      from(i in Incident,
+        where: i.site == ^site,
+        where: fragment("DATE(?)", i.created_at) == ^date
+      )
+      |> Repo.all()
+
+    # Count by severity
+    high = Enum.count(incidents, &(&1.severity == "high"))
+    medium = Enum.count(incidents, &(&1.severity == "medium"))
+    info = length(incidents) - high - medium
+
+    # Count specific types
+    gate_faults = Enum.count(incidents, &(&1.type in ["gate_fault", "gate_stuck"]))
+    tailgating = Enum.count(incidents, &(&1.type == "tailgating"))
+
+    # Group by type
+    by_type =
+      incidents
+      |> Enum.group_by(& &1.type)
+      |> Enum.map(fn {type, incs} -> {type, length(incs)} end)
+      |> Map.new()
+
+    # Top types sorted by count
+    top_types =
+      by_type
+      |> Enum.sort_by(fn {_type, count} -> -count end)
+      |> Enum.take(5)
+
+    %{
+      total: length(incidents),
+      high: high,
+      medium: medium,
+      info: info,
+      gate_faults: gate_faults,
+      tailgating: tailgating,
+      by_type: by_type,
+      top_types: top_types
+    }
+  rescue
+    e ->
+      Logger.warning("Failed to get daily incident stats: #{inspect(e)}")
+      %{
+        total: 0,
+        high: 0,
+        medium: 0,
+        info: 0,
+        gate_faults: 0,
+        tailgating: 0,
+        by_type: %{},
+        top_types: []
+      }
+  end
+
   # ============================================
   # Mutations
   # ============================================
