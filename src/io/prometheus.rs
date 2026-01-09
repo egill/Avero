@@ -3,9 +3,11 @@
 //! Exposes gateway metrics in Prometheus text format at /metrics.
 //! Uses hyper for the HTTP server.
 
+use crate::domain::types::TrackId;
 use crate::infra::metrics::{
     Metrics, METRICS_BUCKET_BOUNDS, METRICS_NUM_BUCKETS, METRICS_STITCH_DIST_BOUNDS,
 };
+use crate::services::gate::GateCommand;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::server::conn::http1;
@@ -315,10 +317,11 @@ fn format_prometheus_metrics(
 }
 
 /// Handle HTTP requests
-async fn handle_request(
+async fn handle_request<G: GateCommand>(
     req: Request<hyper::body::Incoming>,
     metrics: Arc<Metrics>,
     site_id: Arc<String>,
+    gate: Option<Arc<G>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
@@ -335,6 +338,37 @@ async fn handle_request(
             .status(StatusCode::OK)
             .body(Full::new(Bytes::from("ok")))
             .expect("static response should not fail")),
+        // Manual gate open endpoint - POST /gate/open
+        (&Method::POST, "/gate/open") => {
+            if let Some(gate) = gate {
+                let latency_us = gate.send_open_command(TrackId(0)).await;
+                info!(latency_us = %latency_us, "manual_gate_open");
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Full::new(Bytes::from(format!(
+                        r#"{{"ok":true,"latency_us":{}}}"#,
+                        latency_us
+                    ))))
+                    .expect("static response should not fail"))
+            } else {
+                Ok(Response::builder()
+                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                    .header("Content-Type", "application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Full::new(Bytes::from(r#"{"ok":false,"error":"gate_not_configured"}"#)))
+                    .expect("static response should not fail"))
+            }
+        }
+        // CORS preflight for gate/open
+        (&Method::OPTIONS, "/gate/open") => Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            .header("Access-Control-Allow-Headers", "Content-Type")
+            .body(Full::new(Bytes::from("")))
+            .expect("static response should not fail")),
         _ => Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Full::new(Bytes::from("Not Found")))
@@ -343,10 +377,11 @@ async fn handle_request(
 }
 
 /// Start the Prometheus metrics HTTP server
-pub async fn start_metrics_server(
+pub async fn start_metrics_server<G: GateCommand + 'static>(
     port: u16,
     metrics: Arc<Metrics>,
     site_id: String,
+    gate: Option<Arc<G>>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -363,12 +398,14 @@ pub async fn start_metrics_server(
                         let io = TokioIo::new(stream);
                         let metrics = metrics.clone();
                         let site_id = site_id.clone();
+                        let gate = gate.clone();
 
                         tokio::spawn(async move {
                             let service = service_fn(move |req| {
                                 let metrics = metrics.clone();
                                 let site_id = site_id.clone();
-                                async move { handle_request(req, metrics, site_id).await }
+                                let gate = gate.clone();
+                                async move { handle_request(req, metrics, site_id, gate).await }
                             });
 
                             if let Err(e) = http1::Builder::new()

@@ -56,6 +56,35 @@ defmodule AveroCommandWeb.DashboardLive do
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
+  @impl true
+  def handle_event("open_gate", %{"site" => site}, socket) do
+    # Map site to gateway IP (via Tailscale)
+    gateway_ip = case site do
+      "netto" -> "100.80.187.3"
+      "grandi" -> "100.80.187.4"
+      _ -> nil
+    end
+
+    if gateway_ip do
+      # Call the gateway's HTTP endpoint to open the gate
+      Task.start(fn ->
+        url = ~c"http://#{gateway_ip}:9090/gate/open"
+        :inets.start()
+        case :httpc.request(:post, {url, [], ~c"application/json", ""}, [timeout: 5000], []) do
+          {:ok, {{_, 200, _}, _, _}} ->
+            Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_opened, site})
+          {:error, reason} ->
+            require Logger
+            Logger.warning("Gate open failed for #{site}: #{inspect(reason)}")
+          _ ->
+            :ok
+        end
+      end)
+    end
+
+    {:noreply, socket}
+  end
+
   defp init_pos_zones do
     Enum.map(@pos_zone_ids, fn id ->
       %{id: id, occupied: false, count: 0, paid: false}
@@ -111,7 +140,7 @@ defmodule AveroCommandWeb.DashboardLive do
 
       <!-- Grafana Stats Row -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div id="grafana-active-tracks" phx-update="ignore" class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
           <iframe
             src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=2&theme=light&refresh=5s"
             class="w-full h-20 border-0"
@@ -119,7 +148,7 @@ defmodule AveroCommandWeb.DashboardLive do
             title="Active Tracks"
           ></iframe>
         </div>
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div id="grafana-exits" phx-update="ignore" class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
           <iframe
             src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=4&theme=light&refresh=5s"
             class="w-full h-20 border-0"
@@ -127,7 +156,7 @@ defmodule AveroCommandWeb.DashboardLive do
             title="Exits (1h)"
           ></iframe>
         </div>
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div id="grafana-gate-opens" phx-update="ignore" class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
           <iframe
             src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=5&theme=light&refresh=5s"
             class="w-full h-20 border-0"
@@ -135,7 +164,7 @@ defmodule AveroCommandWeb.DashboardLive do
             title="Gate Opens (1h)"
           ></iframe>
         </div>
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div id="grafana-payments" phx-update="ignore" class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
           <iframe
             src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=6&theme=light&refresh=5s"
             class="w-full h-20 border-0"
@@ -175,19 +204,23 @@ defmodule AveroCommandWeb.DashboardLive do
       <!-- Charts Row -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <.dash_card title="Journey Outcomes (24h)">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=51&theme=light&from=now-24h&to=now&refresh=5s"
-            class="w-full h-40 border-0"
-            loading="lazy"
-          ></iframe>
+          <div id="grafana-journey-outcomes" phx-update="ignore">
+            <iframe
+              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=51&theme=light&from=now-24h&to=now&refresh=5s"
+              class="w-full h-40 border-0"
+              loading="lazy"
+            ></iframe>
+          </div>
         </.dash_card>
 
         <.dash_card title="POS Zone Occupancy">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=30&theme=light&from=now-30m&to=now&refresh=5s"
-            class="w-full h-40 border-0"
-            loading="lazy"
-          ></iframe>
+          <div id="grafana-pos-occupancy" phx-update="ignore">
+            <iframe
+              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=30&theme=light&from=now-30m&to=now&refresh=5s"
+              class="w-full h-40 border-0"
+              loading="lazy"
+            ></iframe>
+          </div>
         </.dash_card>
       </div>
 
@@ -228,38 +261,46 @@ defmodule AveroCommandWeb.DashboardLive do
         </.dash_card>
 
         <.dash_card title="Gate State Timeline">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=40&theme=light&from=now-30m&to=now&refresh=5s"
-            class="w-full h-40 border-0"
-            loading="lazy"
-          ></iframe>
+          <div id="grafana-gate-state" phx-update="ignore">
+            <iframe
+              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=40&theme=light&from=now-30m&to=now&refresh=5s"
+              class="w-full h-40 border-0"
+              loading="lazy"
+            ></iframe>
+          </div>
         </.dash_card>
       </div>
 
       <!-- Additional Metrics -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <.dash_card title="Today vs Yesterday">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=50&theme=light&from=now-24h&to=now&refresh=30s"
-            class="w-full h-36 border-0"
-            loading="lazy"
-          ></iframe>
+          <div id="grafana-today-vs-yesterday" phx-update="ignore">
+            <iframe
+              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=50&theme=light&from=now-24h&to=now&refresh=30s"
+              class="w-full h-36 border-0"
+              loading="lazy"
+            ></iframe>
+          </div>
         </.dash_card>
 
         <.dash_card title="Gate Latency">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=43&theme=light&from=now-1h&to=now&refresh=5s"
-            class="w-full h-36 border-0"
-            loading="lazy"
-          ></iframe>
+          <div id="grafana-gate-latency" phx-update="ignore">
+            <iframe
+              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=43&theme=light&from=now-1h&to=now&refresh=5s"
+              class="w-full h-36 border-0"
+              loading="lazy"
+            ></iframe>
+          </div>
         </.dash_card>
 
         <.dash_card title="Tailgating Rate">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=22&theme=light&from=now-24h&to=now&refresh=5s"
-            class="w-full h-36 border-0"
-            loading="lazy"
-          ></iframe>
+          <div id="grafana-tailgating" phx-update="ignore">
+            <iframe
+              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=22&theme=light&from=now-24h&to=now&refresh=5s"
+              class="w-full h-36 border-0"
+              loading="lazy"
+            ></iframe>
+          </div>
         </.dash_card>
       </div>
     </div>
@@ -334,6 +375,19 @@ defmodule AveroCommandWeb.DashboardLive do
         ]}>
           <%= @persons %>
         </span>
+      </div>
+
+      <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <button
+          phx-click="open_gate"
+          phx-value-site={@gate.site}
+          class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+          </svg>
+          Open Gate
+        </button>
       </div>
     </div>
     """
