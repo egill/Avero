@@ -37,8 +37,22 @@ impl Tracker {
 
         let ts = epoch_ms();
 
-        // Try to find a stitch candidate
-        if let Some(stitch) = self.stitcher.find_match(event.position) {
+        // Determine if this looks like a "spawn" (re-detection)
+        // If the track appears in a zone (geometry_id present), it might be spawned
+        // True spawn detection happens later (no STORE zone, no ENTRY line), but we enable
+        // relaxed height matching here for all track creates to help catch re-detections
+        let zone_context = event.geometry_id.map(|gid| self.config.zone_name(gid));
+        let current_zone = zone_context.as_deref();
+        let spawn_hint = current_zone.is_some_and(|z| z.starts_with("POS_"));
+
+        // Try to find a stitch candidate with spawn-hint context
+        // When spawn_hint is true and pending was in POS zone, uses:
+        // - 15cm height tolerance (vs 10cm base)
+        // - 10s time window if same zone (vs 8s)
+        // - 190cm distance if same zone (vs 180cm base)
+        if let Some(stitch) =
+            self.stitcher.find_match_with_context(event.position, current_zone, spawn_hint)
+        {
             let StitchMatch { mut person, time_ms, distance_cm } = stitch;
             self.metrics.record_stitch_matched();
             self.metrics.record_stitch_distance(distance_cm as u64);
@@ -56,6 +70,7 @@ impl Tracker {
                 dwell_ms = %person.accumulated_dwell_ms,
                 time_ms = %time_ms,
                 distance_cm = %distance_cm,
+                spawn_hint = %spawn_hint,
                 "track_stitched"
             );
 

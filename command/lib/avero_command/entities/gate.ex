@@ -11,10 +11,15 @@ defmodule AveroCommand.Entities.Gate do
   use GenServer
   require Logger
 
+  alias AveroCommand.Scenarios.UnusualGateOpening
+
   @registry AveroCommand.EntityRegistry
 
   # Timeout after 30 minutes of inactivity
   @idle_timeout 30 * 60 * 1000
+
+  # Threshold for unusual gate opening incident (2 minutes)
+  @unusual_threshold_ms UnusualGateOpening.threshold_ms()
 
   defstruct [
     :site,
@@ -23,6 +28,7 @@ defmodule AveroCommand.Entities.Gate do
     :state,
     :last_opened_at,
     :last_closed_at,
+    :unusual_open_timer_ref,
     persons_in_zone: [],
     events: [],
     fault: false
@@ -93,22 +99,44 @@ defmodule AveroCommand.Entities.Gate do
     {:stop, :normal, state}
   end
 
+  @impl true
+  def handle_info(:unusual_gate_opening_check, state) do
+    # Timer fired - check if gate is still open
+    if state.state == :open do
+      Logger.info("Gate #{state.site}:#{state.gate_id} has been open for #{div(@unusual_threshold_ms, 1000)}s - creating incident")
+      UnusualGateOpening.create_incident(state.site, state.gate_id, state.last_opened_at)
+    end
+
+    {:noreply, %{state | unusual_open_timer_ref: nil}, @idle_timeout}
+  end
+
   # ============================================
   # Event Handlers
   # ============================================
 
   defp apply_event(state, %{event_type: "gate.opened"} = event) do
+    # Cancel any existing timer
+    if state.unusual_open_timer_ref, do: Process.cancel_timer(state.unusual_open_timer_ref)
+
+    # Schedule timer for unusual gate opening detection
+    timer_ref = Process.send_after(self(), :unusual_gate_opening_check, @unusual_threshold_ms)
+
     %{state |
       state: :open,
       last_opened_at: event.time,
+      unusual_open_timer_ref: timer_ref,
       events: add_event(state.events, event)
     }
   end
 
   defp apply_event(state, %{event_type: "gate.closed"} = event) do
+    # Cancel unusual gate opening timer if set
+    if state.unusual_open_timer_ref, do: Process.cancel_timer(state.unusual_open_timer_ref)
+
     %{state |
       state: :closed,
       last_closed_at: event.time,
+      unusual_open_timer_ref: nil,
       events: add_event(state.events, event)
     }
   end

@@ -276,6 +276,27 @@ defmodule AveroCommand.Journeys do
     _ -> nil
   end
 
+  @doc """
+  Count journeys in a time range by authorization status.
+  Returns %{total: n, authorized: n, unauthorized: n}
+  """
+  def count_by_authorization(site, from_datetime, to_datetime) do
+    from(j in Journey,
+      where: j.site == ^site,
+      where: j.time >= ^from_datetime and j.time <= ^to_datetime,
+      select: %{
+        total: count(j.id),
+        authorized: count(fragment("CASE WHEN ? THEN 1 END", j.authorized)),
+        unauthorized: count(fragment("CASE WHEN NOT ? OR ? IS NULL THEN 1 END", j.authorized, j.authorized))
+      }
+    )
+    |> Repo.one()
+  rescue
+    e ->
+      Logger.warning("Failed to count journeys by authorization: #{inspect(e)}")
+      %{total: 0, authorized: 0, unauthorized: 0}
+  end
+
   # ============================================
   # Mutations
   # ============================================

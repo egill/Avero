@@ -70,6 +70,48 @@ Hooks.ClickOutside = {
   }
 }
 
+// Live timer hook for unusual gate opening incidents
+// Updates every second showing elapsed time since gate opened
+Hooks.LiveTimer = {
+  mounted() {
+    const startedAt = parseInt(this.el.dataset.startedAt)
+    if (isNaN(startedAt)) {
+      this.el.textContent = "--:--"
+      return
+    }
+
+    this.updateTimer = () => {
+      const now = Date.now()
+      const elapsed = now - startedAt
+
+      const hours = Math.floor(elapsed / 3600000)
+      const minutes = Math.floor((elapsed % 3600000) / 60000)
+      const seconds = Math.floor((elapsed % 60000) / 1000)
+
+      let display = ''
+      if (hours > 0) {
+        display = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+      } else {
+        display = `${minutes}:${seconds.toString().padStart(2, '0')}`
+      }
+
+      this.el.textContent = display
+    }
+
+    // Update immediately
+    this.updateTimer()
+
+    // Update every second
+    this.interval = setInterval(this.updateTimer, 1000)
+  },
+
+  destroyed() {
+    if (this.interval) {
+      clearInterval(this.interval)
+    }
+  }
+}
+
 let liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
   hooks: Hooks

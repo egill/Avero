@@ -2,9 +2,11 @@ defmodule AveroCommandWeb.IncidentDetailLive do
   use AveroCommandWeb, :live_view
 
   alias AveroCommand.Incidents
+  alias AveroCommand.Journeys
   alias AveroCommand.Store
 
   @dashboard_uid "NETTO-GRANDI-timescale"
+  @live_stats_refresh_interval 5_000  # Refresh live stats every 5 seconds
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -40,16 +42,39 @@ defmodule AveroCommandWeb.IncidentDetailLive do
         # Get the host from the socket's URI for Grafana links
         grafana_base_url = get_grafana_base_url(socket)
 
-        {:ok,
-         socket
-         |> assign(:incident, incident)
-         |> assign(:related_events, related_events)
-         |> assign(:gate_opener_journey, gate_opener_journey)
-         |> assign(:follower_journeys, follower_journeys)
-         |> assign(:person_journeys, person_journeys)
-         |> assign(:group_info, group_info)
-         |> assign(:grafana_url, build_grafana_url(grafana_base_url, incident))
-         |> assign(:page_title, "Incident #{String.slice(id, 0..7)}")}
+        # Check if this is a live unusual_gate_opening incident
+        is_live_incident = incident.type == "unusual_gate_opening" and
+                          get_in(incident.context, ["is_live"]) == true
+
+        # Fetch live stats for unusual_gate_opening incidents
+        live_stats = if is_live_incident or incident.type == "unusual_gate_opening" do
+          fetch_unusual_gate_stats(incident)
+        else
+          nil
+        end
+
+        socket =
+          socket
+          |> assign(:incident, incident)
+          |> assign(:related_events, related_events)
+          |> assign(:gate_opener_journey, gate_opener_journey)
+          |> assign(:follower_journeys, follower_journeys)
+          |> assign(:person_journeys, person_journeys)
+          |> assign(:group_info, group_info)
+          |> assign(:grafana_url, build_grafana_url(grafana_base_url, incident))
+          |> assign(:page_title, "Incident #{String.slice(id, 0..7)}")
+          |> assign(:is_live_incident, is_live_incident)
+          |> assign(:live_stats, live_stats)
+
+        # Schedule stats refresh for live incidents
+        socket = if is_live_incident and connected?(socket) do
+          Process.send_after(self(), :refresh_live_stats, @live_stats_refresh_interval)
+          socket
+        else
+          socket
+        end
+
+        {:ok, socket}
     end
   end
 
@@ -86,6 +111,49 @@ defmodule AveroCommandWeb.IncidentDetailLive do
     to_time = DateTime.add(incident.created_at, 30, :second)
 
     Store.get_events_in_range(incident.site, from_time, to_time, 50)
+  end
+
+  defp fetch_unusual_gate_stats(incident) do
+    context = incident.context || %{}
+    started_at_ms = context["started_at_ms"]
+
+    # Determine time window - from when gate opened to now (or closed_at)
+    from_datetime = if started_at_ms do
+      DateTime.from_unix!(started_at_ms, :millisecond)
+    else
+      incident.created_at
+    end
+
+    # If incident is resolved, use closed_at; otherwise use now
+    to_datetime = if context["closed_at_ms"] do
+      DateTime.from_unix!(context["closed_at_ms"], :millisecond)
+    else
+      DateTime.utc_now()
+    end
+
+    # Get journey counts by authorization
+    journey_counts = Journeys.count_by_authorization(incident.site, from_datetime, to_datetime)
+
+    # Get backward crossings count
+    backward_count = Store.count_backward_crossings(incident.site, from_datetime, to_datetime)
+
+    # Get list of journeys during this window
+    journeys = Journeys.list_filtered(
+      sites: [incident.site],
+      from_datetime: from_datetime,
+      to_datetime: to_datetime,
+      limit: 20
+    )
+
+    %{
+      total_exits: journey_counts.total || 0,
+      paid_exits: journey_counts.authorized || 0,
+      unpaid_exits: journey_counts.unauthorized || 0,
+      backward_crossings: backward_count || 0,
+      journeys: journeys,
+      from_datetime: from_datetime,
+      to_datetime: to_datetime
+    }
   end
 
   defp fetch_tailgating_journeys(incident) do
@@ -189,7 +257,36 @@ defmodule AveroCommandWeb.IncidentDetailLive do
 
   @impl true
   def handle_info({:incident_updated, incident}, socket) do
-    {:noreply, assign(socket, :incident, incident)}
+    # Update is_live status when incident changes
+    is_live = incident.type == "unusual_gate_opening" and
+              get_in(incident.context, ["is_live"]) == true
+
+    socket =
+      socket
+      |> assign(:incident, incident)
+      |> assign(:is_live_incident, is_live)
+
+    # Update stats if still live or if it just became not-live (final stats)
+    socket = if incident.type == "unusual_gate_opening" do
+      assign(socket, :live_stats, fetch_unusual_gate_stats(incident))
+    else
+      socket
+    end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info(:refresh_live_stats, socket) do
+    if socket.assigns.is_live_incident do
+      # Refresh stats and schedule next refresh
+      stats = fetch_unusual_gate_stats(socket.assigns.incident)
+      Process.send_after(self(), :refresh_live_stats, @live_stats_refresh_interval)
+      {:noreply, assign(socket, :live_stats, stats)}
+    else
+      # Incident is no longer live, stop refreshing
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -322,6 +419,15 @@ defmodule AveroCommandWeb.IncidentDetailLive do
               incident={@incident}
               gate_opener_journey={@gate_opener_journey}
               follower_journeys={@follower_journeys}
+            />
+          <% end %>
+
+          <%!-- Unusual gate opening details --%>
+          <%= if @incident.type == "unusual_gate_opening" do %>
+            <.unusual_gate_opening_detail
+              incident={@incident}
+              is_live={@is_live_incident}
+              live_stats={@live_stats}
             />
           <% end %>
 
@@ -545,6 +651,118 @@ defmodule AveroCommandWeb.IncidentDetailLive do
     </div>
     """
   end
+
+  # Unusual gate opening component - shows live timer and stats
+  defp unusual_gate_opening_detail(assigns) do
+    context = assigns.incident.context || %{}
+    started_at_ms = context["started_at_ms"]
+    total_duration_ms = context["total_duration_ms"]
+
+    assigns =
+      assigns
+      |> assign(:started_at_ms, started_at_ms)
+      |> assign(:total_duration_ms, total_duration_ms)
+
+    ~H"""
+    <div class="px-6 py-4 border-t border-gray-200 bg-orange-50">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-medium text-gray-700">Gate Opening Status</h3>
+        <%= if @is_live do %>
+          <span class="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded animate-pulse">
+            LIVE
+          </span>
+        <% else %>
+          <span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded">
+            RESOLVED
+          </span>
+        <% end %>
+      </div>
+
+      <%!-- Live Timer or Final Duration --%>
+      <div class="mb-6">
+        <p class="text-xs text-gray-500 mb-1">Time Open</p>
+        <%= if @is_live and @started_at_ms do %>
+          <div
+            id="live-timer"
+            phx-hook="LiveTimer"
+            data-started-at={@started_at_ms}
+            class="text-4xl font-mono font-bold text-red-600"
+          >
+            --:--
+          </div>
+        <% else %>
+          <div class="text-4xl font-mono font-bold text-gray-600">
+            <%= format_duration_from_ms(@total_duration_ms) %>
+          </div>
+        <% end %>
+      </div>
+
+      <%!-- Dynamic Stats Grid --%>
+      <%= if @live_stats do %>
+        <div class="grid grid-cols-4 gap-4 mb-6">
+          <div class="bg-white p-4 rounded-lg border shadow-sm">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">Total Exits</dt>
+            <dd class="text-2xl font-bold text-gray-900 mt-1"><%= @live_stats.total_exits %></dd>
+          </div>
+          <div class="bg-white p-4 rounded-lg border shadow-sm">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">Paid Exits</dt>
+            <dd class="text-2xl font-bold text-green-600 mt-1"><%= @live_stats.paid_exits %></dd>
+          </div>
+          <div class="bg-white p-4 rounded-lg border shadow-sm">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">Unpaid Exits</dt>
+            <dd class="text-2xl font-bold text-red-600 mt-1"><%= @live_stats.unpaid_exits %></dd>
+          </div>
+          <div class="bg-white p-4 rounded-lg border shadow-sm">
+            <dt class="text-xs text-gray-500 uppercase tracking-wide">Backward Entries</dt>
+            <dd class="text-2xl font-bold text-orange-600 mt-1"><%= @live_stats.backward_crossings %></dd>
+          </div>
+        </div>
+
+        <%!-- Journey List --%>
+        <h4 class="text-sm font-medium text-gray-700 mb-2">Journeys During Incident</h4>
+        <div class="max-h-64 overflow-y-auto bg-white rounded-lg border divide-y">
+          <%= if Enum.empty?(@live_stats.journeys) do %>
+            <p class="p-4 text-sm text-gray-500">No journeys recorded during this window</p>
+          <% else %>
+            <%= for journey <- @live_stats.journeys do %>
+              <div class="px-4 py-3 flex items-center justify-between hover:bg-gray-50">
+                <div class="flex items-center space-x-3">
+                  <span class="text-sm font-medium text-gray-900">
+                    Person #<%= journey.person_id %>
+                  </span>
+                  <span class="text-xs text-gray-500">
+                    <%= Calendar.strftime(journey.time, "%H:%M:%S") %>
+                  </span>
+                </div>
+                <span class={[
+                  "px-2 py-1 text-xs font-medium rounded",
+                  if(journey.authorized, do: "bg-green-100 text-green-800", else: "bg-red-100 text-red-800")
+                ]}>
+                  <%= if journey.authorized, do: "Paid", else: "Unpaid" %>
+                </span>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp format_duration_from_ms(nil), do: "--:--"
+  defp format_duration_from_ms(ms) when is_integer(ms) do
+    total_seconds = div(ms, 1000)
+    hours = div(total_seconds, 3600)
+    minutes = div(rem(total_seconds, 3600), 60)
+    seconds = rem(total_seconds, 60)
+
+    if hours > 0 do
+      "#{hours}:#{String.pad_leading(Integer.to_string(minutes), 2, "0")}:#{String.pad_leading(Integer.to_string(seconds), 2, "0")}"
+    else
+      "#{minutes}:#{String.pad_leading(Integer.to_string(seconds), 2, "0")}"
+    end
+  end
+  defp format_duration_from_ms(_), do: "--:--"
 
   defp person_journey(assigns) do
     # Filter out events where format_journey_event returns nil (e.g., heartbeats)

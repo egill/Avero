@@ -249,7 +249,42 @@ impl AccCollector {
                 );
             } else {
                 // At least one member qualifies - authorize entire group
-                let all_members = group.all_members();
+                let mut all_members = group.all_members();
+
+                // Also include recent exits that were part of this group
+                // (Bug fix: track left POS but ACC arrived while group member still present)
+                self.cleanup_old_exits();
+                if let Some(exits) = self.recent_exits.get_mut(pos) {
+                    let now = Instant::now();
+                    let mut recent_group_members = Vec::new();
+
+                    for exit in exits.iter() {
+                        // Was this exit part of the current group? Check if any current member
+                        // was in their group_members list (they were together at POS)
+                        let was_in_group =
+                            all_members.iter().any(|&tid| exit.group_members.contains(&tid));
+                        let within_time = now.duration_since(exit.exited_at).as_millis() as u64
+                            <= MAX_TIME_SINCE_EXIT;
+
+                        if was_in_group && within_time && !all_members.contains(&exit.track_id) {
+                            recent_group_members.push(exit.track_id);
+                        }
+                    }
+
+                    // Remove matched recent exits
+                    exits.retain(|e| !recent_group_members.contains(&e.track_id));
+
+                    // Add them to authorized list
+                    if !recent_group_members.is_empty() {
+                        info!(
+                            pos = %pos,
+                            recent_group_members = ?recent_group_members,
+                            "acc_including_recent_group_exits"
+                        );
+                        all_members.extend(recent_group_members);
+                    }
+                }
+
                 info!(
                     pos = %pos,
                     qualified = ?qualified,
@@ -257,7 +292,7 @@ impl AccCollector {
                     "acc_matched_group_present"
                 );
 
-                // Update journeys for all group members
+                // Update journeys for all group members (including recent exits)
                 for &track_id in &all_members {
                     if let Some(journey) = journey_manager.get_mut_any(track_id) {
                         journey.acc_matched = true;
@@ -740,5 +775,111 @@ mod tests {
 
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
         assert!(result.contains(&TrackId(100)), "Exactly 3000ms should match (uses <=)");
+    }
+
+    #[test]
+    fn test_acc_matches_recent_exit_when_group_still_present() {
+        // Bug fix test: Track 18235 scenario
+        // Two tracks enter POS together (forming group)
+        // Track A exits (goes to recent_exits)
+        // ACC arrives while Track B is still at POS
+        // BOTH A and B should be authorized
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(TrackId(100)); // Track A (will exit before ACC)
+        jm.new_journey(TrackId(200)); // Track B (still present when ACC arrives)
+
+        // Both enter POS_1 forming a group
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+
+        // Verify group formed
+        assert_eq!(
+            collector.pos_groups.get("POS_1").unwrap().all_members().len(),
+            2,
+            "Both tracks should be in group"
+        );
+
+        // Give both tracks sufficient dwell
+        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
+            for member in group.members.iter_mut() {
+                member.entered_at = Instant::now() - std::time::Duration::from_secs(8);
+            }
+        }
+
+        // Track 100 exits (goes to recent_exits with group_members=[200])
+        collector.record_pos_exit(TrackId(100), "POS_1", 120000); // 2 min dwell
+
+        // Verify: Track 100 is in recent_exits, Track 200 still in group
+        assert_eq!(
+            collector.pos_groups.get("POS_1").unwrap().all_members(),
+            vec![TrackId(200)],
+            "Only track 200 should remain in group"
+        );
+        assert!(
+            collector.recent_exits.get("POS_1").unwrap().iter().any(|e| e.track_id == TrackId(100)),
+            "Track 100 should be in recent_exits"
+        );
+
+        // Process ACC (simulates payment terminal)
+        // Before fix: only Track 200 was authorized
+        // After fix: BOTH Track 100 and 200 should be authorized
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+
+        assert!(
+            result.contains(&TrackId(100)),
+            "Track 100 (recent exit) should be authorized - BUG FIX"
+        );
+        assert!(result.contains(&TrackId(200)), "Track 200 (still present) should be authorized");
+        assert_eq!(result.len(), 2, "Both group members should be authorized");
+
+        // Verify journeys updated
+        assert!(
+            jm.get(TrackId(100)).unwrap().acc_matched,
+            "Track 100 journey should have acc_matched"
+        );
+        assert!(
+            jm.get(TrackId(200)).unwrap().acc_matched,
+            "Track 200 journey should have acc_matched"
+        );
+    }
+
+    #[test]
+    fn test_recent_exit_not_matched_if_outside_time_window() {
+        // Similar to above but exit is too old - should NOT be included
+        let mut collector = create_test_collector();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+
+        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
+            for member in group.members.iter_mut() {
+                member.entered_at = Instant::now() - std::time::Duration::from_secs(8);
+            }
+        }
+
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
+
+        // Make exit too old (4 seconds ago, outside MAX_TIME_SINCE_EXIT=3000)
+        if let Some(exits) = collector.recent_exits.get_mut("POS_1") {
+            if let Some(exit) = exits.first_mut() {
+                exit.exited_at = Instant::now() - std::time::Duration::from_millis(4000);
+            }
+        }
+
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+
+        // Only Track 200 should be matched (Track 100 exited too long ago)
+        assert_eq!(result, vec![TrackId(200)], "Only present track should match");
+        assert!(
+            !jm.get(TrackId(100)).unwrap().acc_matched,
+            "Track 100 should NOT have acc_matched (exit too old)"
+        );
+        assert!(jm.get(TrackId(200)).unwrap().acc_matched, "Track 200 should have acc_matched");
     }
 }

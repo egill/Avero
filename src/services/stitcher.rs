@@ -13,9 +13,12 @@ use tracing::{debug, info};
 /// Stitch criteria
 const MAX_TIME_MS: u64 = 4500; // 4.5 seconds base grace time
 const MAX_TIME_POS_ZONE_MS: u64 = 8000; // 8 seconds for tracks lost in POS zones
+const MAX_TIME_SPAWN_HINT_MS: u64 = 10000; // 10 seconds for spawn-hint POS matches
 const MAX_DISTANCE_CM: f64 = 180.0; // 180cm
 const MAX_DISTANCE_SAME_ZONE_CM: f64 = 300.0; // 300cm if same zone context
+const MAX_DISTANCE_SPAWN_HINT_CM: f64 = 190.0; // 190cm for spawn-hint matches
 const MAX_HEIGHT_DIFF_CM: f64 = 10.0; // ±10cm
+const MAX_HEIGHT_DIFF_POS_CM: f64 = 15.0; // ±15cm for POS zones (people bend)
 
 /// Result of a successful stitch match
 #[derive(Debug)]
@@ -92,7 +95,7 @@ impl Stitcher {
     /// - Extended grace time for tracks lost in POS zones (8s vs 4.5s)
     /// - Extended distance for tracks with same zone context (300cm vs 180cm)
     pub fn find_match(&mut self, new_position: Option<[f64; 3]>) -> Option<StitchMatch> {
-        self.find_match_with_zone(new_position, None)
+        self.find_match_with_context(new_position, None, false)
     }
 
     /// Try to find a stitch candidate with optional zone context for matching
@@ -101,6 +104,22 @@ impl Stitcher {
         &mut self,
         new_position: Option<[f64; 3]>,
         current_zone: Option<&str>,
+    ) -> Option<StitchMatch> {
+        self.find_match_with_context(new_position, current_zone, false)
+    }
+
+    /// Try to find a stitch candidate with spawn-hint context
+    ///
+    /// spawn_hint: true if the new track appears to be a re-detection (no STORE entry,
+    /// no ENTRY line crossing, spawned in POS zone). This boosts matching thresholds:
+    /// - Time: 10s (vs 8s for POS zones)
+    /// - Distance: 190cm for same-zone matches
+    /// - Height: ±15cm for POS zones (people bend at checkout)
+    pub fn find_match_with_context(
+        &mut self,
+        new_position: Option<[f64; 3]>,
+        current_zone: Option<&str>,
+        spawn_hint: bool,
     ) -> Option<StitchMatch> {
         // First, clean up expired entries
         self.cleanup_expired();
@@ -111,53 +130,87 @@ impl Stitcher {
         let mut best_match: Option<(usize, f64, bool)> = None; // (idx, distance, same_zone)
 
         for (i, pending) in self.pending.iter().enumerate() {
-            // Time check - use extended time for POS zones
+            let is_pos_zone = pending.last_zone.as_ref().is_some_and(|z| z.starts_with("POS_"));
+            let same_zone = current_zone.is_some() && pending.last_zone.as_deref() == current_zone;
+
+            // Time check - use extended time for POS zones, even more for spawn-hint
             let age_ms = now.duration_since(pending.deleted_at).as_millis() as u64;
-            let max_time = if pending.last_zone.as_ref().is_some_and(|z| z.starts_with("POS_")) {
-                MAX_TIME_POS_ZONE_MS
+            let max_time = if spawn_hint && is_pos_zone && same_zone {
+                MAX_TIME_SPAWN_HINT_MS // 10s for spawn-hint same-zone POS
+            } else if is_pos_zone {
+                MAX_TIME_POS_ZONE_MS // 8s for POS zones
             } else {
-                MAX_TIME_MS
+                MAX_TIME_MS // 4.5s base
             };
             if age_ms > max_time {
                 continue;
             }
 
-            let old_pos = pending.position?;
+            let old_pos = match pending.position {
+                Some(pos) => pos,
+                None => continue, // Can't match without position
+            };
 
-            // Height check (position[2] is height in meters)
+            // Height check - relaxed for POS zones (people bend at checkout)
             let height_diff_cm = (new_pos[2] - old_pos[2]).abs() * 100.0;
-            if height_diff_cm > MAX_HEIGHT_DIFF_CM {
+            let max_height = if is_pos_zone {
+                MAX_HEIGHT_DIFF_POS_CM // 15cm for POS zones
+            } else {
+                MAX_HEIGHT_DIFF_CM // 10cm base
+            };
+            if height_diff_cm > max_height {
+                debug!(
+                    old_track_id = %pending.person.track_id,
+                    height_diff_cm = %height_diff_cm as u32,
+                    max_height_cm = %max_height as u32,
+                    spawn_hint = %spawn_hint,
+                    "stitch_rejected_height"
+                );
                 continue;
             }
 
             // Distance check (x, y in meters)
-            // Use extended distance if same zone context
+            // Use extended distance for same zone context
             let dx = new_pos[0] - old_pos[0];
             let dy = new_pos[1] - old_pos[1];
             let distance_cm = (dx * dx + dy * dy).sqrt() * 100.0;
 
-            let same_zone = current_zone.is_some() && pending.last_zone.as_deref() == current_zone;
-            let max_distance = if same_zone { MAX_DISTANCE_SAME_ZONE_CM } else { MAX_DISTANCE_CM };
+            // Distance thresholds:
+            // - Same zone with spawn hint: 190cm (re-detection, slightly relaxed)
+            // - Same zone without spawn hint: 300cm (existing behavior)
+            // - Different zone: 180cm (base)
+            let max_distance = if same_zone && spawn_hint {
+                MAX_DISTANCE_SPAWN_HINT_CM // 190cm for spawn-hint same-zone
+            } else if same_zone {
+                MAX_DISTANCE_SAME_ZONE_CM // 300cm for same-zone
+            } else {
+                MAX_DISTANCE_CM // 180cm base
+            };
 
             if distance_cm > max_distance {
+                debug!(
+                    old_track_id = %pending.person.track_id,
+                    distance_cm = %distance_cm as u32,
+                    max_distance_cm = %max_distance as u32,
+                    same_zone = %same_zone,
+                    spawn_hint = %spawn_hint,
+                    "stitch_rejected_distance"
+                );
                 continue;
             }
 
-            // Track best match
-            // Prefer same-zone matches, then closest distance
-            match &best_match {
-                None => best_match = Some((i, distance_cm, same_zone)),
-                Some((_, _, true)) if !same_zone => {
-                    // Current best is same-zone, don't replace with non-same-zone
-                }
+            // Track best match: prefer same-zone matches, then closest distance
+            let dominated = match &best_match {
+                None => false,
+                Some((_, _, true)) if !same_zone => true, // best is same-zone, this isn't
                 Some((_, best_dist, best_same)) => {
-                    // Prefer same_zone, or if equal same_zone status, prefer closer
-                    if (same_zone && !best_same)
-                        || (same_zone == *best_same && distance_cm < *best_dist)
-                    {
-                        best_match = Some((i, distance_cm, same_zone));
-                    }
+                    // Keep best if it has same_zone advantage OR is closer with equal status
+                    *best_same && !same_zone
+                        || (same_zone == *best_same && *best_dist <= distance_cm)
                 }
+            };
+            if !dominated {
+                best_match = Some((i, distance_cm, same_zone));
             }
         }
 
@@ -169,6 +222,7 @@ impl Stitcher {
                 distance_cm = %distance_cm as u32,
                 time_ms = %time_ms,
                 same_zone = %same_zone,
+                spawn_hint = %spawn_hint,
                 last_zone = ?pending.last_zone,
                 "stitch_match_found"
             );
@@ -380,5 +434,116 @@ mod tests {
         assert_eq!(info[0].last_zone, Some("POS_1".to_string()));
         assert_eq!(info[0].dwell_ms, 5000);
         assert!(info[0].authorized);
+    }
+
+    // ============================================================
+    // Spawn-hint stitching tests
+    // ============================================================
+
+    #[test]
+    fn test_spawn_hint_relaxed_height_in_pos_zone() {
+        // POS zones allow ±15cm height difference (vs 10cm base)
+        // People bend at checkout
+        let mut stitcher = Stitcher::new();
+
+        let mut person = Person::new(TrackId(100));
+        person.authorized = true;
+        // Pending at POS zone
+        stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
+
+        // New track same location but 12cm height difference
+        // Would fail with 10cm threshold, passes with 15cm
+        let result = stitcher.find_match_with_context(Some([1.0, 1.0, 1.82]), Some("POS_1"), true);
+
+        assert!(result.is_some(), "12cm height diff should match in POS zone");
+        assert_eq!(result.unwrap().person.track_id, TrackId(100));
+    }
+
+    #[test]
+    fn test_spawn_hint_height_still_rejected_if_too_far() {
+        // Even in POS zone, >15cm height should be rejected
+        let mut stitcher = Stitcher::new();
+
+        let person = Person::new(TrackId(100));
+        stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
+
+        // 18cm height difference - too much even for POS zone
+        let result = stitcher.find_match_with_context(Some([1.0, 1.0, 1.88]), Some("POS_1"), true);
+
+        assert!(result.is_none(), "18cm height diff should still be rejected");
+    }
+
+    #[test]
+    fn test_spawn_hint_uses_190cm_distance_for_same_zone() {
+        // Spawn hint with same zone: 190cm distance allowed
+        let mut stitcher = Stitcher::new();
+
+        let mut person = Person::new(TrackId(100));
+        person.authorized = true;
+        stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
+
+        // 185cm away - would pass normal 180cm but let's verify spawn-hint works
+        let result = stitcher.find_match_with_context(Some([2.85, 1.0, 1.70]), Some("POS_1"), true);
+
+        assert!(result.is_some(), "185cm should match with spawn_hint same zone");
+        assert_eq!(result.unwrap().distance_cm, 185);
+    }
+
+    #[test]
+    fn test_spawn_hint_rejects_beyond_190cm() {
+        // Spawn hint limits distance to 190cm for same zone
+        let mut stitcher = Stitcher::new();
+
+        let person = Person::new(TrackId(100));
+        stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
+
+        // 195cm away - beyond 190cm limit for spawn-hint
+        let result = stitcher.find_match_with_context(Some([2.95, 1.0, 1.70]), Some("POS_1"), true);
+
+        assert!(result.is_none(), "195cm should NOT match with spawn_hint (limit 190cm)");
+    }
+
+    #[test]
+    fn test_spawn_hint_without_same_zone_uses_base_distance() {
+        // spawn_hint but different zones: uses base 180cm
+        let mut stitcher = Stitcher::new();
+
+        let person = Person::new(TrackId(100));
+        stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
+
+        // 185cm away, spawn_hint but different zone - should fail (>180cm)
+        let result = stitcher.find_match_with_context(Some([2.85, 1.0, 1.70]), Some("POS_2"), true);
+
+        assert!(result.is_none(), "185cm should NOT match for different zones (limit 180cm)");
+    }
+
+    #[test]
+    fn test_base_height_check_for_non_pos_zones() {
+        // Non-POS zones use base 10cm height threshold
+        let mut stitcher = Stitcher::new();
+
+        let person = Person::new(TrackId(100));
+        stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("STORE".to_string()));
+
+        // 12cm height diff - should fail for non-POS zone
+        let result = stitcher.find_match_with_context(Some([1.0, 1.0, 1.82]), Some("STORE"), false);
+
+        assert!(result.is_none(), "12cm should NOT match in STORE zone (limit 10cm)");
+    }
+
+    #[test]
+    fn test_same_zone_without_spawn_hint_uses_300cm() {
+        // Same zone without spawn hint: uses existing 300cm distance
+        let mut stitcher = Stitcher::new();
+
+        let mut person = Person::new(TrackId(100));
+        person.authorized = true;
+        stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
+
+        // 250cm away, same zone, no spawn hint - should pass (300cm limit)
+        let result = stitcher.find_match_with_context(Some([3.5, 1.0, 1.70]), Some("POS_1"), false);
+
+        assert!(result.is_some(), "250cm should match for same zone without spawn_hint");
+        assert_eq!(result.unwrap().distance_cm, 250);
     }
 }

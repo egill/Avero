@@ -154,6 +154,24 @@ defmodule AveroCommand.Store do
       []
   end
 
+  @doc """
+  Count backward line crossings (direction=backward) in a time range.
+  Backward crossings indicate someone entering through the exit.
+  """
+  def count_backward_crossings(site, from_time, to_time) do
+    from(e in Event,
+      where: e.site == ^site,
+      where: e.time >= ^from_time and e.time <= ^to_time,
+      where: fragment("data->>'type' = 'xovis.line.cross' AND data->>'direction' = 'backward'"),
+      select: count(e.id)
+    )
+    |> Repo.one()
+  rescue
+    e ->
+      Logger.warning("Store.count_backward_crossings failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      0
+  end
+
   # ============================================
   # Site Configs
   # ============================================

@@ -10,6 +10,7 @@ defmodule AveroCommand.MQTT.EventRouter do
   alias AveroCommand.Store
   alias AveroCommand.Entities.{PersonRegistry, GateRegistry}
   alias AveroCommand.Scenarios.Evaluator
+  alias AveroCommand.Scenarios.UnusualGateOpening
   alias AveroCommand.Journeys
 
   @doc """
@@ -215,6 +216,11 @@ defmodule AveroCommand.MQTT.EventRouter do
     end
 
     gate_id = data["gate_id"] || 1
+
+    # Auto-resolve unusual_gate_opening incidents when gate closes
+    if data["state"] == "closed" do
+      Task.start(fn -> UnusualGateOpening.maybe_resolve(event.site, gate_id) end)
+    end
 
     %{event |
       event_type: "gates",
