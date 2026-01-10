@@ -13,6 +13,7 @@ use crate::io::{
 };
 use crate::services::gate_worker::GateCmd;
 use crate::services::stitcher::StitchMatch;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -41,18 +42,20 @@ impl Tracker {
         // If the track appears in a zone (geometry_id present), it might be spawned
         // True spawn detection happens later (no STORE zone, no ENTRY line), but we enable
         // relaxed height matching here for all track creates to help catch re-detections
-        let zone_context = event.geometry_id.map(|gid| self.config.zone_name(gid));
-        let current_zone = zone_context.as_deref();
-        let spawn_hint = current_zone.is_some_and(|z| z.starts_with("POS_"));
+        let current_zone: Option<Arc<str>> =
+            event.geometry_id.map(|gid| self.config.zone_name(gid));
+        let spawn_hint = current_zone.as_deref().is_some_and(|z| z.starts_with("POS_"));
 
         // Try to find a stitch candidate with spawn-hint context
         // When spawn_hint is true and pending was in POS zone, uses:
         // - 15cm height tolerance (vs 10cm base)
         // - 10s time window if same zone (vs 8s)
         // - 190cm distance if same zone (vs 180cm base)
-        if let Some(stitch) =
-            self.stitcher.find_match_with_context(event.position, current_zone, spawn_hint)
-        {
+        if let Some(stitch) = self.stitcher.find_match_with_context(
+            event.position,
+            current_zone.as_deref(),
+            spawn_hint,
+        ) {
             let StitchMatch { mut person, time_ms, distance_cm } = stitch;
             self.metrics.record_stitch_matched();
             self.metrics.record_stitch_distance(distance_cm as u64);
@@ -185,8 +188,10 @@ impl Tracker {
                 person.last_position = event.position;
             }
 
-            let last_zone =
-                person.current_zone.map(|id| self.config.zone_name(id)).unwrap_or_default();
+            let last_zone: String = person
+                .current_zone
+                .map(|id| self.config.zone_name(id).to_string())
+                .unwrap_or_default();
 
             info!(
                 track_id = %track_id,
@@ -238,7 +243,7 @@ impl Tracker {
             self.journey_manager.end_journey(track_id, outcome);
 
             // Add to stitcher for potential re-connection (with zone context)
-            let last_zone_name = if last_zone.is_empty() { None } else { Some(last_zone.clone()) };
+            let last_zone_name = if last_zone.is_empty() { None } else { Some(last_zone) };
             self.stitcher.add_pending(person, event.position, last_zone_name);
         }
     }
@@ -288,7 +293,7 @@ impl Tracker {
                 site: None,
                 tid: track_id.0,
                 t: "zone_entry".to_string(),
-                z: Some(zone.clone()),
+                z: Some(zone.to_string()),
                 ts,
                 auth: person.authorized,
                 dwell_ms: None,
@@ -401,7 +406,7 @@ impl Tracker {
                 site: None,
                 tid: track_id.0,
                 t: "zone_exit".to_string(),
-                z: Some(zone.clone()),
+                z: Some(zone.to_string()),
                 ts,
                 auth: person.authorized,
                 dwell_ms: zone_dwell_ms,
@@ -621,7 +626,7 @@ impl Tracker {
                     .rev()
                     .find(|e| {
                         e.t == JourneyEventType::ZoneEntry
-                            && e.z.as_deref() == Some(gate_zone_name.as_str())
+                            && e.z.as_deref() == Some(&*gate_zone_name)
                     })
                     .map(|e| e.ts);
                 if let Some(entry_ts) = gate_entry_ts {
@@ -651,7 +656,7 @@ impl Tracker {
                                     .persons
                                     .get(&track_id)
                                     .map(|p| p.accumulated_dwell_ms),
-                                gate_zone: Some(gate_zone_name.clone()),
+                                gate_zone: Some(gate_zone_name.to_string()),
                                 gate_entry_ts: Some(entry_ts),
                                 delta_ms: Some(delta_ms),
                                 gate_cmd_at: journey.gate_cmd_at,
@@ -713,7 +718,7 @@ impl Tracker {
                     .iter()
                     .map(|(tid, p)| AccDebugTrack {
                         tid: tid.0,
-                        zone: p.current_zone.map(|z| self.config.zone_name(z)),
+                        zone: p.current_zone.map(|z| self.config.zone_name(z).to_string()),
                         dwell_ms: p.accumulated_dwell_ms,
                         auth: p.authorized,
                     })

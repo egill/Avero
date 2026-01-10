@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -255,7 +256,7 @@ pub struct Config {
     entry_line: Option<i32>,
     approach_line: Option<i32>,
     _store_zone: Option<i32>,
-    zone_names: HashMap<i32, String>,
+    zone_names: HashMap<i32, Arc<str>>,
     min_dwell_ms: u64,
     metrics_interval_secs: u64,
     prometheus_port: u16,
@@ -327,15 +328,15 @@ impl Default for Config {
 }
 
 impl Config {
-    fn default_zone_names() -> HashMap<i32, String> {
+    fn default_zone_names() -> HashMap<i32, Arc<str>> {
         let mut names = HashMap::new();
-        names.insert(1001, "POS_1".to_string());
-        names.insert(1002, "POS_2".to_string());
-        names.insert(1003, "POS_3".to_string());
-        names.insert(1004, "POS_4".to_string());
-        names.insert(1005, "POS_5".to_string());
-        names.insert(1006, "EXIT_1".to_string());
-        names.insert(1007, "GATE_1".to_string());
+        names.insert(1001, Arc::from("POS_1"));
+        names.insert(1002, Arc::from("POS_2"));
+        names.insert(1003, Arc::from("POS_3"));
+        names.insert(1004, Arc::from("POS_4"));
+        names.insert(1005, Arc::from("POS_5"));
+        names.insert(1006, Arc::from("EXIT_1"));
+        names.insert(1007, Arc::from("GATE_1"));
         names
     }
 
@@ -391,11 +392,11 @@ impl Config {
         let toml_config: TomlConfig = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file {}", path.display()))?;
 
-        // Convert zone names from string keys to i32 keys
+        // Convert zone names from string keys to i32 keys with Arc<str> values
         let mut zone_names = HashMap::new();
         for (key, value) in toml_config.zones.names {
             if let Ok(id) = key.parse::<i32>() {
-                zone_names.insert(id, value);
+                zone_names.insert(id, Arc::from(value));
             }
         }
 
@@ -484,8 +485,8 @@ impl Config {
 
     /// Get zone name from geometry_id.
     ///
-    /// Returns the configured name for the zone, or a default
-    /// "ZONE_{id}" format if not configured.
+    /// Returns the configured name for the zone (as Arc<str> for cheap cloning),
+    /// or creates a new Arc for unknown zones with "ZONE_{id}" format.
     ///
     /// # Example
     ///
@@ -494,14 +495,14 @@ impl Config {
     /// use gateway_poc::domain::types::GeometryId;
     ///
     /// let config = Config::default();
-    /// assert_eq!(config.zone_name(GeometryId(1001)), "POS_1");
-    /// assert_eq!(config.zone_name(GeometryId(9999)), "ZONE_9999");
+    /// assert_eq!(&*config.zone_name(GeometryId(1001)), "POS_1");
+    /// assert_eq!(&*config.zone_name(GeometryId(9999)), "ZONE_9999");
     /// ```
-    pub fn zone_name(&self, geometry_id: GeometryId) -> String {
+    pub fn zone_name(&self, geometry_id: GeometryId) -> Arc<str> {
         self.zone_names
             .get(&geometry_id.0)
             .cloned()
-            .unwrap_or_else(|| format!("ZONE_{}", geometry_id.0))
+            .unwrap_or_else(|| Arc::from(format!("ZONE_{}", geometry_id.0)))
     }
 
     // Getters for all config fields
@@ -683,7 +684,7 @@ impl Config {
     #[cfg(test)]
     pub fn with_approach_line(mut self, line_id: i32) -> Self {
         self.approach_line = Some(line_id);
-        self.zone_names.insert(line_id, "APPROACH_1".to_string());
+        self.zone_names.insert(line_id, Arc::from("APPROACH_1"));
         self
     }
 }
@@ -716,10 +717,10 @@ mod tests {
     #[test]
     fn test_zone_name() {
         let config = Config::default();
-        assert_eq!(config.zone_name(GeometryId(1001)), "POS_1");
-        assert_eq!(config.zone_name(GeometryId(1007)), "GATE_1");
-        assert_eq!(config.zone_name(GeometryId(1006)), "EXIT_1");
-        assert_eq!(config.zone_name(GeometryId(9999)), "ZONE_9999");
+        assert_eq!(&*config.zone_name(GeometryId(1001)), "POS_1");
+        assert_eq!(&*config.zone_name(GeometryId(1007)), "GATE_1");
+        assert_eq!(&*config.zone_name(GeometryId(1006)), "EXIT_1");
+        assert_eq!(&*config.zone_name(GeometryId(9999)), "ZONE_9999");
     }
 
     #[test]
