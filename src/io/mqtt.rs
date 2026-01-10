@@ -147,14 +147,6 @@ fn timestamp_to_epoch_ms(ts: &TimestampValue) -> u64 {
 fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
     let mut events = Vec::with_capacity(8);
 
-    // Build position map from tracked_objects
-    let mut positions: std::collections::HashMap<i64, [f64; 3]> = std::collections::HashMap::new();
-    for obj in &frame.tracked_objects {
-        if obj.position.len() >= 3 {
-            positions.insert(obj.track_id, [obj.position[0], obj.position[1], obj.position[2]]);
-        }
-    }
-
     // Extract event time from frame timestamp (handles both ISO string and epoch ms)
     let event_time = timestamp_to_epoch_ms(&frame.time);
 
@@ -168,8 +160,14 @@ fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
         });
 
         if let Some(track_id) = attrs.track_id {
-            // Get position for this track if available
-            let position = positions.get(&track_id).copied();
+            // Linear search for position - frames typically have <10 tracked objects
+            let position = frame
+                .tracked_objects
+                .iter()
+                .find(|obj| obj.track_id == track_id)
+                .filter(|obj| obj.position.len() >= 3)
+                .map(|obj| [obj.position[0], obj.position[1], obj.position[2]]);
+
             events.push(ParsedEvent {
                 event_type,
                 track_id: TrackId(track_id),
