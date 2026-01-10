@@ -27,8 +27,7 @@ pub struct GateCmdWorker {
     gate: Arc<GateController>,
     /// Receiver for gate commands
     cmd_rx: mpsc::Receiver<GateCmd>,
-    /// Metrics for recording latency (used for queue depth tracking in US-005)
-    #[allow(dead_code)]
+    /// Metrics for recording queue delay and queue depth
     metrics: Arc<Metrics>,
 }
 
@@ -64,10 +63,11 @@ impl GateCmdWorker {
                 "gate_cmd_processed"
             );
 
-            // Record metrics - queue delay is part of E2E latency visible to customer
-            // The gate.send_open_command already records its own latency internally
+            // Record queue delay to metrics histogram
+            self.metrics.record_gate_queue_delay(queue_delay_us);
+
+            // Warn if queue delay exceeds 1ms - indicates backlog
             if queue_delay_us > 1000 {
-                // Warn if queue delay exceeds 1ms - indicates backlog
                 warn!(
                     track_id = %cmd.track_id,
                     queue_delay_us = %queue_delay_us,

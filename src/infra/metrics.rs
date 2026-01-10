@@ -33,6 +33,23 @@ fn stitch_dist_bucket_index(dist_cm: u64) -> usize {
     STITCH_DIST_BOUNDS.partition_point(|&bound| bound < dist_cm)
 }
 
+/// Update an atomic max value using compare-and-swap loop
+#[inline]
+fn update_atomic_max(atomic_max: &AtomicU64, new_value: u64) {
+    let mut current_max = atomic_max.load(Ordering::Relaxed);
+    while new_value > current_max {
+        match atomic_max.compare_exchange_weak(
+            current_max,
+            new_value,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(actual) => current_max = actual,
+        }
+    }
+}
+
 /// Swap all buckets to zero and return their values
 #[inline]
 fn swap_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
@@ -140,6 +157,19 @@ pub struct Metrics {
     mqtt_events_dropped: AtomicU64,
     /// ACC events dropped due to channel full (monotonic)
     acc_events_dropped: AtomicU64,
+    /// Gate commands dropped due to channel full (monotonic)
+    gate_cmds_dropped: AtomicU64,
+    /// Gate command queue delay histogram (time from enqueue to worker pickup)
+    /// Same buckets as latency: 100, 200, 400, ... 51200 µs
+    gate_queue_delay_buckets: [AtomicU64; NUM_BUCKETS],
+    /// Sum of gate queue delays (reset on report)
+    gate_queue_delay_sum_us: AtomicU64,
+    /// Max gate queue delay (reset on report)
+    gate_queue_delay_max_us: AtomicU64,
+    /// Current event queue depth (updated by sampler)
+    event_queue_depth: AtomicU64,
+    /// Current gate command queue depth (updated by sampler)
+    gate_queue_depth: AtomicU64,
     /// POS zone occupancy (number of people in each zone)
     /// Index is determined by order in pos_zones config
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
@@ -178,6 +208,12 @@ impl Metrics {
             acc_no_journey_total: AtomicU64::new(0),
             mqtt_events_dropped: AtomicU64::new(0),
             acc_events_dropped: AtomicU64::new(0),
+            gate_cmds_dropped: AtomicU64::new(0),
+            gate_queue_delay_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            gate_queue_delay_sum_us: AtomicU64::new(0),
+            gate_queue_delay_max_us: AtomicU64::new(0),
+            event_queue_depth: AtomicU64::new(0),
+            gate_queue_depth: AtomicU64::new(0),
             pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
             pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
             zone_id_to_index: parking_lot::RwLock::new(FxHashMap::default()),
@@ -252,19 +288,8 @@ impl Metrics {
         let bucket = bucket_index(latency_us);
         self.latency_buckets[bucket].fetch_add(1, Ordering::Relaxed);
 
-        // Update max using compare-and-swap loop
-        let mut current_max = self.latency_max_us.load(Ordering::Relaxed);
-        while latency_us > current_max {
-            match self.latency_max_us.compare_exchange_weak(
-                current_max,
-                latency_us,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => current_max = actual,
-            }
-        }
+        // Update max
+        update_atomic_max(&self.latency_max_us, latency_us);
     }
 
     /// Record a gate command was sent (lock-free)
@@ -285,19 +310,8 @@ impl Metrics {
         let bucket = bucket_index(latency_us);
         self.gate_latency_buckets[bucket].fetch_add(1, Ordering::Relaxed);
 
-        // Update max using compare-and-swap loop
-        let mut current_max = self.gate_latency_max_us.load(Ordering::Relaxed);
-        while latency_us > current_max {
-            match self.gate_latency_max_us.compare_exchange_weak(
-                current_max,
-                latency_us,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => current_max = actual,
-            }
-        }
+        // Update max
+        update_atomic_max(&self.gate_latency_max_us, latency_us);
     }
 
     /// Get total events processed
@@ -409,6 +423,55 @@ impl Metrics {
         self.acc_events_dropped.load(Ordering::Relaxed)
     }
 
+    /// Record a gate command dropped due to channel full (lock-free)
+    #[inline]
+    pub fn record_gate_cmd_dropped(&self) {
+        self.gate_cmds_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get gate commands dropped total
+    #[inline]
+    #[allow(dead_code)]
+    pub fn gate_cmds_dropped(&self) -> u64 {
+        self.gate_cmds_dropped.load(Ordering::Relaxed)
+    }
+
+    /// Record gate command queue delay (time from enqueue to worker pickup)
+    #[inline]
+    pub fn record_gate_queue_delay(&self, delay_us: u64) {
+        // Update histogram bucket
+        let bucket = bucket_index(delay_us);
+        self.gate_queue_delay_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        self.gate_queue_delay_sum_us.fetch_add(delay_us, Ordering::Relaxed);
+
+        // Update max
+        update_atomic_max(&self.gate_queue_delay_max_us, delay_us);
+    }
+
+    /// Set current event queue depth (called by sampler)
+    #[inline]
+    pub fn set_event_queue_depth(&self, depth: u64) {
+        self.event_queue_depth.store(depth, Ordering::Relaxed);
+    }
+
+    /// Set current gate command queue depth (called by sampler)
+    #[inline]
+    pub fn set_gate_queue_depth(&self, depth: u64) {
+        self.gate_queue_depth.store(depth, Ordering::Relaxed);
+    }
+
+    /// Get current event queue depth
+    #[inline]
+    pub fn event_queue_depth(&self) -> u64 {
+        self.event_queue_depth.load(Ordering::Relaxed)
+    }
+
+    /// Get current gate queue depth
+    #[inline]
+    pub fn gate_queue_depth(&self) -> u64 {
+        self.gate_queue_depth.load(Ordering::Relaxed)
+    }
+
     /// Get ACC events total
     #[inline]
     #[allow(dead_code)]
@@ -503,6 +566,23 @@ impl Metrics {
         // Get drop counters (don't reset)
         let mqtt_events_dropped = self.mqtt_events_dropped.load(Ordering::Relaxed);
         let acc_events_dropped = self.acc_events_dropped.load(Ordering::Relaxed);
+        let gate_cmds_dropped = self.gate_cmds_dropped.load(Ordering::Relaxed);
+
+        // Swap gate queue delay histogram (reset on report)
+        let gate_queue_delay_buckets = swap_buckets(&self.gate_queue_delay_buckets);
+        let gate_queue_delay_sum = self.gate_queue_delay_sum_us.swap(0, Ordering::Relaxed);
+        let gate_queue_delay_max = self.gate_queue_delay_max_us.swap(0, Ordering::Relaxed);
+        let gate_queue_delay_count: u64 = gate_queue_delay_buckets.iter().sum();
+        let gate_queue_delay_avg_us = if gate_queue_delay_count > 0 {
+            gate_queue_delay_sum / gate_queue_delay_count
+        } else {
+            0
+        };
+        let gate_queue_delay_p99_us = percentile_from_buckets(&gate_queue_delay_buckets, 0.99);
+
+        // Get queue depths (point-in-time, don't reset)
+        let event_queue_depth = self.event_queue_depth.load(Ordering::Relaxed);
+        let gate_queue_depth = self.gate_queue_depth.load(Ordering::Relaxed);
 
         // Get stitch histogram buckets (don't reset - cumulative)
         let stitch_distance_buckets = load_buckets(&self.stitch_distance_buckets);
@@ -547,6 +627,13 @@ impl Metrics {
             acc_no_journey_total,
             mqtt_events_dropped,
             acc_events_dropped,
+            gate_cmds_dropped,
+            gate_queue_delay_buckets,
+            gate_queue_delay_avg_us,
+            gate_queue_delay_max_us: gate_queue_delay_max,
+            gate_queue_delay_p99_us,
+            event_queue_depth,
+            gate_queue_depth,
         }
     }
 }
@@ -620,6 +707,20 @@ pub struct MetricsSummary {
     pub mqtt_events_dropped: u64,
     /// ACC events dropped due to channel full
     pub acc_events_dropped: u64,
+    /// Gate commands dropped due to channel full
+    pub gate_cmds_dropped: u64,
+    /// Gate queue delay histogram buckets (time from enqueue to worker pickup)
+    pub gate_queue_delay_buckets: [u64; NUM_BUCKETS],
+    /// Average gate queue delay (µs)
+    pub gate_queue_delay_avg_us: u64,
+    /// Max gate queue delay (µs)
+    pub gate_queue_delay_max_us: u64,
+    /// 99th percentile gate queue delay (µs)
+    pub gate_queue_delay_p99_us: u64,
+    /// Current event queue depth (snapshot)
+    pub event_queue_depth: u64,
+    /// Current gate command queue depth (snapshot)
+    pub gate_queue_depth: u64,
 }
 
 impl MetricsSummary {

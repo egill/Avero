@@ -97,13 +97,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Create gate command worker (decouples gate I/O from tracker loop)
+    // Keep a clone of the sender for queue depth sampling
     let (gate_cmd_tx, gate_worker) = create_gate_worker(gate.clone(), metrics.clone(), 64);
+    let gate_cmd_tx_sampler = gate_cmd_tx.clone();
     tokio::spawn(async move {
         gate_worker.run().await;
     });
 
     // Create event channel (bounded for backpressure)
+    // Keep a clone of the sender for queue depth sampling
     let (event_tx, event_rx) = mpsc::channel(1000);
+    let event_tx_sampler = event_tx.clone();
 
     // Create watch channel for door state (lossless - latest value always available)
     let (door_tx, door_rx) = watch::channel(gateway_poc::domain::types::DoorStatus::Unknown);
@@ -170,12 +174,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Start metrics reporter (lock-free reads with full summary)
+    // Also samples queue depths for diagnosability
     let metrics_clone = metrics.clone();
     let metrics_interval = config.metrics_interval_secs();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(metrics_interval));
         loop {
             interval.tick().await;
+
+            // Sample queue depths (max_capacity - capacity = current depth)
+            let event_depth =
+                (event_tx_sampler.max_capacity() - event_tx_sampler.capacity()) as u64;
+            let gate_depth =
+                (gate_cmd_tx_sampler.max_capacity() - gate_cmd_tx_sampler.capacity()) as u64;
+            metrics_clone.set_event_queue_depth(event_depth);
+            metrics_clone.set_gate_queue_depth(gate_depth);
+
             // Use full report with placeholder track counts (actual counts are in tracker)
             let summary = metrics_clone.report(0, 0);
             summary.log();
