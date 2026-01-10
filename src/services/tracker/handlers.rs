@@ -631,12 +631,13 @@ impl Tracker {
             }
         }
 
-        // Set ACC group size on all matched journeys (for Command display)
+        // Set ACC group size and member track IDs on all matched journeys (for Command display)
         let group_size = matched_tracks.len() as u8;
         if group_size > 1 {
             for &track_id in &matched_tracks {
                 if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
                     journey.acc_group_size = group_size;
+                    journey.acc_group_tids = matched_tracks.iter().copied().collect();
                 }
             }
         }

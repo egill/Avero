@@ -125,7 +125,9 @@ pub struct Journey {
     pub authorized: bool,
     pub total_dwell_ms: u64,
     pub acc_matched: bool,
-    pub gate_cmd_at: Option<u64>,    // epoch ms
+    pub acc_group_size: u8,                     // 1 = solo, 2+ = group (people at POS together)
+    pub acc_group_tids: SmallVec<[TrackId; 4]>, // Track IDs of all group members
+    pub gate_cmd_at: Option<u64>,               // epoch ms
     pub gate_opened_at: Option<u64>, // epoch ms from RS485
     pub gate_was_open: bool,
     pub started_at: u64,       // epoch ms
@@ -162,6 +164,8 @@ impl Journey {
             authorized: false,
             total_dwell_ms: 0,
             acc_matched: false,
+            acc_group_size: 1,
+            acc_group_tids: SmallVec::new(),
             gate_cmd_at: None,
             gate_opened_at: None,
             gate_was_open: false,
@@ -266,6 +270,15 @@ impl Journey {
         obj.insert("auth".to_string(), serde_json::Value::Bool(self.authorized));
         obj.insert("dwell".to_string(), serde_json::Value::Number(self.total_dwell_ms.into()));
         obj.insert("acc".to_string(), serde_json::Value::Bool(self.acc_matched));
+        if self.acc_group_size > 1 {
+            obj.insert(
+                "acc_group".to_string(),
+                serde_json::Value::Number(self.acc_group_size.into()),
+            );
+            // Include track IDs of all group members
+            let group_tids: Vec<i64> = self.acc_group_tids.iter().map(|t| t.0).collect();
+            obj.insert("acc_group_tids".to_string(), serde_json::json!(group_tids));
+        }
 
         if let Some(gate_cmd) = self.gate_cmd_at {
             obj.insert("gate_cmd".to_string(), serde_json::Value::Number(gate_cmd.into()));

@@ -322,11 +322,8 @@ impl AccCollector {
         // Second try: recently exited with sufficient dwell AND pos now empty
         if !self.pos_groups.contains_key(pos) {
             // Log how long POS has been empty - helps diagnose ACC timing issues
-            let empty_since_ms = self
-                .last_pos_exit
-                .get(pos)
-                .map(|t| t.elapsed().as_millis() as u64)
-                .unwrap_or(0);
+            let empty_since_ms =
+                self.last_pos_exit.get(pos).map(|t| t.elapsed().as_millis() as u64).unwrap_or(0);
             info!(pos = %pos, empty_since_ms = %empty_since_ms, "acc_arrived_pos_empty");
             self.metrics.record_acc_empty_pos_time(empty_since_ms);
             self.cleanup_old_exits();
