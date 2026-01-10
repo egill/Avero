@@ -359,6 +359,20 @@ fn format_prometheus_metrics(
         site_id, summary.journey_egress_dropped
     ));
 
+    output.push_str("# HELP gateway_journey_egress_received_total Journey egress events attempted (before try_send)\n");
+    output.push_str("# TYPE gateway_journey_egress_received_total counter\n");
+    output.push_str(&format!(
+        "gateway_journey_egress_received_total{{site=\"{}\"}} {}\n",
+        site_id, summary.journey_egress_received
+    ));
+
+    output.push_str("# HELP gateway_egress_drop_ratio Journey egress drop ratio (dropped / received)\n");
+    output.push_str("# TYPE gateway_egress_drop_ratio gauge\n");
+    output.push_str(&format!(
+        "gateway_egress_drop_ratio{{site=\"{}\"}} {:.6}\n",
+        site_id, summary.egress_drop_ratio
+    ));
+
     // Gate queue delay histogram (time from enqueue to worker pickup)
     output
         .push_str("# HELP gateway_gate_queue_delay_us Gate command queue delay in microseconds\n");

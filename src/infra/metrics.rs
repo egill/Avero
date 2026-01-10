@@ -165,6 +165,8 @@ pub struct Metrics {
     acc_events_received: AtomicU64,
     /// Journey egress events dropped due to channel full (monotonic)
     journey_egress_dropped: AtomicU64,
+    /// Journeys attempted to enqueue for egress (monotonic)
+    journey_egress_received: AtomicU64,
     /// Gate command queue delay histogram (time from enqueue to worker pickup)
     /// Same buckets as latency: 100, 200, 400, ... 51200 µs
     gate_queue_delay_buckets: [AtomicU64; NUM_BUCKETS],
@@ -236,6 +238,7 @@ impl Metrics {
             mqtt_events_received: AtomicU64::new(0),
             acc_events_received: AtomicU64::new(0),
             journey_egress_dropped: AtomicU64::new(0),
+            journey_egress_received: AtomicU64::new(0),
             gate_queue_delay_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_queue_delay_sum_us: AtomicU64::new(0),
             gate_queue_delay_max_us: AtomicU64::new(0),
@@ -502,10 +505,22 @@ impl Metrics {
         self.journey_egress_dropped.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record a journey egress enqueue attempt (lock-free)
+    #[inline]
+    pub fn record_journey_egress_received(&self) {
+        self.journey_egress_received.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Get journey egress dropped total
     #[inline]
     pub fn journey_egress_dropped(&self) -> u64 {
         self.journey_egress_dropped.load(Ordering::Relaxed)
+    }
+
+    /// Get journey egress received total
+    #[inline]
+    pub fn journey_egress_received(&self) -> u64 {
+        self.journey_egress_received.load(Ordering::Relaxed)
     }
 
     /// Record gate command queue delay (time from enqueue to worker pickup)
@@ -696,12 +711,18 @@ impl Metrics {
         let mqtt_events_received = self.mqtt_events_received.load(Ordering::Relaxed);
         let acc_events_received = self.acc_events_received.load(Ordering::Relaxed);
         let journey_egress_dropped = self.journey_egress_dropped.load(Ordering::Relaxed);
+        let journey_egress_received = self.journey_egress_received.load(Ordering::Relaxed);
 
         // Compute drop ratios (guard divide-by-zero)
         let mqtt_drop_ratio =
             if mqtt_events_received > 0 { mqtt_events_dropped as f64 / mqtt_events_received as f64 } else { 0.0 };
         let acc_drop_ratio =
             if acc_events_received > 0 { acc_events_dropped as f64 / acc_events_received as f64 } else { 0.0 };
+        let egress_drop_ratio = if journey_egress_received > 0 {
+            journey_egress_dropped as f64 / journey_egress_received as f64
+        } else {
+            0.0
+        };
 
         // Swap gate queue delay histogram (reset on report)
         let gate_queue_delay_buckets = swap_buckets(&self.gate_queue_delay_buckets);
@@ -794,8 +815,10 @@ impl Metrics {
             mqtt_events_received,
             acc_events_received,
             journey_egress_dropped,
+            journey_egress_received,
             mqtt_drop_ratio,
             acc_drop_ratio,
+            egress_drop_ratio,
             gate_queue_delay_buckets,
             gate_queue_delay_avg_us,
             gate_queue_delay_max_us: gate_queue_delay_max,
@@ -894,10 +917,14 @@ pub struct MetricsSummary {
     pub acc_events_received: u64,
     /// Journey egress events dropped due to channel full
     pub journey_egress_dropped: u64,
+    /// Journeys attempted to enqueue for egress
+    pub journey_egress_received: u64,
     /// MQTT drop ratio (dropped / received)
     pub mqtt_drop_ratio: f64,
     /// ACC drop ratio (dropped / received)
     pub acc_drop_ratio: f64,
+    /// Egress drop ratio (dropped / received)
+    pub egress_drop_ratio: f64,
     /// Gate queue delay histogram buckets (time from enqueue to worker pickup)
     pub gate_queue_delay_buckets: [u64; NUM_BUCKETS],
     /// Average gate queue delay (µs)
@@ -954,7 +981,9 @@ impl MetricsSummary {
             acc_recv = %self.acc_events_received,
             acc_drop = %self.acc_events_dropped,
             acc_drop_pct = format!("{:.2}", self.acc_drop_ratio * 100.0),
+            egress_recv = %self.journey_egress_received,
             egress_drop = %self.journey_egress_dropped,
+            egress_drop_pct = format!("{:.2}", self.egress_drop_ratio * 100.0),
             gate_drop = %self.gate_cmds_dropped,
             event_q_pct = %self.event_queue_utilization_pct,
             gate_q_pct = %self.gate_queue_utilization_pct,

@@ -172,7 +172,7 @@
       "instructions": "Add received counters in src/infra/metrics.rs and increment them in src/io/mqtt.rs and src/io/acc_listener.rs before try_send. Add journey_egress_dropped counter in tracker when journey_tx.try_send fails. Compute drop ratios in Metrics::report (dropped / received, guard divide-by-zero). Update Prometheus output in src/io/prometheus.rs to expose counters and ratios. Update MetricsSummary::log to include drops/ratios.",
       "files": ["src/infra/metrics.rs", "src/io/mqtt.rs", "src/io/acc_listener.rs", "src/services/tracker/mod.rs", "src/io/prometheus.rs"],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "HIGH: Needed to quantify whether we're dropping a small vs large portion of events."
     },
     {
@@ -189,7 +189,7 @@
       "instructions": "In src/main.rs sampler, compute utilization = depth / max_capacity * 100 for event and gate queues. Add setters and fields in Metrics, include in MetricsSummary and Prometheus output. Use u64 or f64 as appropriate, keep units clear.",
       "files": ["src/main.rs", "src/infra/metrics.rs", "src/io/prometheus.rs"],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "MEDIUM: Helps identify when we're close to capacity even before drops occur."
     }
   ]

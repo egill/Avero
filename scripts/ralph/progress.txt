@@ -331,5 +331,52 @@ O(events * tracked_objects) complexity is acceptable given both are small.
 
 ---
 
+### US-010: Expose drop counters and drop ratios for ingress/egress ✓
+**Commit:** 5437eea feat: [US-010] - Expose drop counters and drop ratios for ingress/egress
+
+**Changes:**
+- Added `mqtt_events_received` and `acc_events_received` counters to Metrics
+- Added `journey_egress_dropped` counter to track egress channel drops
+- MQTT and ACC ingress now call `record_*_event_received()` before try_send
+- Tracker calls `record_journey_egress_dropped()` on journey_tx.try_send failure
+- Compute `mqtt_drop_ratio` and `acc_drop_ratio` in Metrics::report (with divide-by-zero guards)
+- Prometheus exposes new counters (*_received_total, *_dropped_total) and drop ratio gauges
+- MetricsSummary::log includes drop counts and percentages
+
+**Files modified:**
+- `src/infra/metrics.rs` - new counters, recording methods, drop ratio computation
+- `src/io/mqtt.rs` - record_mqtt_event_received() call
+- `src/io/acc_listener.rs` - record_acc_event_received() call
+- `src/services/tracker/mod.rs` - record_journey_egress_dropped() call
+- `src/io/prometheus.rs` - expose new counters and ratios
+
+**Key insight:** Drop ratios are essential for quantifying backpressure severity.
+A small drop rate (0.01%) is acceptable; a large rate (10%) indicates capacity problems.
+The received counters provide the denominator needed to compute meaningful percentages.
+
+---
+
+### US-011: Expose queue utilization percentages for pressure monitoring ✓
+**Commit:** 3f40eb7 feat: [US-011] - Expose queue utilization percentages for pressure monitoring
+
+**Changes:**
+- Added `event_queue_utilization_pct` and `gate_queue_utilization_pct` fields to Metrics
+- Compute utilization as `depth * 100 / max_capacity` in main.rs sampler
+- Added `cloudplus_max_capacity()` method to GateController and CloudPlusClient
+- Prometheus exposes utilization gauges: `gateway_event_queue_utilization_pct`, `gateway_gate_queue_utilization_pct`
+- MetricsSummary::log includes `event_q_pct` and `gate_q_pct`
+
+**Files modified:**
+- `src/infra/metrics.rs` - utilization fields, setters, getters
+- `src/io/cloudplus.rs` - outbound_max_capacity() method
+- `src/services/gate.rs` - cloudplus_max_capacity() method
+- `src/main.rs` - compute utilization in sampler
+- `src/io/prometheus.rs` - expose utilization gauges
+
+**Key insight:** Utilization percentage (0-100) allows detecting pressure before drops occur.
+At 80% utilization, the system is close to capacity. At 100%, drops will start.
+
+---
+
 ## Story Progress
 

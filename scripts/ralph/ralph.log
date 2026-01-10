@@ -131,3 +131,6 @@ All 9 stories have `passes: true`. According to the Ralph Agent Instructions:
 > ```
 
 COMPLETE
+No output means no stories have `passes: false`. All stories are complete.
+
+COMPLETE
