@@ -89,6 +89,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize POS zone tracking
     metrics.set_pos_zones(config.pos_zones());
 
+    // Create MQTT egress channel early (needed by gate worker for timing events)
+    // The publisher will be started later if mqtt_egress is enabled
+    let (egress_sender, egress_rx) = if config.mqtt_egress_enabled() {
+        let (sender, rx) = create_egress_channel(1000, config.site_id().to_string());
+        (Some(sender), Some(rx))
+    } else {
+        (None, None)
+    };
+
     // Start CloudPlus TCP client if in TCP mode
     if let Some(tcp_client) = gate.tcp_client() {
         let tcp_shutdown = shutdown_rx.clone();
@@ -99,7 +108,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create gate command worker (decouples gate I/O from tracker loop)
     // Keep a clone of the sender for queue depth sampling
-    let (gate_cmd_tx, gate_worker) = create_gate_worker(gate.clone(), metrics.clone(), 64);
+    let (gate_cmd_tx, gate_worker) =
+        create_gate_worker(gate.clone(), metrics.clone(), 64, egress_sender.clone());
     let gate_cmd_tx_sampler = gate_cmd_tx.clone();
     tokio::spawn(async move {
         gate_worker.run().await;
@@ -206,19 +216,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Create MQTT egress channel and publisher (if enabled)
-    let egress_sender = if config.mqtt_egress_enabled() {
-        let (egress_sender, egress_rx) = create_egress_channel(1000, config.site_id().to_string());
-
+    // Start MQTT egress publisher (if enabled, channel was created earlier)
+    if let (Some(ref sender), Some(rx)) = (&egress_sender, egress_rx) {
         // Start MQTT egress publisher
-        let publisher = MqttPublisher::new(&config, egress_rx);
+        let publisher = MqttPublisher::new(&config, rx);
         let publisher_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
             publisher.run(publisher_shutdown).await;
         });
 
         // Start metrics egress publisher (separate from logging)
-        let metrics_egress = egress_sender.clone();
+        let metrics_egress = sender.clone();
         let metrics_for_egress = metrics.clone();
         let egress_interval = config.mqtt_egress_metrics_interval_secs();
         tokio::spawn(async move {
@@ -230,11 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 metrics_egress.send_metrics(summary);
             }
         });
-
-        Some(egress_sender)
-    } else {
-        None
-    };
+    }
 
     // Start tracker (main event processing loop)
     let mut tracker = gateway_poc::services::Tracker::new(

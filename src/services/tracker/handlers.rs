@@ -319,13 +319,12 @@ impl Tracker {
                     "gate_entry_not_authorized"
                 );
                 if let Some(ref sender) = self.egress_sender {
-                    sender.send_gate_state(GateStatePayload {
-                        site: None,
+                    sender.send_gate_state(GateStatePayload::new(
                         ts,
-                        state: "blocked".to_string(),
-                        tid: Some(track_id.0),
-                        src: "tracker".to_string(),
-                    });
+                        "blocked",
+                        Some(track_id.0),
+                        "tracker",
+                    ));
                 }
             }
         }
@@ -535,19 +534,12 @@ impl Tracker {
 
         // Publish gate state change to MQTT
         if let Some(ref sender) = self.egress_sender {
-            let state = match status {
-                DoorStatus::Open => "open",
-                DoorStatus::Closed => "closed",
-                DoorStatus::Moving => "moving",
-                DoorStatus::Unknown => "unknown",
-            };
-            sender.send_gate_state(GateStatePayload {
-                site: None,
-                ts: epoch_ms(),
-                state: state.to_string(),
-                tid: self.door_correlator.last_gate_cmd_track_id().map(|t| t.0),
-                src: "rs485".to_string(),
-            });
+            sender.send_gate_state(GateStatePayload::new(
+                epoch_ms(),
+                status.as_str(),
+                self.door_correlator.last_gate_cmd_track_id().map(|t| t.0),
+                "rs485",
+            ));
         }
 
         // Correlate door state with recent gate commands
@@ -809,13 +801,12 @@ impl Tracker {
         );
 
         if let Some(ref sender) = self.egress_sender {
-            sender.send_gate_state(GateStatePayload {
-                site: None,
+            sender.send_gate_state(GateStatePayload::new(
                 ts,
-                state: "cmd_enqueued".to_string(),
-                tid: Some(track_id.0),
-                src: src.to_string(),
-            });
+                "cmd_enqueued",
+                Some(track_id.0),
+                src,
+            ));
         }
 
         self.door_correlator.record_gate_cmd(track_id);

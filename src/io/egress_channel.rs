@@ -125,13 +125,60 @@ pub struct GateStatePayload {
     pub site: Option<String>,
     /// Timestamp (epoch ms)
     pub ts: u64,
-    /// Gate state (cmd_sent, open, closed, moving)
+    /// Gate state (cmd_enqueued, cmd_sent, open, closed, moving)
     pub state: String,
     /// Associated track ID (if any)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tid: Option<i64>,
     /// Source of the state change (rs485, tcp, cmd)
     pub src: String,
+    /// Queue delay in microseconds (time from enqueue to processing start)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_delay_us: Option<u64>,
+    /// Send latency in microseconds (time for actual network send)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_latency_us: Option<u64>,
+    /// Total enqueue-to-send time in microseconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enqueue_to_send_us: Option<u64>,
+}
+
+impl GateStatePayload {
+    /// Create a new gate state payload without timing info
+    pub fn new(ts: u64, state: &str, tid: Option<i64>, src: &str) -> Self {
+        Self {
+            site: None,
+            ts,
+            state: state.to_string(),
+            tid,
+            src: src.to_string(),
+            queue_delay_us: None,
+            send_latency_us: None,
+            enqueue_to_send_us: None,
+        }
+    }
+
+    /// Create a gate state payload with timing info (for cmd_sent events)
+    pub fn with_timing(
+        ts: u64,
+        state: &str,
+        tid: Option<i64>,
+        src: &str,
+        queue_delay_us: u64,
+        send_latency_us: u64,
+        enqueue_to_send_us: u64,
+    ) -> Self {
+        Self {
+            site: None,
+            ts,
+            state: state.to_string(),
+            tid,
+            src: src.to_string(),
+            queue_delay_us: Some(queue_delay_us),
+            send_latency_us: Some(send_latency_us),
+            enqueue_to_send_us: Some(enqueue_to_send_us),
+        }
+    }
 }
 
 /// Payload for track lifecycle events

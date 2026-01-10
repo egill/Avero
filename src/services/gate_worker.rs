@@ -4,8 +4,10 @@
 //! network I/O from blocking event processing. The tracker enqueues commands
 //! via an mpsc channel, and the worker handles actual network operations.
 
+use crate::domain::journey::epoch_ms;
 use crate::domain::types::TrackId;
 use crate::infra::metrics::Metrics;
+use crate::io::egress_channel::{EgressSender, GateStatePayload};
 use crate::services::gate::{GateCommand, GateController};
 use std::sync::Arc;
 use std::time::Instant;
@@ -29,6 +31,8 @@ pub struct GateCmdWorker {
     cmd_rx: mpsc::Receiver<GateCmd>,
     /// Metrics for recording queue delay and queue depth
     metrics: Arc<Metrics>,
+    /// Optional egress sender for emitting gate state events with timing
+    egress_sender: Option<EgressSender>,
 }
 
 impl GateCmdWorker {
@@ -37,8 +41,9 @@ impl GateCmdWorker {
         gate: Arc<GateController>,
         cmd_rx: mpsc::Receiver<GateCmd>,
         metrics: Arc<Metrics>,
+        egress_sender: Option<EgressSender>,
     ) -> Self {
-        Self { gate, cmd_rx, metrics }
+        Self { gate, cmd_rx, metrics, egress_sender }
     }
 
     /// Run the worker, processing commands until the channel closes
@@ -71,6 +76,19 @@ impl GateCmdWorker {
             let enqueue_to_send_us = cmd.enqueued_at.elapsed().as_micros() as u64;
             self.metrics.record_gate_enqueue_to_send(enqueue_to_send_us);
 
+            // Emit cmd_sent event with timing info
+            if let Some(ref sender) = self.egress_sender {
+                sender.send_gate_state(GateStatePayload::with_timing(
+                    epoch_ms(),
+                    "cmd_sent",
+                    Some(cmd.track_id.0),
+                    "gate_worker",
+                    queue_delay_us,
+                    send_latency_us,
+                    enqueue_to_send_us,
+                ));
+            }
+
             // Warn if queue delay exceeds 1ms - indicates backlog
             if queue_delay_us > 1000 {
                 warn!(
@@ -92,8 +110,9 @@ pub fn create_gate_worker(
     gate: Arc<GateController>,
     metrics: Arc<Metrics>,
     buffer_size: usize,
+    egress_sender: Option<EgressSender>,
 ) -> (mpsc::Sender<GateCmd>, GateCmdWorker) {
     let (cmd_tx, cmd_rx) = mpsc::channel(buffer_size);
-    let worker = GateCmdWorker::new(gate, cmd_rx, metrics);
+    let worker = GateCmdWorker::new(gate, cmd_rx, metrics, egress_sender);
     (cmd_tx, worker)
 }
