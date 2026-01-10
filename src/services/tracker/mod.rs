@@ -137,6 +137,7 @@ impl Tracker {
 
             // Send to egress writer via channel (non-blocking)
             if let Err(e) = self.journey_tx.try_send(journey) {
+                self.metrics.record_journey_egress_dropped();
                 warn!(error = %e, "journey_egress_queue_full");
             }
         }

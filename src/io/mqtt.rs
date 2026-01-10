@@ -65,6 +65,7 @@ pub async fn start_mqtt_client(
                                 }
                                 for event in events {
                                     debug!(track_id = %event.track_id, event_type = ?event.event_type, "Parsed event");
+                                    metrics.record_mqtt_event_received();
                                     if let Err(e) = event_tx.try_send(event) {
                                         match e {
                                             TrySendError::Full(_) => {

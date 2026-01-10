@@ -159,6 +159,12 @@ pub struct Metrics {
     acc_events_dropped: AtomicU64,
     /// Gate commands dropped due to channel full (monotonic)
     gate_cmds_dropped: AtomicU64,
+    /// MQTT events received (monotonic) - before try_send
+    mqtt_events_received: AtomicU64,
+    /// ACC events received (monotonic) - before try_send
+    acc_events_received: AtomicU64,
+    /// Journey egress events dropped due to channel full (monotonic)
+    journey_egress_dropped: AtomicU64,
     /// Gate command queue delay histogram (time from enqueue to worker pickup)
     /// Same buckets as latency: 100, 200, 400, ... 51200 µs
     gate_queue_delay_buckets: [AtomicU64; NUM_BUCKETS],
@@ -223,6 +229,9 @@ impl Metrics {
             mqtt_events_dropped: AtomicU64::new(0),
             acc_events_dropped: AtomicU64::new(0),
             gate_cmds_dropped: AtomicU64::new(0),
+            mqtt_events_received: AtomicU64::new(0),
+            acc_events_received: AtomicU64::new(0),
+            journey_egress_dropped: AtomicU64::new(0),
             gate_queue_delay_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_queue_delay_sum_us: AtomicU64::new(0),
             gate_queue_delay_max_us: AtomicU64::new(0),
@@ -457,6 +466,42 @@ impl Metrics {
         self.gate_cmds_dropped.load(Ordering::Relaxed)
     }
 
+    /// Record an MQTT event received (before try_send) (lock-free)
+    #[inline]
+    pub fn record_mqtt_event_received(&self) {
+        self.mqtt_events_received.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get MQTT events received total
+    #[inline]
+    pub fn mqtt_events_received(&self) -> u64 {
+        self.mqtt_events_received.load(Ordering::Relaxed)
+    }
+
+    /// Record an ACC event received (before try_send) (lock-free)
+    #[inline]
+    pub fn record_acc_event_received(&self) {
+        self.acc_events_received.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get ACC events received total
+    #[inline]
+    pub fn acc_events_received(&self) -> u64 {
+        self.acc_events_received.load(Ordering::Relaxed)
+    }
+
+    /// Record a journey egress event dropped due to channel full (lock-free)
+    #[inline]
+    pub fn record_journey_egress_dropped(&self) {
+        self.journey_egress_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get journey egress dropped total
+    #[inline]
+    pub fn journey_egress_dropped(&self) -> u64 {
+        self.journey_egress_dropped.load(Ordering::Relaxed)
+    }
+
     /// Record gate command queue delay (time from enqueue to worker pickup)
     #[inline]
     pub fn record_gate_queue_delay(&self, delay_us: u64) {
@@ -614,10 +659,19 @@ impl Metrics {
         let acc_late_total = self.acc_late_total.load(Ordering::Relaxed);
         let acc_no_journey_total = self.acc_no_journey_total.load(Ordering::Relaxed);
 
-        // Get drop counters (don't reset)
+        // Get drop and received counters (don't reset)
         let mqtt_events_dropped = self.mqtt_events_dropped.load(Ordering::Relaxed);
         let acc_events_dropped = self.acc_events_dropped.load(Ordering::Relaxed);
         let gate_cmds_dropped = self.gate_cmds_dropped.load(Ordering::Relaxed);
+        let mqtt_events_received = self.mqtt_events_received.load(Ordering::Relaxed);
+        let acc_events_received = self.acc_events_received.load(Ordering::Relaxed);
+        let journey_egress_dropped = self.journey_egress_dropped.load(Ordering::Relaxed);
+
+        // Compute drop ratios (guard divide-by-zero)
+        let mqtt_drop_ratio =
+            if mqtt_events_received > 0 { mqtt_events_dropped as f64 / mqtt_events_received as f64 } else { 0.0 };
+        let acc_drop_ratio =
+            if acc_events_received > 0 { acc_events_dropped as f64 / acc_events_received as f64 } else { 0.0 };
 
         // Swap gate queue delay histogram (reset on report)
         let gate_queue_delay_buckets = swap_buckets(&self.gate_queue_delay_buckets);
@@ -705,6 +759,11 @@ impl Metrics {
             mqtt_events_dropped,
             acc_events_dropped,
             gate_cmds_dropped,
+            mqtt_events_received,
+            acc_events_received,
+            journey_egress_dropped,
+            mqtt_drop_ratio,
+            acc_drop_ratio,
             gate_queue_delay_buckets,
             gate_queue_delay_avg_us,
             gate_queue_delay_max_us: gate_queue_delay_max,
@@ -795,6 +854,16 @@ pub struct MetricsSummary {
     pub acc_events_dropped: u64,
     /// Gate commands dropped due to channel full
     pub gate_cmds_dropped: u64,
+    /// MQTT events received (before try_send)
+    pub mqtt_events_received: u64,
+    /// ACC events received (before try_send)
+    pub acc_events_received: u64,
+    /// Journey egress events dropped due to channel full
+    pub journey_egress_dropped: u64,
+    /// MQTT drop ratio (dropped / received)
+    pub mqtt_drop_ratio: f64,
+    /// ACC drop ratio (dropped / received)
+    pub acc_drop_ratio: f64,
     /// Gate queue delay histogram buckets (time from enqueue to worker pickup)
     pub gate_queue_delay_buckets: [u64; NUM_BUCKETS],
     /// Average gate queue delay (µs)
@@ -841,6 +910,14 @@ impl MetricsSummary {
             authorized_tracks = %self.authorized_tracks,
             gate_cmds = %self.gate_commands_sent,
             gate_p99_us = %self.gate_lat_p99_us,
+            mqtt_recv = %self.mqtt_events_received,
+            mqtt_drop = %self.mqtt_events_dropped,
+            mqtt_drop_pct = format!("{:.2}", self.mqtt_drop_ratio * 100.0),
+            acc_recv = %self.acc_events_received,
+            acc_drop = %self.acc_events_dropped,
+            acc_drop_pct = format!("{:.2}", self.acc_drop_ratio * 100.0),
+            egress_drop = %self.journey_egress_dropped,
+            gate_drop = %self.gate_cmds_dropped,
             "metrics"
         );
     }

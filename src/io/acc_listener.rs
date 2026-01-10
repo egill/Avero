@@ -123,6 +123,7 @@ async fn handle_acc_connection(
             };
 
             // Use try_send to never block the connection handler
+            metrics.record_acc_event_received();
             match event_tx.try_send(event) {
                 Ok(()) => {}
                 Err(TrySendError::Full(_)) => {

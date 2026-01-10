@@ -302,6 +302,63 @@ fn format_prometheus_metrics(
         site_id, summary.acc_no_journey_total
     ));
 
+    // Drop and received counters
+    output.push_str("# HELP gateway_mqtt_events_received_total MQTT events received (before try_send)\n");
+    output.push_str("# TYPE gateway_mqtt_events_received_total counter\n");
+    output.push_str(&format!(
+        "gateway_mqtt_events_received_total{{site=\"{}\"}} {}\n",
+        site_id, summary.mqtt_events_received
+    ));
+
+    output.push_str("# HELP gateway_mqtt_events_dropped_total MQTT events dropped due to channel full\n");
+    output.push_str("# TYPE gateway_mqtt_events_dropped_total counter\n");
+    output.push_str(&format!(
+        "gateway_mqtt_events_dropped_total{{site=\"{}\"}} {}\n",
+        site_id, summary.mqtt_events_dropped
+    ));
+
+    output.push_str("# HELP gateway_mqtt_drop_ratio MQTT drop ratio (dropped / received)\n");
+    output.push_str("# TYPE gateway_mqtt_drop_ratio gauge\n");
+    output.push_str(&format!(
+        "gateway_mqtt_drop_ratio{{site=\"{}\"}} {:.6}\n",
+        site_id, summary.mqtt_drop_ratio
+    ));
+
+    output.push_str("# HELP gateway_acc_events_received_total ACC events received (before try_send)\n");
+    output.push_str("# TYPE gateway_acc_events_received_total counter\n");
+    output.push_str(&format!(
+        "gateway_acc_events_received_total{{site=\"{}\"}} {}\n",
+        site_id, summary.acc_events_received
+    ));
+
+    output.push_str("# HELP gateway_acc_events_dropped_total ACC events dropped due to channel full\n");
+    output.push_str("# TYPE gateway_acc_events_dropped_total counter\n");
+    output.push_str(&format!(
+        "gateway_acc_events_dropped_total{{site=\"{}\"}} {}\n",
+        site_id, summary.acc_events_dropped
+    ));
+
+    output.push_str("# HELP gateway_acc_drop_ratio ACC drop ratio (dropped / received)\n");
+    output.push_str("# TYPE gateway_acc_drop_ratio gauge\n");
+    output.push_str(&format!(
+        "gateway_acc_drop_ratio{{site=\"{}\"}} {:.6}\n",
+        site_id, summary.acc_drop_ratio
+    ));
+
+    output.push_str("# HELP gateway_gate_cmds_dropped_total Gate commands dropped due to channel full\n");
+    output.push_str("# TYPE gateway_gate_cmds_dropped_total counter\n");
+    output.push_str(&format!(
+        "gateway_gate_cmds_dropped_total{{site=\"{}\"}} {}\n",
+        site_id, summary.gate_cmds_dropped
+    ));
+
+    output.push_str("# HELP gateway_journey_egress_dropped_total Journey egress events dropped\n");
+    output.push_str("# TYPE gateway_journey_egress_dropped_total counter\n");
+    output.push_str(&format!(
+        "gateway_journey_egress_dropped_total{{site=\"{}\"}} {}\n",
+        site_id, summary.journey_egress_dropped
+    ));
+
     // Gate queue delay histogram (time from enqueue to worker pickup)
     output
         .push_str("# HELP gateway_gate_queue_delay_us Gate command queue delay in microseconds\n");
