@@ -164,6 +164,10 @@ impl Tracker {
 
         let latency_us = process_start.elapsed().as_micros() as u64;
         self.metrics.record_event_processed(latency_us);
+
+        // Update track counts for Prometheus/MQTT metrics (non-blocking atomic stores)
+        self.metrics.set_active_tracks(self.active_tracks());
+        self.metrics.set_authorized_tracks(self.authorized_tracks());
     }
 
     /// Get current active track count

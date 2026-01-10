@@ -54,6 +54,10 @@ pub struct ZoneEventPayload {
     /// Total accumulated dwell across all POS zones
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_dwell_ms: Option<u64>,
+    /// Original event timestamp from Xovis sensor (epoch ms).
+    /// Compare with `ts` to calculate sensor-to-tracker latency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_time: Option<u64>,
 }
 
 /// Payload for metrics snapshot
@@ -92,6 +96,16 @@ pub struct MetricsPayload {
     pub gate_lat_max_us: u64,
     /// 99th percentile gate command latency (µs)
     pub gate_lat_p99_us: u64,
+    /// Current event queue depth (snapshot)
+    pub event_queue_depth: u64,
+    /// Current gate command queue depth (snapshot)
+    pub gate_queue_depth: u64,
+    /// Current CloudPlus outbound queue depth (snapshot)
+    pub cloudplus_queue_depth: u64,
+    /// Event queue utilization percentage (0-100)
+    pub event_queue_utilization_pct: u64,
+    /// Gate queue utilization percentage (0-100)
+    pub gate_queue_utilization_pct: u64,
 }
 
 impl From<MetricsSummary> for MetricsPayload {
@@ -113,6 +127,11 @@ impl From<MetricsSummary> for MetricsPayload {
             gate_lat_avg_us: summary.gate_lat_avg_us,
             gate_lat_max_us: summary.gate_lat_max_us,
             gate_lat_p99_us: summary.gate_lat_p99_us,
+            event_queue_depth: summary.event_queue_depth,
+            gate_queue_depth: summary.gate_queue_depth,
+            cloudplus_queue_depth: summary.cloudplus_queue_depth,
+            event_queue_utilization_pct: summary.event_queue_utilization_pct,
+            gate_queue_utilization_pct: summary.gate_queue_utilization_pct,
         }
     }
 }

@@ -301,6 +301,7 @@ impl Tracker {
                 auth: person.authorized,
                 dwell_ms: None,
                 total_dwell_ms: Some(person.accumulated_dwell_ms),
+                event_time: Some(event.event_time),
             });
         }
 
@@ -412,6 +413,7 @@ impl Tracker {
                 auth: person.authorized,
                 dwell_ms: zone_dwell_ms,
                 total_dwell_ms: Some(person.accumulated_dwell_ms),
+                event_time: Some(event.event_time),
             });
         }
 

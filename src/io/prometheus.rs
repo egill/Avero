@@ -531,8 +531,8 @@ async fn handle_request<G: GateCommand>(
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
-            // TODO: Get actual track counts from tracker
-            // For now, pass 0s - the histogram data is the important part
+            // Pass 0s to use stored values from metrics.set_active_tracks/set_authorized_tracks
+            // (updated by tracker on each event)
             let body = format_prometheus_metrics(&metrics, 0, 0, &site_id);
             Ok(Response::builder()
                 .status(StatusCode::OK)

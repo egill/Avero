@@ -1,18 +1,13 @@
 defmodule AveroCommand.Scenarios.GateObstruction do
   @moduledoc """
-  Scenario #22: Gate Obstruction / False Triggers
+  Scenario #22: Gate Empty Cycles (Stats)
 
   Detects when a gate has multiple open/close cycles where nobody
-  actually crossed. This indicates:
-  - Sensor misalignment or debris triggering false positives
-  - Gate hardware issues causing spurious opens
-  - Objects obstructing the sensor beam
+  actually crossed. This is recorded as a statistical observation only.
 
   Detection: gate.closed events with exit_summary.total_crossings == 0
-  If we see multiple such "empty cycles" in a short window, that's concerning.
-
   Trigger: gate.closed with total_crossings == 0
-  Severity: MEDIUM (2-3 empty cycles) or HIGH (4+ empty cycles)
+  Severity: INFO (stats only)
   """
   require Logger
 
@@ -31,19 +26,14 @@ defmodule AveroCommand.Scenarios.GateObstruction do
   """
   def evaluate(%{event_type: "gates", data: %{"type" => "gate.closed"} = data} = event) do
     gate_id = data["gate_id"] || 0
-    exit_summary = data["exit_summary"] || %{}
-    total_crossings = exit_summary["total_crossings"] || 0
+    total_crossings = total_crossings_from(data)
 
     # Skip gate_id 0 (invalid) - this filters out malformed events
     if gate_id == 0 do
       :no_match
     else
-      # Only consider this if nobody crossed (empty cycle)
-      if total_crossings == 0 do
-        check_empty_cycle_pattern(event, gate_id)
-      else
-        :no_match
-      end
+      # Only consider this if we have explicit crossing counts and nobody crossed
+      if total_crossings == 0, do: check_empty_cycle_pattern(event, gate_id), else: :no_match
     end
   end
 
@@ -61,7 +51,7 @@ defmodule AveroCommand.Scenarios.GateObstruction do
           e.data["type"] == "gate.closed" &&
           e.data["gate_id"] == gate_id &&
           DateTime.compare(e.time, cutoff) == :gt &&
-          (e.data["exit_summary"]["total_crossings"] || 0) == 0
+          total_crossings_from(e.data) == 0
       end)
       |> length()
 
@@ -72,10 +62,10 @@ defmodule AveroCommand.Scenarios.GateObstruction do
 
     cond do
       empty_cycle_count >= @high_threshold ->
-        {:match, build_incident(event, gate_id, empty_cycle_count, "high")}
+        {:match, build_incident(event, gate_id, empty_cycle_count)}
 
       empty_cycle_count >= @warning_threshold ->
-        {:match, build_incident(event, gate_id, empty_cycle_count, "medium")}
+        {:match, build_incident(event, gate_id, empty_cycle_count)}
 
       true ->
         :no_match
@@ -86,37 +76,48 @@ defmodule AveroCommand.Scenarios.GateObstruction do
       :no_match
   end
 
-  defp build_incident(event, gate_id, empty_cycle_count, severity) do
+  defp build_incident(event, gate_id, empty_cycle_count) do
     %{
-      type: "gate_obstruction",
-      severity: severity,
-      category: "equipment",
+      type: "gate_empty_cycles",
+      severity: "info",
+      category: "operational",
       site: event.site,
       gate_id: gate_id,
       context: %{
         gate_id: gate_id,
         empty_cycle_count: empty_cycle_count,
         window_seconds: @window_seconds,
-        message: "Gate #{gate_id} had #{empty_cycle_count} empty cycles (no crossings) in #{@window_seconds}s - possible sensor issue or obstruction"
+        message: "Gate #{gate_id} had #{empty_cycle_count} empty cycles (no crossings) in #{@window_seconds}s"
       },
-      suggested_actions: build_actions(severity)
+      suggested_actions: build_actions()
     }
   end
 
-  defp build_actions("high") do
+  defp build_actions do
     [
-      %{"id" => "check_sensor", "label" => "Check Sensor Alignment", "auto" => false},
-      %{"id" => "check_gate_area", "label" => "Inspect Gate Area", "auto" => false},
-      %{"id" => "notify_maintenance", "label" => "Notify Maintenance", "auto" => true},
-      %{"id" => "acknowledge", "label" => "Acknowledge", "auto" => false}
-    ]
-  end
-
-  defp build_actions(_) do
-    [
-      %{"id" => "check_sensor", "label" => "Check Sensor Alignment", "auto" => false},
       %{"id" => "acknowledge", "label" => "Acknowledge", "auto" => false},
       %{"id" => "dismiss", "label" => "Dismiss", "auto" => false}
     ]
   end
+
+  defp total_crossings_from(data) when is_map(data) do
+    exit_summary = data["exit_summary"]
+
+    cond do
+      is_map(exit_summary) -> normalize_count(exit_summary["total_crossings"])
+      true -> normalize_count(data["crossing_count"])
+    end
+  end
+
+  defp total_crossings_from(_), do: nil
+
+  defp normalize_count(value) when is_integer(value), do: value
+  defp normalize_count(value) when is_float(value), do: trunc(value)
+  defp normalize_count(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+  defp normalize_count(_), do: nil
 end

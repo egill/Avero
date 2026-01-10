@@ -186,6 +186,10 @@ pub struct Metrics {
     gate_queue_delay_sum_us: AtomicU64,
     /// Max gate queue delay (reset on report)
     gate_queue_delay_max_us: AtomicU64,
+    /// Current active tracks count (updated by tracker)
+    active_tracks: AtomicU64,
+    /// Current authorized tracks count (updated by tracker)
+    authorized_tracks: AtomicU64,
     /// Current event queue depth (updated by sampler)
     event_queue_depth: AtomicU64,
     /// Current gate command queue depth (updated by sampler)
@@ -254,6 +258,8 @@ impl Metrics {
             gate_queue_delay_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_queue_delay_sum_us: AtomicU64::new(0),
             gate_queue_delay_max_us: AtomicU64::new(0),
+            active_tracks: AtomicU64::new(0),
+            authorized_tracks: AtomicU64::new(0),
             event_queue_depth: AtomicU64::new(0),
             gate_queue_depth: AtomicU64::new(0),
             cloudplus_queue_depth: AtomicU64::new(0),
@@ -547,6 +553,30 @@ impl Metrics {
         update_atomic_max(&self.gate_queue_delay_max_us, delay_us);
     }
 
+    /// Set current active tracks count (called by tracker)
+    #[inline]
+    pub fn set_active_tracks(&self, count: usize) {
+        self.active_tracks.store(count as u64, Ordering::Relaxed);
+    }
+
+    /// Get current active tracks count
+    #[inline]
+    pub fn active_tracks(&self) -> usize {
+        self.active_tracks.load(Ordering::Relaxed) as usize
+    }
+
+    /// Set current authorized tracks count (called by tracker)
+    #[inline]
+    pub fn set_authorized_tracks(&self, count: usize) {
+        self.authorized_tracks.store(count as u64, Ordering::Relaxed);
+    }
+
+    /// Get current authorized tracks count
+    #[inline]
+    pub fn authorized_tracks(&self) -> usize {
+        self.authorized_tracks.load(Ordering::Relaxed) as usize
+    }
+
     /// Set current event queue depth (called by sampler)
     #[inline]
     pub fn set_event_queue_depth(&self, depth: u64) {
@@ -657,7 +687,13 @@ impl Metrics {
     ///
     /// This is the only method that resets counters. It uses atomic swap
     /// to get a consistent snapshot while allowing concurrent updates.
+    ///
+    /// Pass 0 for active_tracks/authorized_tracks to use stored values from set_active_tracks/set_authorized_tracks.
     pub fn report(&self, active_tracks: usize, authorized_tracks: usize) -> MetricsSummary {
+        // Use stored values if 0 is passed (for callers without direct tracker access)
+        let active_tracks = if active_tracks == 0 { self.active_tracks() } else { active_tracks };
+        let authorized_tracks =
+            if authorized_tracks == 0 { self.authorized_tracks() } else { authorized_tracks };
         // Swap periodic counters to zero and get their values
         let events_count = self.events_since_report.swap(0, Ordering::Relaxed);
         let latency_sum = self.latency_sum_us.swap(0, Ordering::Relaxed);

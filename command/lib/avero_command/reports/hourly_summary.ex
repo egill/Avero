@@ -15,6 +15,7 @@ defmodule AveroCommand.Reports.HourlySummary do
 
   alias AveroCommand.Store
   alias AveroCommand.Incidents.Manager
+  alias AveroCommand.Reports.SiteDiscovery
 
   @doc """
   Scheduled job to generate hourly summary.
@@ -33,12 +34,7 @@ defmodule AveroCommand.Reports.HourlySummary do
   end
 
   defp get_active_sites do
-    Store.recent_events(500, nil)
-    |> Enum.map(& &1.site)
-    |> Enum.uniq()
-    |> Enum.reject(&is_nil/1)
-  rescue
-    _ -> []
+    SiteDiscovery.list_recent_sites()
   end
 
   defp generate_summary(site) do
@@ -71,9 +67,7 @@ defmodule AveroCommand.Reports.HourlySummary do
       e.event_type == "gates" && e.data["type"] == "gate.opened"
     end)
 
-    payments = Enum.count(events, fn e ->
-      e.event_type == "payments" && e.data["type"] == "payment.received"
-    end)
+    payments = Enum.count(events, &payment_event?/1)
 
     barcodes = Enum.count(events, fn e ->
       e.event_type == "barcodes" && e.data["type"] == "barcode.validated"
@@ -107,6 +101,11 @@ defmodule AveroCommand.Reports.HourlySummary do
       gate_stats: gate_stats,
       event_count: length(events)
     }
+  end
+
+  defp payment_event?(event) do
+    (event.event_type == "payments" && event.data["type"] == "payment.received") ||
+      (event.event_type == "people" && event.data["type"] == "person.payment.received")
   end
 
   defp create_incident(site, stats) do

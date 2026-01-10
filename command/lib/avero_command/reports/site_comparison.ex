@@ -16,6 +16,7 @@ defmodule AveroCommand.Reports.SiteComparison do
   alias AveroCommand.Store
   alias AveroCommand.Incidents
   alias AveroCommand.Incidents.Manager
+  alias AveroCommand.Reports.SiteDiscovery
 
   @doc """
   Scheduled job to generate site comparison report.
@@ -26,8 +27,12 @@ defmodule AveroCommand.Reports.SiteComparison do
 
     sites = get_all_sites()
 
-    if length(sites) > 1 do
-      site_stats = Enum.map(sites, &get_site_stats/1)
+    site_stats =
+      sites
+      |> Enum.map(&get_site_stats/1)
+      |> Enum.reject(&(&1.event_count == 0))
+
+    if length(site_stats) > 1 do
       create_comparison_report(site_stats)
     end
 
@@ -35,17 +40,7 @@ defmodule AveroCommand.Reports.SiteComparison do
   end
 
   defp get_all_sites do
-    today_start = Date.utc_today() |> DateTime.new!(~T[00:00:00], "Etc/UTC")
-
-    Store.recent_events(5000, nil)
-    |> Enum.filter(fn e ->
-      DateTime.compare(e.time, today_start) == :gt
-    end)
-    |> Enum.map(& &1.site)
-    |> Enum.uniq()
-    |> Enum.reject(&is_nil/1)
-  rescue
-    _ -> []
+    SiteDiscovery.list_recent_sites()
   end
 
   defp get_site_stats(site) do
@@ -64,9 +59,7 @@ defmodule AveroCommand.Reports.SiteComparison do
       e.event_type == "gates" && e.data["type"] == "gate.closed"
     end)
 
-    payments = Enum.count(events, fn e ->
-      e.event_type == "payments" && e.data["type"] == "payment.received"
-    end)
+    payments = Enum.count(events, &payment_event?/1)
 
     incidents = Incidents.list_active()
     |> Enum.filter(fn inc ->
@@ -88,6 +81,11 @@ defmodule AveroCommand.Reports.SiteComparison do
     }
   rescue
     _ -> %{site: site, exits: 0, gate_cycles: 0, payments: 0, incidents: 0, high_severity_incidents: 0, event_count: 0}
+  end
+
+  defp payment_event?(event) do
+    (event.event_type == "payments" && event.data["type"] == "payment.received") ||
+      (event.event_type == "people" && event.data["type"] == "person.payment.received")
   end
 
   defp create_comparison_report(site_stats) do

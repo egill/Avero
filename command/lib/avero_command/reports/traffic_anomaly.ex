@@ -15,6 +15,7 @@ defmodule AveroCommand.Reports.TrafficAnomaly do
 
   alias AveroCommand.Store
   alias AveroCommand.Incidents.Manager
+  alias AveroCommand.Reports.SiteDiscovery
 
   # Deviation threshold to trigger alert (percentage)
   @high_deviation_threshold 50
@@ -37,12 +38,7 @@ defmodule AveroCommand.Reports.TrafficAnomaly do
   end
 
   defp get_active_sites do
-    Store.recent_events(500, nil)
-    |> Enum.map(& &1.site)
-    |> Enum.uniq()
-    |> Enum.reject(&is_nil/1)
-  rescue
-    _ -> []
+    SiteDiscovery.list_recent_sites()
   end
 
   defp check_anomaly(site) do

@@ -110,6 +110,8 @@ pub struct AccCollector {
     pos_groups: HashMap<String, PosGroup>,
     /// Recent exits by zone name (for delayed matching)
     recent_exits: HashMap<String, Vec<RecentExit>>,
+    /// Last time each POS zone became empty (for debugging ACC timing)
+    last_pos_exit: HashMap<String, Instant>,
 }
 
 impl AccCollector {
@@ -119,6 +121,7 @@ impl AccCollector {
             min_dwell_for_acc: config.min_dwell_ms(),
             pos_groups: HashMap::new(),
             recent_exits: HashMap::new(),
+            last_pos_exit: HashMap::new(),
         }
     }
 
@@ -169,6 +172,8 @@ impl AccCollector {
                 if group.is_empty() {
                     debug!(track_id = %track_id, pos = %pos_zone, "acc_pos_group_removed_empty");
                     self.pos_groups.remove(pos_zone);
+                    // Track when this POS became empty for ACC timing diagnostics
+                    self.last_pos_exit.insert(pos_zone.to_string(), Instant::now());
                 } else {
                     let remaining = group.all_members();
                     debug!(track_id = %track_id, pos = %pos_zone, remaining = ?remaining, "acc_pos_exit_group_remains");
@@ -311,7 +316,13 @@ impl AccCollector {
 
         // Second try: recently exited with sufficient dwell AND pos now empty
         if !self.pos_groups.contains_key(pos) {
-            debug!(pos = %pos, "acc_pos_empty_checking_recent_exits");
+            // Log how long POS has been empty - helps diagnose ACC timing issues
+            let empty_since_ms = self
+                .last_pos_exit
+                .get(pos)
+                .map(|t| t.elapsed().as_millis() as u64)
+                .unwrap_or(0);
+            info!(pos = %pos, empty_since_ms = %empty_since_ms, "acc_arrived_pos_empty");
             self.cleanup_old_exits();
 
             if let Some(exits) = self.recent_exits.get_mut(pos) {
