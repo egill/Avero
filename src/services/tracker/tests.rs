@@ -9,19 +9,41 @@ use crate::services::gate_worker::GateCmd;
 use std::collections::HashMap;
 use tokio::time::Duration;
 
-fn create_test_tracker() -> Tracker {
+/// Test harness that keeps channel receivers alive so `try_send` succeeds
+struct TestTracker {
+    tracker: Tracker,
+    #[allow(dead_code)]
+    gate_cmd_rx: mpsc::Receiver<GateCmd>,
+    #[allow(dead_code)]
+    journey_rx: mpsc::Receiver<Journey>,
+    #[allow(dead_code)]
+    door_tx: watch::Sender<DoorStatus>,
+}
+
+impl std::ops::Deref for TestTracker {
+    type Target = Tracker;
+    fn deref(&self) -> &Self::Target {
+        &self.tracker
+    }
+}
+
+impl std::ops::DerefMut for TestTracker {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.tracker
+    }
+}
+
+fn create_test_tracker() -> TestTracker {
     create_test_tracker_with_config(Config::default())
 }
 
-fn create_test_tracker_with_config(config: Config) -> Tracker {
-    // Create a channel for gate commands (we won't consume them in tests)
-    let (gate_cmd_tx, _gate_cmd_rx) = mpsc::channel::<GateCmd>(64);
-    // Create a channel for journey egress (we won't consume them in tests)
-    let (journey_tx, _journey_rx) = mpsc::channel::<Journey>(64);
-    // Create watch channel for door state (not used in most tests)
-    let (_door_tx, door_rx) = watch::channel(DoorStatus::Unknown);
+fn create_test_tracker_with_config(config: Config) -> TestTracker {
+    let (gate_cmd_tx, gate_cmd_rx) = mpsc::channel::<GateCmd>(64);
+    let (journey_tx, journey_rx) = mpsc::channel::<Journey>(64);
+    let (door_tx, door_rx) = watch::channel(DoorStatus::Unknown);
     let metrics = Arc::new(Metrics::new());
-    Tracker::new(config, gate_cmd_tx, journey_tx, metrics, None, door_rx)
+    let tracker = Tracker::new(config, gate_cmd_tx, journey_tx, metrics, None, door_rx);
+    TestTracker { tracker, gate_cmd_rx, journey_rx, door_tx }
 }
 
 fn millis(ms: u64) -> Duration {
@@ -29,9 +51,7 @@ fn millis(ms: u64) -> Duration {
 }
 
 fn acc_ip_mapping() -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    map.insert("127.0.0.1".to_string(), "POS_1".to_string());
-    map
+    HashMap::from([("127.0.0.1".to_string(), "POS_1".to_string())])
 }
 
 /// Builder for creating test ParsedEvent instances

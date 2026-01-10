@@ -136,40 +136,40 @@ impl GateController {
         (url.to_string(), None, None)
     }
 
-    fn send_open_tcp(&self, track_id: TrackId, start: Instant) -> u64 {
+    async fn send_open_tcp(&self, track_id: TrackId, start: Instant) -> u64 {
         let Some(ref client) = self.tcp_client else {
             log_tcp_client_not_initialized(track_id);
             return start.elapsed().as_micros() as u64;
         };
 
-        match client.send_open(0) {
+        match client.send_open(0).await {
             Ok(queue_latency_us) => {
-                let total_latency_us = start.elapsed().as_micros() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 info!(
                     track_id = %track_id,
-                    latency_us = %total_latency_us,
+                    latency_us = %latency_us,
                     queue_latency_us = %queue_latency_us,
                     mode = "tcp",
                     "gate_open_command"
                 );
-                total_latency_us
+                latency_us
             }
             Err(e) => {
                 let latency_us = start.elapsed().as_micros() as u64;
-                // Check if this is a queue full error
-                let err_str = e.to_string();
-                if err_str.contains("queue full") {
-                    // Gate command dropped - customer will have to wait
-                    warn!(
-                        track_id = %track_id,
-                        latency_us = %latency_us,
-                        "gate_command_dropped_queue_full"
-                    );
-                    if let Some(ref metrics) = self.metrics {
-                        metrics.record_gate_cmd_dropped();
+                let err_msg = e.to_string();
+                match err_msg.as_str() {
+                    "not connected" => {
+                        warn!(track_id = %track_id, "gate_command_failed_not_connected");
                     }
-                } else {
-                    log_tcp_command_error(track_id, latency_us, e.as_ref());
+                    "queue full" => {
+                        warn!(track_id = %track_id, latency_us = %latency_us, "gate_command_dropped_queue_full");
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.record_gate_cmd_dropped();
+                        }
+                    }
+                    _ => {
+                        log_tcp_command_error(track_id, latency_us, e.as_ref());
+                    }
                 }
                 latency_us
             }
@@ -221,7 +221,7 @@ impl GateCommand for GateController {
     async fn send_open_command(&self, track_id: TrackId) -> u64 {
         let start = Instant::now();
         match self.mode {
-            GateMode::Tcp => self.send_open_tcp(track_id, start),
+            GateMode::Tcp => self.send_open_tcp(track_id, start).await,
             GateMode::Http => self.send_open_http(track_id, start).await,
         }
     }

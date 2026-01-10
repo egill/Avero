@@ -631,6 +631,16 @@ impl Tracker {
             }
         }
 
+        // Set ACC group size on all matched journeys (for Command display)
+        let group_size = matched_tracks.len() as u8;
+        if group_size > 1 {
+            for &track_id in &matched_tracks {
+                if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+                    journey.acc_group_size = group_size;
+                }
+            }
+        }
+
         let gate_zone = self.config.gate_zone();
         let gate_zone_name = self.config.zone_name(gate_zone);
         for &track_id in &matched_tracks {
@@ -790,6 +800,9 @@ impl Tracker {
     ///
     /// This method returns immediately after enqueueing - the actual network I/O
     /// is handled by the GateCmdWorker task asynchronously.
+    ///
+    /// State/metrics are only updated on successful enqueue to avoid recording
+    /// commands that were dropped due to channel full.
     fn send_gate_open_command(
         &mut self,
         track_id: TrackId,
@@ -797,42 +810,52 @@ impl Tracker {
         src: &str,
         received_at: Instant,
     ) {
-        // Record E2E gate latency (from event received to command enqueued)
-        let e2e_latency_us = received_at.elapsed().as_micros() as u64;
-        self.metrics.record_gate_latency(e2e_latency_us);
-        self.metrics.record_gate_command();
-
         // Enqueue command to worker - never blocks on network I/O
         let cmd = GateCmd { track_id, enqueued_at: Instant::now() };
-        if let Err(e) = self.gate_cmd_tx.try_send(cmd) {
-            warn!(
-                track_id = %track_id,
-                error = %e,
-                "gate_cmd_enqueue_failed"
-            );
-            // Command dropped - gate won't open for this customer
-            // This is logged but we continue processing
-        }
+        match self.gate_cmd_tx.try_send(cmd) {
+            Ok(()) => {
+                // Record E2E gate latency only on successful enqueue
+                let e2e_latency_us = received_at.elapsed().as_micros() as u64;
+                self.metrics.record_gate_latency(e2e_latency_us);
+                self.metrics.record_gate_command();
 
-        if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
-            journey.gate_cmd_at = Some(ts);
-        }
-        self.journey_manager.add_event(
-            track_id,
-            JourneyEvent::new(JourneyEventType::GateCmd, ts)
-                .with_extra(&format!("e2e_us={e2e_latency_us}")),
-        );
+                // Update journey state
+                if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+                    journey.gate_cmd_at = Some(ts);
+                }
+                self.journey_manager.add_event(
+                    track_id,
+                    JourneyEvent::new(JourneyEventType::GateCmd, ts)
+                        .with_extra(&format!("e2e_us={e2e_latency_us}")),
+                );
 
-        if let Some(ref sender) = self.egress_sender {
-            sender.send_gate_state(GateStatePayload::new(
-                ts,
-                "cmd_enqueued",
-                Some(track_id.0),
-                src,
-            ));
-        }
+                // Emit state for TUI and record for door correlation
+                if let Some(ref sender) = self.egress_sender {
+                    sender.send_gate_state(GateStatePayload::new(
+                        ts,
+                        "cmd_enqueued",
+                        Some(track_id.0),
+                        src,
+                    ));
+                }
+                self.door_correlator.record_gate_cmd(track_id);
+            }
+            Err(e) => {
+                // Command dropped - gate won't open for this customer
+                self.metrics.record_gate_cmd_dropped();
+                warn!(track_id = %track_id, error = %e, "gate_cmd_enqueue_failed");
 
-        self.door_correlator.record_gate_cmd(track_id);
+                // Emit dropped state for TUI visibility
+                if let Some(ref sender) = self.egress_sender {
+                    sender.send_gate_state(GateStatePayload::new(
+                        ts,
+                        "cmd_dropped",
+                        Some(track_id.0),
+                        src,
+                    ));
+                }
+            }
+        }
     }
 
     /// Determine the journey outcome when a track is deleted
