@@ -136,6 +136,10 @@ pub struct Metrics {
     acc_late_total: AtomicU64,
     /// ACC events matched but no journey found
     acc_no_journey_total: AtomicU64,
+    /// MQTT events dropped due to channel full (monotonic)
+    mqtt_events_dropped: AtomicU64,
+    /// ACC events dropped due to channel full (monotonic)
+    acc_events_dropped: AtomicU64,
     /// POS zone occupancy (number of people in each zone)
     /// Index is determined by order in pos_zones config
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
@@ -172,6 +176,8 @@ impl Metrics {
             stitch_time_sum: AtomicU64::new(0),
             acc_late_total: AtomicU64::new(0),
             acc_no_journey_total: AtomicU64::new(0),
+            mqtt_events_dropped: AtomicU64::new(0),
+            acc_events_dropped: AtomicU64::new(0),
             pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
             pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
             zone_id_to_index: parking_lot::RwLock::new(FxHashMap::default()),
@@ -377,6 +383,32 @@ impl Metrics {
         self.acc_no_journey_total.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record an MQTT event dropped due to channel full (lock-free)
+    #[inline]
+    pub fn record_mqtt_event_dropped(&self) {
+        self.mqtt_events_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record an ACC event dropped due to channel full (lock-free)
+    #[inline]
+    pub fn record_acc_event_dropped(&self) {
+        self.acc_events_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get MQTT events dropped total
+    #[inline]
+    #[allow(dead_code)]
+    pub fn mqtt_events_dropped(&self) -> u64 {
+        self.mqtt_events_dropped.load(Ordering::Relaxed)
+    }
+
+    /// Get ACC events dropped total
+    #[inline]
+    #[allow(dead_code)]
+    pub fn acc_events_dropped(&self) -> u64 {
+        self.acc_events_dropped.load(Ordering::Relaxed)
+    }
+
     /// Get ACC events total
     #[inline]
     #[allow(dead_code)]
@@ -468,6 +500,10 @@ impl Metrics {
         let acc_late_total = self.acc_late_total.load(Ordering::Relaxed);
         let acc_no_journey_total = self.acc_no_journey_total.load(Ordering::Relaxed);
 
+        // Get drop counters (don't reset)
+        let mqtt_events_dropped = self.mqtt_events_dropped.load(Ordering::Relaxed);
+        let acc_events_dropped = self.acc_events_dropped.load(Ordering::Relaxed);
+
         // Get stitch histogram buckets (don't reset - cumulative)
         let stitch_distance_buckets = load_buckets(&self.stitch_distance_buckets);
         let stitch_distance_sum = self.stitch_distance_sum.load(Ordering::Relaxed);
@@ -509,6 +545,8 @@ impl Metrics {
             stitch_time_avg_ms,
             acc_late_total,
             acc_no_journey_total,
+            mqtt_events_dropped,
+            acc_events_dropped,
         }
     }
 }
@@ -578,6 +616,10 @@ pub struct MetricsSummary {
     pub acc_late_total: u64,
     /// ACC events matched but no journey found
     pub acc_no_journey_total: u64,
+    /// MQTT events dropped due to channel full
+    pub mqtt_events_dropped: u64,
+    /// ACC events dropped due to channel full
+    pub acc_events_dropped: u64,
 }
 
 impl MetricsSummary {

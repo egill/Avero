@@ -113,27 +113,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rs485_monitor.run(rs485_shutdown).await;
     });
 
-    // Start MQTT client
+    // Start MQTT client (with metrics for drop tracking)
     let mqtt_config = config.clone();
     let mqtt_tx = event_tx.clone();
+    let mqtt_metrics = metrics.clone();
     let mqtt_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
         if let Err(e) =
-            gateway_poc::io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_shutdown).await
+            gateway_poc::io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_metrics, mqtt_shutdown).await
         {
             tracing::error!(error = %e, "MQTT client error");
         }
     });
 
-    // Start ACC TCP listener
+    // Start ACC TCP listener (with metrics for drop tracking)
     let acc_config = AccListenerConfig {
         port: config.acc_listener_port(),
         enabled: config.acc_listener_enabled(),
     };
     let acc_tx = event_tx;
+    let acc_metrics = metrics.clone();
     let acc_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
-        if let Err(e) = start_acc_listener(acc_config, acc_tx, acc_shutdown).await {
+        if let Err(e) = start_acc_listener(acc_config, acc_tx, acc_metrics, acc_shutdown).await {
             tracing::error!(error = %e, "ACC listener error");
         }
     });

@@ -124,7 +124,27 @@ Consequences:
 
 ## Completed Stories
 
-(none yet)
+### US-001: Decouple gate commands from tracker loop ✓
+**Commit:** 0965cc3 feat: [US-001] - Decouple gate commands from tracker loop
+
+**Changes:**
+- Created `src/services/gate_worker.rs` with `GateCmdWorker` task
+- Worker owns `GateController` and receives commands via mpsc channel
+- Tracker enqueues gate commands with `try_send()` - never awaits network I/O
+- Worker measures queue delay and send latency, logs timing breakdown
+- All event handlers made synchronous (no more `.await` on hot path)
+- Gate state payload changed from "cmd_sent" to "cmd_enqueued"
+
+**Files modified:**
+- `src/services/gate_worker.rs` (NEW)
+- `src/services/tracker/handlers.rs` - sync handlers, try_send to channel
+- `src/services/tracker/mod.rs` - uses gate_cmd_tx instead of gate Arc
+- `src/services/mod.rs` - exports gate_worker module
+- `src/main.rs` - spawns GateCmdWorker task
+- `src/services/tracker/tests.rs` - updated for sync process_event
+
+**Key insight:** This is the PRIMARY fix for "gate open too late" - network I/O
+no longer blocks the tracker event loop.
 
 ---
 

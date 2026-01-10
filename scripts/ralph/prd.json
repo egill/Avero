@@ -16,7 +16,7 @@
       "instructions": "Create src/services/gate_worker.rs with GateCmdWorker that owns GateController. Add gate_cmd_tx: mpsc::Sender<GateCmd> to Tracker. send_gate_open_command becomes 'enqueue + record timestamp' and returns immediately. Worker does actual send_open_command, measures latency, updates metrics. Adjust src/main.rs to spawn worker.",
       "files": ["src/services/tracker/handlers.rs", "src/services/gate_worker.rs (new)", "src/main.rs"],
       "priority": 0,
-      "passes": false,
+      "passes": true,
       "notes": "CRITICAL: Primary cause of 'gate open too late'. Creates new gate_worker.rs module."
     },
     {
