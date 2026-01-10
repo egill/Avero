@@ -66,7 +66,7 @@ impl Tracker {
             person.track_id = track_id;
             person.last_position = event.position;
 
-            info!(
+            debug!(
                 new_track_id = %track_id,
                 old_track_id = %old_track_id,
                 authorized = %person.authorized,
@@ -193,7 +193,7 @@ impl Tracker {
                 .map(|id| self.config.zone_name(id).to_string())
                 .unwrap_or_default();
 
-            info!(
+            debug!(
                 track_id = %track_id,
                 authorized = %person.authorized,
                 dwell_ms = %person.accumulated_dwell_ms,
@@ -467,7 +467,7 @@ impl Tracker {
                     journey.crossed_entry = true;
                 }
             } else if direction == "backward" {
-                info!(
+                debug!(
                     track_id = %track_id,
                     "entry_line_backward_returning_to_store"
                 );
@@ -844,7 +844,7 @@ impl Tracker {
                 if event.t == JourneyEventType::EntryCross {
                     if let Some(extra) = &event.extra {
                         if extra.contains("dir=backward") {
-                            info!(
+                            debug!(
                                 track_id = %track_id,
                                 "journey_returned_backward_entry"
                             );
@@ -866,7 +866,7 @@ impl Tracker {
             let in_gate_area = last_zone.to_uppercase().contains("GATE");
 
             if has_approach_forward && in_gate_area && !has_exit_cross {
-                info!(
+                debug!(
                     track_id = %track_id,
                     zone = %last_zone,
                     authorized = %person.authorized,
@@ -879,7 +879,7 @@ impl Tracker {
         // Check last zone - if in POS or STORE area, they went back to shopping
         if let Some(zone_id) = person.current_zone {
             if self.config.is_pos_zone(zone_id.0) {
-                info!(
+                debug!(
                     track_id = %track_id,
                     zone = %last_zone,
                     "journey_returned_pos_zone"
@@ -891,7 +891,7 @@ impl Tracker {
         // Check zone name for STORE indication
         let zone_upper = last_zone.to_uppercase();
         if zone_upper.contains("STORE") || zone_upper.contains("SHOPPING") {
-            info!(
+            debug!(
                 track_id = %track_id,
                 zone = %last_zone,
                 "journey_returned_store_zone"
@@ -900,7 +900,7 @@ impl Tracker {
         }
 
         // If near gate/exit or unknown, consider it lost
-        info!(
+        debug!(
             track_id = %track_id,
             zone = %last_zone,
             "journey_lost"
