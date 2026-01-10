@@ -727,10 +727,10 @@ impl Metrics {
         let acc_drop_ratio = ratio_or_zero(acc_events_dropped, acc_events_received);
         let egress_drop_ratio = ratio_or_zero(journey_egress_dropped, journey_egress_received);
 
-        // Swap gate queue delay histogram (reset on report)
-        let gate_queue_delay_buckets = swap_buckets(&self.gate_queue_delay_buckets);
-        let gate_queue_delay_sum = self.gate_queue_delay_sum_us.swap(0, Ordering::Relaxed);
-        let gate_queue_delay_max = self.gate_queue_delay_max_us.swap(0, Ordering::Relaxed);
+        // Load gate queue delay histogram (cumulative for Prometheus)
+        let gate_queue_delay_buckets = load_buckets(&self.gate_queue_delay_buckets);
+        let gate_queue_delay_sum = self.gate_queue_delay_sum_us.load(Ordering::Relaxed);
+        let gate_queue_delay_max = self.gate_queue_delay_max_us.load(Ordering::Relaxed);
         let gate_queue_delay_count: u64 = gate_queue_delay_buckets.iter().sum();
         let gate_queue_delay_avg_us = avg_or_zero(gate_queue_delay_sum, gate_queue_delay_count);
         let gate_queue_delay_p99_us = percentile_from_buckets(&gate_queue_delay_buckets, 0.99);
@@ -742,18 +742,18 @@ impl Metrics {
         let event_queue_utilization_pct = self.event_queue_utilization_pct.load(Ordering::Relaxed);
         let gate_queue_utilization_pct = self.gate_queue_utilization_pct.load(Ordering::Relaxed);
 
-        // Swap gate send latency histogram (reset on report)
-        let gate_send_latency_buckets = swap_buckets(&self.gate_send_latency_buckets);
-        let gate_send_latency_sum = self.gate_send_latency_sum_us.swap(0, Ordering::Relaxed);
-        let gate_send_latency_max = self.gate_send_latency_max_us.swap(0, Ordering::Relaxed);
+        // Load gate send latency histogram (cumulative for Prometheus)
+        let gate_send_latency_buckets = load_buckets(&self.gate_send_latency_buckets);
+        let gate_send_latency_sum = self.gate_send_latency_sum_us.load(Ordering::Relaxed);
+        let gate_send_latency_max = self.gate_send_latency_max_us.load(Ordering::Relaxed);
         let gate_send_latency_count: u64 = gate_send_latency_buckets.iter().sum();
         let gate_send_latency_avg_us = avg_or_zero(gate_send_latency_sum, gate_send_latency_count);
         let gate_send_latency_p99_us = percentile_from_buckets(&gate_send_latency_buckets, 0.99);
 
-        // Swap gate enqueue-to-send histogram (reset on report)
-        let gate_enqueue_to_send_buckets = swap_buckets(&self.gate_enqueue_to_send_buckets);
-        let gate_enqueue_to_send_sum = self.gate_enqueue_to_send_sum_us.swap(0, Ordering::Relaxed);
-        let gate_enqueue_to_send_max = self.gate_enqueue_to_send_max_us.swap(0, Ordering::Relaxed);
+        // Load gate enqueue-to-send histogram (cumulative for Prometheus)
+        let gate_enqueue_to_send_buckets = load_buckets(&self.gate_enqueue_to_send_buckets);
+        let gate_enqueue_to_send_sum = self.gate_enqueue_to_send_sum_us.load(Ordering::Relaxed);
+        let gate_enqueue_to_send_max = self.gate_enqueue_to_send_max_us.load(Ordering::Relaxed);
         let gate_enqueue_to_send_count: u64 = gate_enqueue_to_send_buckets.iter().sum();
         let gate_enqueue_to_send_avg_us =
             avg_or_zero(gate_enqueue_to_send_sum, gate_enqueue_to_send_count);
