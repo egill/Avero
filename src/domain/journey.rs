@@ -125,9 +125,9 @@ pub struct Journey {
     pub authorized: bool,
     pub total_dwell_ms: u64,
     pub acc_matched: bool,
-    pub acc_group_size: u8,                     // 1 = solo, 2+ = group (people at POS together)
+    pub acc_group_size: u8, // 1 = solo, 2+ = group (people at POS together)
     pub acc_group_tids: SmallVec<[TrackId; 4]>, // Track IDs of all group members
-    pub gate_cmd_at: Option<u64>,               // epoch ms
+    pub gate_cmd_at: Option<u64>, // epoch ms
     pub gate_opened_at: Option<u64>, // epoch ms from RS485
     pub gate_was_open: bool,
     pub started_at: u64,       // epoch ms

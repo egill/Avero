@@ -14,7 +14,20 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+// ============================================================================
+// Default value constants
+// ============================================================================
+
+const DEFAULT_PROMETHEUS_PORT: u16 = 80;
+const DEFAULT_ACC_LISTENER_PORT: u16 = 25803;
+const DEFAULT_BROKER_PORT: u16 = 1883;
+const DEFAULT_METRICS_PUBLISH_INTERVAL: u64 = 5;
+
+// ============================================================================
+// TOML config structs
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GateMode {
     Http,
@@ -70,148 +83,156 @@ pub struct AuthorizationConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MetricsConfig {
     pub interval_secs: u64,
-    /// Prometheus metrics HTTP port (0 to disable)
-    #[serde(default = "default_prometheus_port")]
+    #[serde(default = "Defaults::prometheus_port")]
     pub prometheus_port: u16,
 }
 
-fn default_prometheus_port() -> u16 {
-    80 // Default to port 80 for Prometheus scraping
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AccConfig {
-    /// IP to POS zone name mapping (e.g., "192.168.1.10" = "POS_1")
     #[serde(default)]
     pub ip_to_pos: HashMap<String, String>,
-    /// Enable ACC TCP listener
-    #[serde(default = "default_acc_listener_enabled")]
+    #[serde(default = "Defaults::acc_listener_enabled")]
     pub listener_enabled: bool,
-    /// ACC TCP listener port
-    #[serde(default = "default_acc_listener_port")]
+    #[serde(default = "Defaults::acc_listener_port")]
     pub listener_port: u16,
 }
 
-fn default_acc_listener_enabled() -> bool {
-    true
-}
-
-fn default_acc_listener_port() -> u16 {
-    25803
+impl Default for AccConfig {
+    fn default() -> Self {
+        Self {
+            ip_to_pos: HashMap::new(),
+            listener_enabled: true,
+            listener_port: DEFAULT_ACC_LISTENER_PORT,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EgressConfig {
-    /// File path for journey egress (JSONL format)
-    #[serde(default = "default_egress_file")]
+    #[serde(default = "Defaults::egress_file")]
     pub file: String,
 }
 
 impl Default for EgressConfig {
     fn default() -> Self {
-        Self { file: default_egress_file() }
+        Self { file: "journeys.jsonl".to_string() }
     }
 }
 
-fn default_egress_file() -> String {
-    "journeys.jsonl".to_string()
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MqttEgressConfig {
-    /// Enable MQTT egress publishing
-    #[serde(default = "default_mqtt_egress_enabled")]
+    #[serde(default = "Defaults::mqtt_egress_enabled")]
     pub enabled: bool,
-    /// MQTT broker host for egress (defaults to mqtt.host if not set)
     pub host: Option<String>,
-    /// MQTT broker port for egress (defaults to mqtt.port if not set)
     pub port: Option<u16>,
-    /// Topic for completed journey JSONs (QoS 1)
-    #[serde(default = "default_journeys_topic")]
+    #[serde(default = "Defaults::journeys_topic")]
     pub journeys_topic: String,
-    /// Topic for live zone events (QoS 0)
-    #[serde(default = "default_events_topic")]
+    #[serde(default = "Defaults::events_topic")]
     pub events_topic: String,
-    /// Topic for periodic metrics snapshots (QoS 0)
-    #[serde(default = "default_metrics_topic")]
+    #[serde(default = "Defaults::metrics_topic")]
     pub metrics_topic: String,
-    /// Topic for gate state changes (QoS 0)
-    #[serde(default = "default_gate_topic")]
+    #[serde(default = "Defaults::gate_topic")]
     pub gate_topic: String,
-    /// Topic for track lifecycle events (QoS 0)
-    #[serde(default = "default_tracks_topic")]
+    #[serde(default = "Defaults::tracks_topic")]
     pub tracks_topic: String,
-    /// Topic for ACC (payment terminal) events (QoS 0)
-    #[serde(default = "default_acc_topic")]
+    #[serde(default = "Defaults::acc_topic")]
     pub acc_topic: String,
-    /// Interval for publishing metrics (seconds)
-    #[serde(default = "default_metrics_publish_interval")]
+    #[serde(default = "Defaults::metrics_publish_interval")]
     pub metrics_publish_interval_secs: u64,
 }
 
-fn default_mqtt_egress_enabled() -> bool {
-    true
-}
-
-fn default_journeys_topic() -> String {
-    "gateway/journeys".to_string()
-}
-
-fn default_events_topic() -> String {
-    "gateway/events".to_string()
-}
-
-fn default_metrics_topic() -> String {
-    "gateway/metrics".to_string()
-}
-
-fn default_gate_topic() -> String {
-    "gateway/gate".to_string()
-}
-
-fn default_tracks_topic() -> String {
-    "gateway/tracks".to_string()
-}
-
-fn default_acc_topic() -> String {
-    "gateway/acc".to_string()
-}
-
-fn default_metrics_publish_interval() -> u64 {
-    5
+impl Default for MqttEgressConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            host: None,
+            port: None,
+            journeys_topic: "gateway/journeys".to_string(),
+            events_topic: "gateway/events".to_string(),
+            metrics_topic: "gateway/metrics".to_string(),
+            gate_topic: "gateway/gate".to_string(),
+            tracks_topic: "gateway/tracks".to_string(),
+            acc_topic: "gateway/acc".to_string(),
+            metrics_publish_interval_secs: DEFAULT_METRICS_PUBLISH_INTERVAL,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrokerConfig {
-    #[serde(default = "default_broker_bind_address")]
+    #[serde(default = "Defaults::broker_bind_address")]
     pub bind_address: String,
-    #[serde(default = "default_broker_port")]
+    #[serde(default = "Defaults::broker_port")]
     pub port: u16,
-}
-
-fn default_broker_bind_address() -> String {
-    "0.0.0.0".to_string()
-}
-
-fn default_broker_port() -> u16 {
-    1883
 }
 
 impl Default for BrokerConfig {
     fn default() -> Self {
-        Self { bind_address: default_broker_bind_address(), port: default_broker_port() }
+        Self { bind_address: "0.0.0.0".to_string(), port: DEFAULT_BROKER_PORT }
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SiteConfig {
-    /// Unique site identifier (e.g., "netto", "grandi")
-    #[serde(default = "default_site_id")]
+    #[serde(default = "Defaults::site_id")]
     pub id: String,
 }
 
-fn default_site_id() -> String {
-    "gateway".to_string()
+impl Default for SiteConfig {
+    fn default() -> Self {
+        Self { id: "gateway".to_string() }
+    }
+}
+
+/// Serde default value functions (must be free functions for serde)
+struct Defaults;
+
+impl Defaults {
+    fn prometheus_port() -> u16 {
+        DEFAULT_PROMETHEUS_PORT
+    }
+    fn acc_listener_enabled() -> bool {
+        true
+    }
+    fn acc_listener_port() -> u16 {
+        DEFAULT_ACC_LISTENER_PORT
+    }
+    fn egress_file() -> String {
+        "journeys.jsonl".to_string()
+    }
+    fn mqtt_egress_enabled() -> bool {
+        true
+    }
+    fn journeys_topic() -> String {
+        "gateway/journeys".to_string()
+    }
+    fn events_topic() -> String {
+        "gateway/events".to_string()
+    }
+    fn metrics_topic() -> String {
+        "gateway/metrics".to_string()
+    }
+    fn gate_topic() -> String {
+        "gateway/gate".to_string()
+    }
+    fn tracks_topic() -> String {
+        "gateway/tracks".to_string()
+    }
+    fn acc_topic() -> String {
+        "gateway/acc".to_string()
+    }
+    fn metrics_publish_interval() -> u64 {
+        DEFAULT_METRICS_PUBLISH_INTERVAL
+    }
+    fn broker_bind_address() -> String {
+        "0.0.0.0".to_string()
+    }
+    fn broker_port() -> u16 {
+        DEFAULT_BROKER_PORT
+    }
+    fn site_id() -> String {
+        "gateway".to_string()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -234,40 +255,64 @@ pub struct TomlConfig {
     pub mqtt_egress: MqttEgressConfig,
 }
 
+// ============================================================================
+// Main Config struct
+// ============================================================================
+
 /// Main configuration struct used throughout the application
 #[derive(Debug, Clone)]
 pub struct Config {
+    // Site
     site_id: String,
+    config_file: String,
+
+    // MQTT ingress
     mqtt_host: String,
     mqtt_port: u16,
     mqtt_topic: String,
     mqtt_username: Option<String>,
     mqtt_password: Option<String>,
+
+    // Gate control
     gate_mode: GateMode,
     gate_url: String,
     gate_tcp_addr: String,
     gate_timeout_ms: u64,
+
+    // RS485 door sensor
     rs485_device: String,
     rs485_baud: u32,
     rs485_poll_interval_ms: u64,
+
+    // Zone definitions
     pos_zones: Vec<i32>,
     gate_zone: i32,
     exit_line: i32,
     entry_line: Option<i32>,
     approach_line: Option<i32>,
-    _store_zone: Option<i32>,
+    store_zone: Option<i32>,
     zone_names: HashMap<i32, Arc<str>>,
+
+    // Authorization
     min_dwell_ms: u64,
+
+    // Metrics
     metrics_interval_secs: u64,
     prometheus_port: u16,
-    config_file: String,
+
+    // ACC payment terminal
     acc_ip_to_pos: HashMap<String, String>,
     acc_listener_enabled: bool,
     acc_listener_port: u16,
+
+    // Egress
     egress_file: String,
+
+    // Embedded broker
     broker_bind_address: String,
     broker_port: u16,
-    // MQTT Egress config
+
+    // MQTT egress
     mqtt_egress_enabled: bool,
     mqtt_egress_host: Option<String>,
     mqtt_egress_port: Option<u16>,
@@ -280,12 +325,45 @@ pub struct Config {
     mqtt_egress_metrics_interval_secs: u64,
 }
 
+/// Macro to generate simple getter methods
+macro_rules! config_getters {
+    // &str getters (return reference to String field)
+    (str: $($name:ident),* $(,)?) => {
+        $(
+            #[inline]
+            pub fn $name(&self) -> &str {
+                &self.$name
+            }
+        )*
+    };
+    // Copy type getters (return by value)
+    (copy: $($name:ident -> $ty:ty),* $(,)?) => {
+        $(
+            #[inline]
+            pub fn $name(&self) -> $ty {
+                self.$name
+            }
+        )*
+    };
+    // Option<i32> getters (return by value since Copy)
+    (opt_i32: $($name:ident),* $(,)?) => {
+        $(
+            #[inline]
+            pub fn $name(&self) -> Option<i32> {
+                self.$name
+            }
+        )*
+    };
+}
+
 impl Default for Config {
     fn default() -> Self {
+        let mqtt_egress = MqttEgressConfig::default();
         Self {
             site_id: "gateway".to_string(),
+            config_file: "default".to_string(),
             mqtt_host: "localhost".to_string(),
-            mqtt_port: 1883,
+            mqtt_port: DEFAULT_BROKER_PORT,
             mqtt_topic: "#".to_string(),
             mqtt_username: None,
             mqtt_password: None,
@@ -301,28 +379,27 @@ impl Default for Config {
             exit_line: 1006,
             entry_line: None,
             approach_line: None,
-            _store_zone: None,
+            store_zone: None,
             zone_names: Self::default_zone_names(),
             min_dwell_ms: 7000,
             metrics_interval_secs: 10,
-            prometheus_port: 80,
-            config_file: "default".to_string(),
+            prometheus_port: DEFAULT_PROMETHEUS_PORT,
             acc_ip_to_pos: HashMap::new(),
             acc_listener_enabled: true,
-            acc_listener_port: 25803,
+            acc_listener_port: DEFAULT_ACC_LISTENER_PORT,
             egress_file: "journeys.jsonl".to_string(),
             broker_bind_address: "0.0.0.0".to_string(),
-            broker_port: 1883,
-            mqtt_egress_enabled: true,
-            mqtt_egress_host: None,
-            mqtt_egress_port: None,
-            mqtt_egress_journeys_topic: "gateway/journeys".to_string(),
-            mqtt_egress_events_topic: "gateway/events".to_string(),
-            mqtt_egress_metrics_topic: "gateway/metrics".to_string(),
-            mqtt_egress_gate_topic: "gateway/gate".to_string(),
-            mqtt_egress_tracks_topic: "gateway/tracks".to_string(),
-            mqtt_egress_acc_topic: "gateway/acc".to_string(),
-            mqtt_egress_metrics_interval_secs: 5,
+            broker_port: DEFAULT_BROKER_PORT,
+            mqtt_egress_enabled: mqtt_egress.enabled,
+            mqtt_egress_host: mqtt_egress.host,
+            mqtt_egress_port: mqtt_egress.port,
+            mqtt_egress_journeys_topic: mqtt_egress.journeys_topic,
+            mqtt_egress_events_topic: mqtt_egress.events_topic,
+            mqtt_egress_metrics_topic: mqtt_egress.metrics_topic,
+            mqtt_egress_gate_topic: mqtt_egress.gate_topic,
+            mqtt_egress_tracks_topic: mqtt_egress.tracks_topic,
+            mqtt_egress_acc_topic: mqtt_egress.acc_topic,
+            mqtt_egress_metrics_interval_secs: mqtt_egress.metrics_publish_interval_secs,
         }
     }
 }
@@ -419,7 +496,7 @@ impl Config {
             exit_line: toml_config.zones.exit_line,
             entry_line: toml_config.zones.entry_line,
             approach_line: toml_config.zones.approach_line,
-            _store_zone: toml_config.zones.store_zone,
+            store_zone: toml_config.zones.store_zone,
             zone_names,
             min_dwell_ms: toml_config.authorization.min_dwell_ms,
             metrics_interval_secs: toml_config.metrics.interval_secs,
@@ -505,165 +582,92 @@ impl Config {
             .unwrap_or_else(|| Arc::from(format!("ZONE_{}", geometry_id.0)))
     }
 
-    // Getters for all config fields
-    pub fn site_id(&self) -> &str {
-        &self.site_id
+    // ========================================================================
+    // Getters (generated via macro for simple cases)
+    // ========================================================================
+
+    config_getters!(str:
+        site_id,
+        config_file,
+        mqtt_host,
+        mqtt_topic,
+        gate_url,
+        gate_tcp_addr,
+        rs485_device,
+        egress_file,
+        broker_bind_address,
+        mqtt_egress_journeys_topic,
+        mqtt_egress_events_topic,
+        mqtt_egress_metrics_topic,
+        mqtt_egress_gate_topic,
+        mqtt_egress_tracks_topic,
+        mqtt_egress_acc_topic,
+    );
+
+    config_getters!(copy:
+        mqtt_port -> u16,
+        gate_timeout_ms -> u64,
+        rs485_baud -> u32,
+        rs485_poll_interval_ms -> u64,
+        exit_line -> i32,
+        min_dwell_ms -> u64,
+        metrics_interval_secs -> u64,
+        prometheus_port -> u16,
+        acc_listener_enabled -> bool,
+        acc_listener_port -> u16,
+        broker_port -> u16,
+        mqtt_egress_enabled -> bool,
+        mqtt_egress_metrics_interval_secs -> u64,
+    );
+
+    config_getters!(opt_i32: entry_line, approach_line);
+
+    #[allow(dead_code)]
+    #[inline]
+    pub fn store_zone(&self) -> Option<i32> {
+        self.store_zone
     }
 
-    pub fn mqtt_host(&self) -> &str {
-        &self.mqtt_host
-    }
-
-    pub fn mqtt_port(&self) -> u16 {
-        self.mqtt_port
-    }
-
-    pub fn mqtt_topic(&self) -> &str {
-        &self.mqtt_topic
-    }
-
+    #[inline]
     pub fn mqtt_username(&self) -> Option<&str> {
         self.mqtt_username.as_deref()
     }
 
+    #[inline]
     pub fn mqtt_password(&self) -> Option<&str> {
         self.mqtt_password.as_deref()
     }
 
-    pub fn gate_mode(&self) -> &GateMode {
-        &self.gate_mode
+    #[inline]
+    pub fn gate_mode(&self) -> GateMode {
+        self.gate_mode
     }
 
-    pub fn gate_url(&self) -> &str {
-        &self.gate_url
-    }
-
-    pub fn gate_tcp_addr(&self) -> &str {
-        &self.gate_tcp_addr
-    }
-
-    pub fn gate_timeout_ms(&self) -> u64 {
-        self.gate_timeout_ms
-    }
-
-    pub fn rs485_device(&self) -> &str {
-        &self.rs485_device
-    }
-
-    pub fn rs485_baud(&self) -> u32 {
-        self.rs485_baud
-    }
-
-    pub fn rs485_poll_interval_ms(&self) -> u64 {
-        self.rs485_poll_interval_ms
-    }
-
+    #[inline]
     pub fn pos_zones(&self) -> &[i32] {
         &self.pos_zones
     }
 
+    #[inline]
     pub fn gate_zone(&self) -> GeometryId {
         GeometryId(self.gate_zone)
     }
 
-    pub fn exit_line(&self) -> i32 {
-        self.exit_line
-    }
-
-    pub fn entry_line(&self) -> Option<i32> {
-        self.entry_line
-    }
-
-    pub fn approach_line(&self) -> Option<i32> {
-        self.approach_line
-    }
-
-    #[allow(dead_code)]
-    pub fn store_zone(&self) -> Option<i32> {
-        self._store_zone
-    }
-
-    pub fn min_dwell_ms(&self) -> u64 {
-        self.min_dwell_ms
-    }
-
-    pub fn metrics_interval_secs(&self) -> u64 {
-        self.metrics_interval_secs
-    }
-
-    pub fn prometheus_port(&self) -> u16 {
-        self.prometheus_port
-    }
-
-    pub fn config_file(&self) -> &str {
-        &self.config_file
-    }
-
+    #[inline]
     pub fn acc_ip_to_pos(&self) -> &HashMap<String, String> {
         &self.acc_ip_to_pos
     }
 
-    pub fn acc_listener_enabled(&self) -> bool {
-        self.acc_listener_enabled
-    }
-
-    pub fn acc_listener_port(&self) -> u16 {
-        self.acc_listener_port
-    }
-
-    pub fn egress_file(&self) -> &str {
-        &self.egress_file
-    }
-
-    pub fn broker_bind_address(&self) -> &str {
-        &self.broker_bind_address
-    }
-
-    pub fn broker_port(&self) -> u16 {
-        self.broker_port
-    }
-
-    // MQTT Egress getters
-    pub fn mqtt_egress_enabled(&self) -> bool {
-        self.mqtt_egress_enabled
-    }
-
     /// Get MQTT egress host, falling back to main mqtt host if not set
+    #[inline]
     pub fn mqtt_egress_host(&self) -> &str {
         self.mqtt_egress_host.as_deref().unwrap_or(&self.mqtt_host)
     }
 
     /// Get MQTT egress port, falling back to main mqtt port if not set
+    #[inline]
     pub fn mqtt_egress_port(&self) -> u16 {
         self.mqtt_egress_port.unwrap_or(self.mqtt_port)
-    }
-
-    pub fn mqtt_egress_journeys_topic(&self) -> &str {
-        &self.mqtt_egress_journeys_topic
-    }
-
-    pub fn mqtt_egress_events_topic(&self) -> &str {
-        &self.mqtt_egress_events_topic
-    }
-
-    pub fn mqtt_egress_metrics_topic(&self) -> &str {
-        &self.mqtt_egress_metrics_topic
-    }
-
-    pub fn mqtt_egress_gate_topic(&self) -> &str {
-        &self.mqtt_egress_gate_topic
-    }
-
-    pub fn mqtt_egress_tracks_topic(&self) -> &str {
-        &self.mqtt_egress_tracks_topic
-    }
-
-    pub fn mqtt_egress_acc_topic(&self) -> &str {
-        &self.mqtt_egress_acc_topic
-    }
-
-    pub fn mqtt_egress_metrics_interval_secs(&self) -> u64 {
-        self.mqtt_egress_metrics_interval_secs
     }
 
     /// Builder method for tests to set min_dwell_ms
