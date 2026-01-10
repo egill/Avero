@@ -144,7 +144,7 @@ pub struct GateStatePayload {
     pub site: Option<String>,
     /// Timestamp (epoch ms)
     pub ts: u64,
-    /// Gate state (cmd_enqueued, cmd_sent, open, closed, moving)
+    /// Gate state (cmd_enqueued, cmd_sent, cmd_dropped, open, closed, moving)
     pub state: String,
     /// Associated track ID (if any)
     #[serde(skip_serializing_if = "Option::is_none")]

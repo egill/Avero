@@ -968,6 +968,12 @@ impl DashboardState {
                         GateZoneStatus::Exiting { tid, door_state: "cmd_sent".to_string() };
                 }
             }
+            "cmd_dropped" => {
+                if let Some(tid) = event.tid.or(self.gate_zone.occupant_tid) {
+                    self.gate_zone_status =
+                        GateZoneStatus::Exiting { tid, door_state: "cmd_dropped".to_string() };
+                }
+            }
             "moving" => {
                 self.current_gate_flow.moving_ts = Some(event.ts);
                 self.current_gate_flow.moving_received = Some(now);
@@ -1597,7 +1603,12 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
         }
         GateZoneStatus::Blocked { tid } => ("⚠", Color::Red, format!("T{} UNAUTH", tid)),
         GateZoneStatus::Exiting { tid, door_state } => {
-            ("→", Color::Cyan, format!("GATE:T{} {}", tid, door_state))
+            let (icon, color) = if door_state == "cmd_dropped" {
+                ("⚠", Color::Red)
+            } else {
+                ("→", Color::Cyan)
+            };
+            (icon, color, format!("GATE:T{} {}", tid, door_state))
         }
     };
 
