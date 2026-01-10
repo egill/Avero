@@ -146,41 +146,22 @@ impl Tracker {
 
     /// Process a single event, dispatching to the appropriate handler
     ///
-    /// All handlers are now synchronous - gate commands are enqueued to
-    /// a worker task, not awaited inline.
+    /// All handlers are synchronous - gate commands are enqueued to a worker task.
     pub fn process_event(&mut self, event: ParsedEvent) {
         let process_start = Instant::now();
 
         match event.event_type {
-            EventType::TrackCreate => {
-                self.handle_track_create(&event);
-            }
-            EventType::TrackDelete => {
-                self.handle_track_delete(&event);
-            }
-            EventType::ZoneEntry => {
-                self.handle_zone_entry(&event);
-            }
-            EventType::ZoneExit => {
-                self.handle_zone_exit(&event);
-            }
-            EventType::LineCrossForward => {
-                self.handle_line_cross(&event, "forward");
-            }
-            EventType::LineCrossBackward => {
-                self.handle_line_cross(&event, "backward");
-            }
-            EventType::DoorStateChange(_) => {
-                // Door state now comes via watch channel, not event channel.
-                // This arm is unreachable but kept for exhaustive matching.
-            }
-            EventType::AccEvent(ip) => {
-                self.handle_acc_event(&ip, event.received_at);
-            }
-            EventType::Unknown(_) => {}
+            EventType::TrackCreate => self.handle_track_create(&event),
+            EventType::TrackDelete => self.handle_track_delete(&event),
+            EventType::ZoneEntry => self.handle_zone_entry(&event),
+            EventType::ZoneExit => self.handle_zone_exit(&event),
+            EventType::LineCrossForward => self.handle_line_cross(&event, "forward"),
+            EventType::LineCrossBackward => self.handle_line_cross(&event, "backward"),
+            EventType::AccEvent(ip) => self.handle_acc_event(&ip, event.received_at),
+            // Door state comes via watch channel, not event channel
+            EventType::DoorStateChange(_) | EventType::Unknown(_) => {}
         }
 
-        // Record processing latency (lock-free)
         let latency_us = process_start.elapsed().as_micros() as u64;
         self.metrics.record_event_processed(latency_us);
     }

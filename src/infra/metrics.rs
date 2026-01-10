@@ -53,21 +53,37 @@ fn update_atomic_max(atomic_max: &AtomicU64, new_value: u64) {
 /// Swap all buckets to zero and return their values
 #[inline]
 fn swap_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
-    let mut result = [0u64; NUM_BUCKETS];
-    for (i, bucket) in buckets.iter().enumerate() {
-        result[i] = bucket.swap(0, Ordering::Relaxed);
-    }
-    result
+    std::array::from_fn(|i| buckets[i].swap(0, Ordering::Relaxed))
 }
 
 /// Load all bucket values without resetting
 #[inline]
 fn load_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
-    let mut result = [0u64; NUM_BUCKETS];
-    for (i, bucket) in buckets.iter().enumerate() {
-        result[i] = bucket.load(Ordering::Relaxed);
+    std::array::from_fn(|i| buckets[i].load(Ordering::Relaxed))
+}
+
+/// Upper bounds for each bucket (last bucket uses 2x the previous bound)
+const BUCKET_UPPER_BOUNDS: [u64; NUM_BUCKETS] =
+    [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400];
+
+/// Compute average, returning 0 if count is zero
+#[inline]
+fn avg_or_zero(sum: u64, count: u64) -> u64 {
+    if count > 0 {
+        sum / count
+    } else {
+        0
     }
-    result
+}
+
+/// Compute ratio, returning 0.0 if denominator is zero
+#[inline]
+fn ratio_or_zero(numerator: u64, denominator: u64) -> f64 {
+    if denominator > 0 {
+        numerator as f64 / denominator as f64
+    } else {
+        0.0
+    }
 }
 
 /// Compute percentile from histogram buckets
@@ -80,10 +96,6 @@ fn percentile_from_buckets(buckets: &[u64; NUM_BUCKETS], percentile: f64) -> u64
 
     let target = (total as f64 * percentile) as u64;
     let mut cumulative = 0u64;
-
-    // Upper bounds for each bucket (last bucket uses 2x the previous bound)
-    const BUCKET_UPPER_BOUNDS: [u64; NUM_BUCKETS] =
-        [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400];
 
     for (i, &count) in buckets.iter().enumerate() {
         cumulative += count;
@@ -675,13 +687,10 @@ impl Metrics {
         };
 
         // Calculate derived metrics
-        let events_per_sec = if elapsed.as_secs_f64() > 0.0 {
-            events_count as f64 / elapsed.as_secs_f64()
-        } else {
-            0.0
-        };
-
-        let avg_latency = if events_count > 0 { latency_sum / events_count } else { 0 };
+        let elapsed_secs = elapsed.as_secs_f64();
+        let events_per_sec =
+            if elapsed_secs > 0.0 { events_count as f64 / elapsed_secs } else { 0.0 };
+        let avg_latency = avg_or_zero(latency_sum, events_count);
 
         // Compute percentiles from histogram
         let lat_p50 = percentile_from_buckets(&lat_buckets, 0.50);
@@ -689,7 +698,7 @@ impl Metrics {
         let lat_p99 = percentile_from_buckets(&lat_buckets, 0.99);
 
         // Gate latency metrics
-        let gate_avg_latency = if gate_count > 0 { gate_latency_sum / gate_count } else { 0 };
+        let gate_avg_latency = avg_or_zero(gate_latency_sum, gate_count);
         let gate_lat_p99 = percentile_from_buckets(&gate_lat_buckets, 0.99);
 
         // Get current gate state and exits (don't reset)
@@ -713,27 +722,17 @@ impl Metrics {
         let journey_egress_dropped = self.journey_egress_dropped.load(Ordering::Relaxed);
         let journey_egress_received = self.journey_egress_received.load(Ordering::Relaxed);
 
-        // Compute drop ratios (guard divide-by-zero)
-        let mqtt_drop_ratio =
-            if mqtt_events_received > 0 { mqtt_events_dropped as f64 / mqtt_events_received as f64 } else { 0.0 };
-        let acc_drop_ratio =
-            if acc_events_received > 0 { acc_events_dropped as f64 / acc_events_received as f64 } else { 0.0 };
-        let egress_drop_ratio = if journey_egress_received > 0 {
-            journey_egress_dropped as f64 / journey_egress_received as f64
-        } else {
-            0.0
-        };
+        // Compute drop ratios
+        let mqtt_drop_ratio = ratio_or_zero(mqtt_events_dropped, mqtt_events_received);
+        let acc_drop_ratio = ratio_or_zero(acc_events_dropped, acc_events_received);
+        let egress_drop_ratio = ratio_or_zero(journey_egress_dropped, journey_egress_received);
 
         // Swap gate queue delay histogram (reset on report)
         let gate_queue_delay_buckets = swap_buckets(&self.gate_queue_delay_buckets);
         let gate_queue_delay_sum = self.gate_queue_delay_sum_us.swap(0, Ordering::Relaxed);
         let gate_queue_delay_max = self.gate_queue_delay_max_us.swap(0, Ordering::Relaxed);
         let gate_queue_delay_count: u64 = gate_queue_delay_buckets.iter().sum();
-        let gate_queue_delay_avg_us = if gate_queue_delay_count > 0 {
-            gate_queue_delay_sum / gate_queue_delay_count
-        } else {
-            0
-        };
+        let gate_queue_delay_avg_us = avg_or_zero(gate_queue_delay_sum, gate_queue_delay_count);
         let gate_queue_delay_p99_us = percentile_from_buckets(&gate_queue_delay_buckets, 0.99);
 
         // Get queue depths and utilization (point-in-time, don't reset)
@@ -748,11 +747,7 @@ impl Metrics {
         let gate_send_latency_sum = self.gate_send_latency_sum_us.swap(0, Ordering::Relaxed);
         let gate_send_latency_max = self.gate_send_latency_max_us.swap(0, Ordering::Relaxed);
         let gate_send_latency_count: u64 = gate_send_latency_buckets.iter().sum();
-        let gate_send_latency_avg_us = if gate_send_latency_count > 0 {
-            gate_send_latency_sum / gate_send_latency_count
-        } else {
-            0
-        };
+        let gate_send_latency_avg_us = avg_or_zero(gate_send_latency_sum, gate_send_latency_count);
         let gate_send_latency_p99_us = percentile_from_buckets(&gate_send_latency_buckets, 0.99);
 
         // Swap gate enqueue-to-send histogram (reset on report)
@@ -760,11 +755,8 @@ impl Metrics {
         let gate_enqueue_to_send_sum = self.gate_enqueue_to_send_sum_us.swap(0, Ordering::Relaxed);
         let gate_enqueue_to_send_max = self.gate_enqueue_to_send_max_us.swap(0, Ordering::Relaxed);
         let gate_enqueue_to_send_count: u64 = gate_enqueue_to_send_buckets.iter().sum();
-        let gate_enqueue_to_send_avg_us = if gate_enqueue_to_send_count > 0 {
-            gate_enqueue_to_send_sum / gate_enqueue_to_send_count
-        } else {
-            0
-        };
+        let gate_enqueue_to_send_avg_us =
+            avg_or_zero(gate_enqueue_to_send_sum, gate_enqueue_to_send_count);
         let gate_enqueue_to_send_p99_us =
             percentile_from_buckets(&gate_enqueue_to_send_buckets, 0.99);
 
@@ -772,14 +764,12 @@ impl Metrics {
         let stitch_distance_buckets = load_buckets(&self.stitch_distance_buckets);
         let stitch_distance_sum = self.stitch_distance_sum.load(Ordering::Relaxed);
         let stitch_distance_count: u64 = stitch_distance_buckets.iter().sum();
-        let stitch_distance_avg_cm =
-            if stitch_distance_count > 0 { stitch_distance_sum / stitch_distance_count } else { 0 };
+        let stitch_distance_avg_cm = avg_or_zero(stitch_distance_sum, stitch_distance_count);
 
         let stitch_time_buckets = load_buckets(&self.stitch_time_buckets);
         let stitch_time_sum = self.stitch_time_sum.load(Ordering::Relaxed);
         let stitch_time_count: u64 = stitch_time_buckets.iter().sum();
-        let stitch_time_avg_ms =
-            if stitch_time_count > 0 { stitch_time_sum / stitch_time_count } else { 0 };
+        let stitch_time_avg_ms = avg_or_zero(stitch_time_sum, stitch_time_count);
 
         MetricsSummary {
             events_total,

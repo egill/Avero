@@ -9,8 +9,20 @@
 //! - `services/` - Business logic (Tracker, JourneyManager, Gate)
 //! - `infra/` - Infrastructure (Config, Metrics, Broker)
 
+use std::sync::Arc;
+
 use clap::Parser;
-use gateway_poc::infra::{Config, GateMode, Metrics};
+use tokio::sync::{mpsc, watch};
+use tracing::info;
+use tracing_subscriber::fmt::time::UtcTime;
+use tracing_subscriber::EnvFilter;
+
+use gateway_poc::infra::{Config, Metrics};
+use gateway_poc::io::{
+    create_egress_channel, create_egress_writer, start_acc_listener, AccListenerConfig,
+    MqttPublisher, Rs485Monitor,
+};
+use gateway_poc::services::{create_gate_worker, GateController};
 
 /// Gateway PoC - Automated retail gate control system
 #[derive(Parser, Debug)]
@@ -20,16 +32,16 @@ struct Args {
     #[arg(short, long, default_value = "config/dev.toml")]
     config: String,
 }
-use gateway_poc::io::{
-    create_egress_channel, create_egress_writer, start_acc_listener, AccListenerConfig,
-    MqttPublisher, Rs485Monitor,
-};
-use gateway_poc::services::{create_gate_worker, GateController};
-use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
-use tracing::info;
-use tracing_subscriber::fmt::time::UtcTime;
-use tracing_subscriber::EnvFilter;
+
+/// Calculate queue utilization as a percentage (0-100).
+#[inline]
+fn utilization_pct(used: u64, capacity: u64) -> u64 {
+    if capacity > 0 {
+        used * 100 / capacity
+    } else {
+        0
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -58,11 +70,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start embedded MQTT broker with config
     gateway_poc::infra::broker::start_embedded_broker(&config);
 
-    // Log configuration
-    let gate_mode_str = match config.gate_mode() {
-        GateMode::Tcp => "tcp",
-        GateMode::Http => "http",
-    };
     info!(
         config_file = %config.config_file(),
         mqtt_host = %config.mqtt_host(),
@@ -70,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mqtt_topic = %config.mqtt_topic(),
         mqtt_egress_host = %config.mqtt_egress_host(),
         mqtt_egress_port = %config.mqtt_egress_port(),
-        gate_mode = %gate_mode_str,
+        gate_mode = ?config.gate_mode(),
         gate_tcp_addr = %config.gate_tcp_addr(),
         min_dwell_ms = %config.min_dwell_ms(),
         pos_zones = ?config.pos_zones(),
@@ -209,19 +216,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             metrics_clone.set_gate_queue_depth(cloudplus_depth);
             metrics_clone.set_cloudplus_queue_depth(cloudplus_depth);
 
-            // Compute queue utilization percentages (0-100)
-            let event_util_pct = if event_max_capacity > 0 {
-                event_depth * 100 / event_max_capacity
-            } else {
-                0
-            };
-            let gate_util_pct = if gate_max_capacity > 0 {
-                cloudplus_depth * 100 / gate_max_capacity
-            } else {
-                0
-            };
-            metrics_clone.set_event_queue_utilization_pct(event_util_pct);
-            metrics_clone.set_gate_queue_utilization_pct(gate_util_pct);
+            metrics_clone
+                .set_event_queue_utilization_pct(utilization_pct(event_depth, event_max_capacity));
+            metrics_clone.set_gate_queue_utilization_pct(utilization_pct(
+                cloudplus_depth,
+                gate_max_capacity,
+            ));
 
             // Use full report with placeholder track counts (actual counts are in tracker)
             let summary = metrics_clone.report(0, 0);

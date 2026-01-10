@@ -5,7 +5,7 @@
 
 use crate::domain::types::TrackId;
 use crate::infra::metrics::{
-    Metrics, METRICS_BUCKET_BOUNDS, METRICS_NUM_BUCKETS, METRICS_STITCH_DIST_BOUNDS,
+    Metrics, MetricsSummary, METRICS_BUCKET_BOUNDS, METRICS_NUM_BUCKETS, METRICS_STITCH_DIST_BOUNDS,
 };
 use crate::services::gate::GateCommand;
 use bytes::Bytes;
@@ -15,11 +15,75 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::convert::Infallible;
+use std::fmt::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tracing::{error, info};
+
+/// Prometheus metric type
+enum MetricType {
+    Counter,
+    Gauge,
+}
+
+impl MetricType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            MetricType::Counter => "counter",
+            MetricType::Gauge => "gauge",
+        }
+    }
+}
+
+/// Write a simple metric (counter or gauge) with site label
+fn write_metric(
+    output: &mut String,
+    name: &str,
+    help: &str,
+    typ: MetricType,
+    site: &str,
+    val: u64,
+) {
+    let _ = writeln!(output, "# HELP {name} {help}");
+    let _ = writeln!(output, "# TYPE {name} {}", typ.as_str());
+    let _ = writeln!(output, "{name}{{site=\"{site}\"}} {val}");
+}
+
+/// Write a gauge metric with f64 value
+fn write_gauge_f64(output: &mut String, name: &str, help: &str, site: &str, val: f64) {
+    let _ = writeln!(output, "# HELP {name} {help}");
+    let _ = writeln!(output, "# TYPE {name} gauge");
+    let _ = writeln!(output, "{name}{{site=\"{site}\"}} {val:.6}");
+}
+
+/// Write a histogram metric with buckets, sum, and count
+fn write_histogram(
+    output: &mut String,
+    name: &str,
+    help: &str,
+    site: &str,
+    buckets: &[u64; METRICS_NUM_BUCKETS],
+    bounds: &[u64; 10],
+    avg: u64,
+) {
+    let _ = writeln!(output, "# HELP {name} {help}");
+    let _ = writeln!(output, "# TYPE {name} histogram");
+
+    let mut cumulative = 0u64;
+    for (i, &bound) in bounds.iter().enumerate() {
+        cumulative += buckets[i];
+        let _ = writeln!(output, "{name}_bucket{{site=\"{site}\",le=\"{bound}\"}} {cumulative}");
+    }
+    cumulative += buckets[METRICS_NUM_BUCKETS - 1];
+    let _ = writeln!(output, "{name}_bucket{{site=\"{site}\",le=\"+Inf\"}} {cumulative}");
+
+    let count: u64 = buckets.iter().sum();
+    let sum = avg * count;
+    let _ = writeln!(output, "{name}_sum{{site=\"{site}\"}} {sum}");
+    let _ = writeln!(output, "{name}_count{{site=\"{site}\"}} {count}");
+}
 
 /// Format metrics in Prometheus text exposition format
 fn format_prometheus_metrics(
@@ -31,511 +95,431 @@ fn format_prometheus_metrics(
     let summary = metrics.report(active_tracks, authorized_tracks);
     let mut output = String::with_capacity(8192);
 
-    // Event processing metrics
-    output.push_str("# HELP gateway_events_total Total events processed\n");
-    output.push_str("# TYPE gateway_events_total counter\n");
-    output.push_str(&format!(
-        "gateway_events_total{{site=\"{}\"}} {}\n",
-        site_id, summary.events_total
-    ));
+    write_core_metrics(&mut output, site_id, &summary);
+    write_latency_metrics(&mut output, site_id, &summary);
+    write_gate_metrics(&mut output, site_id, &summary);
+    write_track_metrics(&mut output, site_id, &summary);
+    write_pos_occupancy(&mut output, site_id, metrics);
+    write_acc_metrics(&mut output, site_id, &summary);
+    write_stitch_metrics(&mut output, site_id, &summary);
+    write_drop_metrics(&mut output, site_id, &summary);
+    write_queue_metrics(&mut output, site_id, &summary);
 
-    output.push_str("# HELP gateway_events_per_sec Events processed per second\n");
-    output.push_str("# TYPE gateway_events_per_sec gauge\n");
-    output.push_str(&format!(
-        "gateway_events_per_sec{{site=\"{}\"}} {:.2}\n",
-        site_id, summary.events_per_sec
-    ));
-
-    // Event latency histogram
-    output.push_str("# HELP gateway_event_latency_us Event processing latency in microseconds\n");
-    output.push_str("# TYPE gateway_event_latency_us histogram\n");
-
-    let mut cumulative = 0u64;
-    for (i, &bound) in METRICS_BUCKET_BOUNDS.iter().enumerate() {
-        cumulative += summary.lat_buckets[i];
-        output.push_str(&format!(
-            "gateway_event_latency_us_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
-            site_id, bound, cumulative
-        ));
-    }
-    // Add overflow bucket and +Inf
-    cumulative += summary.lat_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_event_latency_us_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
-        site_id, cumulative
-    ));
-
-    // Sum and count (approximate sum from avg * count)
-    let count = summary.lat_buckets.iter().sum::<u64>();
-    let sum = summary.avg_process_latency_us * count;
-    output.push_str(&format!("gateway_event_latency_us_sum{{site=\"{}\"}} {}\n", site_id, sum));
-    output.push_str(&format!("gateway_event_latency_us_count{{site=\"{}\"}} {}\n", site_id, count));
-
-    // Percentiles as gauges (easier to graph)
-    output.push_str("# HELP gateway_event_latency_p50_us 50th percentile event latency\n");
-    output.push_str("# TYPE gateway_event_latency_p50_us gauge\n");
-    output.push_str(&format!(
-        "gateway_event_latency_p50_us{{site=\"{}\"}} {}\n",
-        site_id, summary.lat_p50_us
-    ));
-
-    output.push_str("# HELP gateway_event_latency_p95_us 95th percentile event latency\n");
-    output.push_str("# TYPE gateway_event_latency_p95_us gauge\n");
-    output.push_str(&format!(
-        "gateway_event_latency_p95_us{{site=\"{}\"}} {}\n",
-        site_id, summary.lat_p95_us
-    ));
-
-    output.push_str("# HELP gateway_event_latency_p99_us 99th percentile event latency\n");
-    output.push_str("# TYPE gateway_event_latency_p99_us gauge\n");
-    output.push_str(&format!(
-        "gateway_event_latency_p99_us{{site=\"{}\"}} {}\n",
-        site_id, summary.lat_p99_us
-    ));
-
-    // Gate command metrics
-    output.push_str("# HELP gateway_gate_commands_total Total gate commands sent\n");
-    output.push_str("# TYPE gateway_gate_commands_total counter\n");
-    output.push_str(&format!(
-        "gateway_gate_commands_total{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_commands_sent
-    ));
-
-    // Gate latency histogram
-    output.push_str("# HELP gateway_gate_latency_us Gate command E2E latency in microseconds\n");
-    output.push_str("# TYPE gateway_gate_latency_us histogram\n");
-
-    let mut gate_cumulative = 0u64;
-    for (i, &bound) in METRICS_BUCKET_BOUNDS.iter().enumerate() {
-        gate_cumulative += summary.gate_lat_buckets[i];
-        output.push_str(&format!(
-            "gateway_gate_latency_us_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
-            site_id, bound, gate_cumulative
-        ));
-    }
-    gate_cumulative += summary.gate_lat_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_gate_latency_us_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
-        site_id, gate_cumulative
-    ));
-
-    let gate_count = summary.gate_lat_buckets.iter().sum::<u64>();
-    let gate_sum = summary.gate_lat_avg_us * gate_count;
-    output.push_str(&format!("gateway_gate_latency_us_sum{{site=\"{}\"}} {}\n", site_id, gate_sum));
-    output.push_str(&format!(
-        "gateway_gate_latency_us_count{{site=\"{}\"}} {}\n",
-        site_id, gate_count
-    ));
-
-    output.push_str("# HELP gateway_gate_latency_p99_us 99th percentile gate command latency\n");
-    output.push_str("# TYPE gateway_gate_latency_p99_us gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_latency_p99_us{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_lat_p99_us
-    ));
-
-    output.push_str("# HELP gateway_gate_latency_max_us Maximum gate command latency\n");
-    output.push_str("# TYPE gateway_gate_latency_max_us gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_latency_max_us{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_lat_max_us
-    ));
-
-    // Track counts
-    output.push_str("# HELP gateway_active_tracks Current active tracks\n");
-    output.push_str("# TYPE gateway_active_tracks gauge\n");
-    output.push_str(&format!(
-        "gateway_active_tracks{{site=\"{}\"}} {}\n",
-        site_id, summary.active_tracks
-    ));
-
-    output.push_str("# HELP gateway_authorized_tracks Current authorized tracks\n");
-    output.push_str("# TYPE gateway_authorized_tracks gauge\n");
-    output.push_str(&format!(
-        "gateway_authorized_tracks{{site=\"{}\"}} {}\n",
-        site_id, summary.authorized_tracks
-    ));
-
-    // Gate state (0=closed, 1=moving, 2=open)
-    output.push_str("# HELP gateway_gate_state Current gate state (0=closed, 1=moving, 2=open)\n");
-    output.push_str("# TYPE gateway_gate_state gauge\n");
     output
-        .push_str(&format!("gateway_gate_state{{site=\"{}\"}} {}\n", site_id, summary.gate_state));
+}
 
-    // Exits counter
-    output.push_str("# HELP gateway_exits_total Total exits through gate\n");
-    output.push_str("# TYPE gateway_exits_total counter\n");
-    output.push_str(&format!(
-        "gateway_exits_total{{site=\"{}\"}} {}\n",
-        site_id, summary.exits_total
-    ));
+fn write_core_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+    write_metric(
+        output,
+        "gateway_events_total",
+        "Total events processed",
+        MetricType::Counter,
+        site,
+        summary.events_total,
+    );
+    let _ = writeln!(output, "# HELP gateway_events_per_sec Events processed per second");
+    let _ = writeln!(output, "# TYPE gateway_events_per_sec gauge");
+    let _ =
+        writeln!(output, "gateway_events_per_sec{{site=\"{site}\"}} {:.2}", summary.events_per_sec);
+}
 
-    // POS zone occupancy
-    output.push_str("# HELP gateway_pos_occupancy Number of people in each POS zone\n");
-    output.push_str("# TYPE gateway_pos_occupancy gauge\n");
+fn write_latency_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+    write_histogram(
+        output,
+        "gateway_event_latency_us",
+        "Event processing latency in microseconds",
+        site,
+        &summary.lat_buckets,
+        &METRICS_BUCKET_BOUNDS,
+        summary.avg_process_latency_us,
+    );
+
+    write_metric(
+        output,
+        "gateway_event_latency_p50_us",
+        "50th percentile event latency",
+        MetricType::Gauge,
+        site,
+        summary.lat_p50_us,
+    );
+    write_metric(
+        output,
+        "gateway_event_latency_p95_us",
+        "95th percentile event latency",
+        MetricType::Gauge,
+        site,
+        summary.lat_p95_us,
+    );
+    write_metric(
+        output,
+        "gateway_event_latency_p99_us",
+        "99th percentile event latency",
+        MetricType::Gauge,
+        site,
+        summary.lat_p99_us,
+    );
+}
+
+fn write_gate_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+    write_metric(
+        output,
+        "gateway_gate_commands_total",
+        "Total gate commands sent",
+        MetricType::Counter,
+        site,
+        summary.gate_commands_sent,
+    );
+
+    write_histogram(
+        output,
+        "gateway_gate_latency_us",
+        "Gate command E2E latency in microseconds",
+        site,
+        &summary.gate_lat_buckets,
+        &METRICS_BUCKET_BOUNDS,
+        summary.gate_lat_avg_us,
+    );
+
+    write_metric(
+        output,
+        "gateway_gate_latency_p99_us",
+        "99th percentile gate command latency",
+        MetricType::Gauge,
+        site,
+        summary.gate_lat_p99_us,
+    );
+    write_metric(
+        output,
+        "gateway_gate_latency_max_us",
+        "Maximum gate command latency",
+        MetricType::Gauge,
+        site,
+        summary.gate_lat_max_us,
+    );
+    write_metric(
+        output,
+        "gateway_gate_state",
+        "Current gate state (0=closed, 1=moving, 2=open)",
+        MetricType::Gauge,
+        site,
+        summary.gate_state,
+    );
+    write_metric(
+        output,
+        "gateway_exits_total",
+        "Total exits through gate",
+        MetricType::Counter,
+        site,
+        summary.exits_total,
+    );
+}
+
+fn write_track_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+    write_metric(
+        output,
+        "gateway_active_tracks",
+        "Current active tracks",
+        MetricType::Gauge,
+        site,
+        summary.active_tracks as u64,
+    );
+    write_metric(
+        output,
+        "gateway_authorized_tracks",
+        "Current authorized tracks",
+        MetricType::Gauge,
+        site,
+        summary.authorized_tracks as u64,
+    );
+}
+
+fn write_pos_occupancy(output: &mut String, site: &str, metrics: &Metrics) {
+    let _ = writeln!(output, "# HELP gateway_pos_occupancy Number of people in each POS zone");
+    let _ = writeln!(output, "# TYPE gateway_pos_occupancy gauge");
     for (zone_id, count) in metrics.pos_occupancy() {
-        output.push_str(&format!(
-            "gateway_pos_occupancy{{site=\"{}\",zone_id=\"{}\"}} {}\n",
-            site_id, zone_id, count
-        ));
+        let _ = writeln!(
+            output,
+            "gateway_pos_occupancy{{site=\"{site}\",zone_id=\"{zone_id}\"}} {count}"
+        );
     }
+}
 
-    // ACC metrics
-    output.push_str("# HELP gateway_acc_events_total Total ACC events received\n");
-    output.push_str("# TYPE gateway_acc_events_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_events_total{{site=\"{}\"}} {}\n",
-        site_id, summary.acc_events_total
-    ));
-
-    output.push_str("# HELP gateway_acc_matched_total ACC events matched to tracks\n");
-    output.push_str("# TYPE gateway_acc_matched_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_matched_total{{site=\"{}\"}} {}\n",
-        site_id, summary.acc_matched_total
-    ));
-
-    // Stitch metrics
-    output.push_str("# HELP gateway_stitch_matched_total Tracks successfully stitched\n");
-    output.push_str("# TYPE gateway_stitch_matched_total counter\n");
-    output.push_str(&format!(
-        "gateway_stitch_matched_total{{site=\"{}\"}} {}\n",
-        site_id, summary.stitch_matched_total
-    ));
-
-    output.push_str(
-        "# HELP gateway_stitch_expired_total Tracks truly lost (expired without stitch)\n",
+fn write_acc_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+    write_metric(
+        output,
+        "gateway_acc_events_total",
+        "Total ACC events received",
+        MetricType::Counter,
+        site,
+        summary.acc_events_total,
     );
-    output.push_str("# TYPE gateway_stitch_expired_total counter\n");
-    output.push_str(&format!(
-        "gateway_stitch_expired_total{{site=\"{}\"}} {}\n",
-        site_id, summary.stitch_expired_total
-    ));
-
-    // Stitch distance histogram (cm)
-    output.push_str("# HELP gateway_stitch_distance_cm Stitch distance in centimeters\n");
-    output.push_str("# TYPE gateway_stitch_distance_cm histogram\n");
-
-    let mut stitch_dist_cumulative = 0u64;
-    for (i, &bound) in METRICS_STITCH_DIST_BOUNDS.iter().enumerate() {
-        stitch_dist_cumulative += summary.stitch_distance_buckets[i];
-        output.push_str(&format!(
-            "gateway_stitch_distance_cm_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
-            site_id, bound, stitch_dist_cumulative
-        ));
-    }
-    stitch_dist_cumulative += summary.stitch_distance_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_stitch_distance_cm_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
-        site_id, stitch_dist_cumulative
-    ));
-
-    let stitch_dist_count = summary.stitch_distance_buckets.iter().sum::<u64>();
-    let stitch_dist_sum = summary.stitch_distance_avg_cm * stitch_dist_count;
-    output.push_str(&format!(
-        "gateway_stitch_distance_cm_sum{{site=\"{}\"}} {}\n",
-        site_id, stitch_dist_sum
-    ));
-    output.push_str(&format!(
-        "gateway_stitch_distance_cm_count{{site=\"{}\"}} {}\n",
-        site_id, stitch_dist_count
-    ));
-
-    output.push_str("# HELP gateway_stitch_distance_avg_cm Average stitch distance\n");
-    output.push_str("# TYPE gateway_stitch_distance_avg_cm gauge\n");
-    output.push_str(&format!(
-        "gateway_stitch_distance_avg_cm{{site=\"{}\"}} {}\n",
-        site_id, summary.stitch_distance_avg_cm
-    ));
-
-    // Stitch time histogram (ms)
-    output.push_str("# HELP gateway_stitch_time_ms Stitch time in milliseconds\n");
-    output.push_str("# TYPE gateway_stitch_time_ms histogram\n");
-
-    let mut stitch_time_cumulative = 0u64;
-    for (i, &bound) in METRICS_BUCKET_BOUNDS.iter().enumerate() {
-        stitch_time_cumulative += summary.stitch_time_buckets[i];
-        output.push_str(&format!(
-            "gateway_stitch_time_ms_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
-            site_id, bound, stitch_time_cumulative
-        ));
-    }
-    stitch_time_cumulative += summary.stitch_time_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_stitch_time_ms_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
-        site_id, stitch_time_cumulative
-    ));
-
-    let stitch_time_count = summary.stitch_time_buckets.iter().sum::<u64>();
-    let stitch_time_sum = summary.stitch_time_avg_ms * stitch_time_count;
-    output.push_str(&format!(
-        "gateway_stitch_time_ms_sum{{site=\"{}\"}} {}\n",
-        site_id, stitch_time_sum
-    ));
-    output.push_str(&format!(
-        "gateway_stitch_time_ms_count{{site=\"{}\"}} {}\n",
-        site_id, stitch_time_count
-    ));
-
-    output.push_str("# HELP gateway_stitch_time_avg_ms Average stitch time\n");
-    output.push_str("# TYPE gateway_stitch_time_avg_ms gauge\n");
-    output.push_str(&format!(
-        "gateway_stitch_time_avg_ms{{site=\"{}\"}} {}\n",
-        site_id, summary.stitch_time_avg_ms
-    ));
-
-    // ACC late and no_journey counters
-    output.push_str(
-        "# HELP gateway_acc_late_total ACC events that arrived late (after gate entry)\n",
+    write_metric(
+        output,
+        "gateway_acc_matched_total",
+        "ACC events matched to tracks",
+        MetricType::Counter,
+        site,
+        summary.acc_matched_total,
     );
-    output.push_str("# TYPE gateway_acc_late_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_late_total{{site=\"{}\"}} {}\n",
-        site_id, summary.acc_late_total
-    ));
-
-    output
-        .push_str("# HELP gateway_acc_no_journey_total ACC events matched but no journey found\n");
-    output.push_str("# TYPE gateway_acc_no_journey_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_no_journey_total{{site=\"{}\"}} {}\n",
-        site_id, summary.acc_no_journey_total
-    ));
-
-    // Drop and received counters
-    output.push_str("# HELP gateway_mqtt_events_received_total MQTT events received (before try_send)\n");
-    output.push_str("# TYPE gateway_mqtt_events_received_total counter\n");
-    output.push_str(&format!(
-        "gateway_mqtt_events_received_total{{site=\"{}\"}} {}\n",
-        site_id, summary.mqtt_events_received
-    ));
-
-    output.push_str("# HELP gateway_mqtt_events_dropped_total MQTT events dropped due to channel full\n");
-    output.push_str("# TYPE gateway_mqtt_events_dropped_total counter\n");
-    output.push_str(&format!(
-        "gateway_mqtt_events_dropped_total{{site=\"{}\"}} {}\n",
-        site_id, summary.mqtt_events_dropped
-    ));
-
-    output.push_str("# HELP gateway_mqtt_drop_ratio MQTT drop ratio (dropped / received)\n");
-    output.push_str("# TYPE gateway_mqtt_drop_ratio gauge\n");
-    output.push_str(&format!(
-        "gateway_mqtt_drop_ratio{{site=\"{}\"}} {:.6}\n",
-        site_id, summary.mqtt_drop_ratio
-    ));
-
-    output.push_str("# HELP gateway_acc_events_received_total ACC events received (before try_send)\n");
-    output.push_str("# TYPE gateway_acc_events_received_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_events_received_total{{site=\"{}\"}} {}\n",
-        site_id, summary.acc_events_received
-    ));
-
-    output.push_str("# HELP gateway_acc_events_dropped_total ACC events dropped due to channel full\n");
-    output.push_str("# TYPE gateway_acc_events_dropped_total counter\n");
-    output.push_str(&format!(
-        "gateway_acc_events_dropped_total{{site=\"{}\"}} {}\n",
-        site_id, summary.acc_events_dropped
-    ));
-
-    output.push_str("# HELP gateway_acc_drop_ratio ACC drop ratio (dropped / received)\n");
-    output.push_str("# TYPE gateway_acc_drop_ratio gauge\n");
-    output.push_str(&format!(
-        "gateway_acc_drop_ratio{{site=\"{}\"}} {:.6}\n",
-        site_id, summary.acc_drop_ratio
-    ));
-
-    output.push_str("# HELP gateway_gate_cmds_dropped_total Gate commands dropped due to channel full\n");
-    output.push_str("# TYPE gateway_gate_cmds_dropped_total counter\n");
-    output.push_str(&format!(
-        "gateway_gate_cmds_dropped_total{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_cmds_dropped
-    ));
-
-    output.push_str("# HELP gateway_journey_egress_dropped_total Journey egress events dropped\n");
-    output.push_str("# TYPE gateway_journey_egress_dropped_total counter\n");
-    output.push_str(&format!(
-        "gateway_journey_egress_dropped_total{{site=\"{}\"}} {}\n",
-        site_id, summary.journey_egress_dropped
-    ));
-
-    output.push_str("# HELP gateway_journey_egress_received_total Journey egress events attempted (before try_send)\n");
-    output.push_str("# TYPE gateway_journey_egress_received_total counter\n");
-    output.push_str(&format!(
-        "gateway_journey_egress_received_total{{site=\"{}\"}} {}\n",
-        site_id, summary.journey_egress_received
-    ));
-
-    output.push_str("# HELP gateway_egress_drop_ratio Journey egress drop ratio (dropped / received)\n");
-    output.push_str("# TYPE gateway_egress_drop_ratio gauge\n");
-    output.push_str(&format!(
-        "gateway_egress_drop_ratio{{site=\"{}\"}} {:.6}\n",
-        site_id, summary.egress_drop_ratio
-    ));
-
-    // Gate queue delay histogram (time from enqueue to worker pickup)
-    output
-        .push_str("# HELP gateway_gate_queue_delay_us Gate command queue delay in microseconds\n");
-    output.push_str("# TYPE gateway_gate_queue_delay_us histogram\n");
-
-    let mut gate_queue_delay_cumulative = 0u64;
-    for (i, &bound) in METRICS_BUCKET_BOUNDS.iter().enumerate() {
-        gate_queue_delay_cumulative += summary.gate_queue_delay_buckets[i];
-        output.push_str(&format!(
-            "gateway_gate_queue_delay_us_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
-            site_id, bound, gate_queue_delay_cumulative
-        ));
-    }
-    gate_queue_delay_cumulative += summary.gate_queue_delay_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_gate_queue_delay_us_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
-        site_id, gate_queue_delay_cumulative
-    ));
-
-    let gate_queue_delay_count = summary.gate_queue_delay_buckets.iter().sum::<u64>();
-    let gate_queue_delay_sum = summary.gate_queue_delay_avg_us * gate_queue_delay_count;
-    output.push_str(&format!(
-        "gateway_gate_queue_delay_us_sum{{site=\"{}\"}} {}\n",
-        site_id, gate_queue_delay_sum
-    ));
-    output.push_str(&format!(
-        "gateway_gate_queue_delay_us_count{{site=\"{}\"}} {}\n",
-        site_id, gate_queue_delay_count
-    ));
-
-    output.push_str("# HELP gateway_gate_queue_delay_p99_us 99th percentile gate queue delay\n");
-    output.push_str("# TYPE gateway_gate_queue_delay_p99_us gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_queue_delay_p99_us{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_queue_delay_p99_us
-    ));
-
-    output.push_str("# HELP gateway_gate_queue_delay_max_us Maximum gate queue delay\n");
-    output.push_str("# TYPE gateway_gate_queue_delay_max_us gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_queue_delay_max_us{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_queue_delay_max_us
-    ));
-
-    // Queue depths
-    output.push_str("# HELP gateway_event_queue_depth Current event queue depth\n");
-    output.push_str("# TYPE gateway_event_queue_depth gauge\n");
-    output.push_str(&format!(
-        "gateway_event_queue_depth{{site=\"{}\"}} {}\n",
-        site_id, summary.event_queue_depth
-    ));
-
-    output.push_str(
-        "# HELP gateway_gate_queue_depth Current gate queue depth (CloudPlus outbound)\n",
+    write_metric(
+        output,
+        "gateway_acc_late_total",
+        "ACC events that arrived late (after gate entry)",
+        MetricType::Counter,
+        site,
+        summary.acc_late_total,
     );
-    output.push_str("# TYPE gateway_gate_queue_depth gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_queue_depth{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_queue_depth
-    ));
-
-    output
-        .push_str("# HELP gateway_cloudplus_queue_depth Current CloudPlus outbound queue depth\n");
-    output.push_str("# TYPE gateway_cloudplus_queue_depth gauge\n");
-    output.push_str(&format!(
-        "gateway_cloudplus_queue_depth{{site=\"{}\"}} {}\n",
-        site_id, summary.cloudplus_queue_depth
-    ));
-
-    // Queue utilization percentages
-    output.push_str("# HELP gateway_event_queue_utilization_pct Event queue utilization percentage (0-100)\n");
-    output.push_str("# TYPE gateway_event_queue_utilization_pct gauge\n");
-    output.push_str(&format!(
-        "gateway_event_queue_utilization_pct{{site=\"{}\"}} {}\n",
-        site_id, summary.event_queue_utilization_pct
-    ));
-
-    output.push_str("# HELP gateway_gate_queue_utilization_pct Gate queue utilization percentage (0-100)\n");
-    output.push_str("# TYPE gateway_gate_queue_utilization_pct gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_queue_utilization_pct{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_queue_utilization_pct
-    ));
-
-    // Gate send latency histogram (time for actual network send)
-    output.push_str(
-        "# HELP gateway_gate_send_latency_us Gate command network send latency in microseconds\n",
+    write_metric(
+        output,
+        "gateway_acc_no_journey_total",
+        "ACC events matched but no journey found",
+        MetricType::Counter,
+        site,
+        summary.acc_no_journey_total,
     );
-    output.push_str("# TYPE gateway_gate_send_latency_us histogram\n");
+}
 
-    let mut gate_send_cumulative = 0u64;
-    for (i, &bound) in METRICS_BUCKET_BOUNDS.iter().enumerate() {
-        gate_send_cumulative += summary.gate_send_latency_buckets[i];
-        output.push_str(&format!(
-            "gateway_gate_send_latency_us_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
-            site_id, bound, gate_send_cumulative
-        ));
-    }
-    gate_send_cumulative += summary.gate_send_latency_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_gate_send_latency_us_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
-        site_id, gate_send_cumulative
-    ));
-
-    let gate_send_count = summary.gate_send_latency_buckets.iter().sum::<u64>();
-    let gate_send_sum = summary.gate_send_latency_avg_us * gate_send_count;
-    output.push_str(&format!(
-        "gateway_gate_send_latency_us_sum{{site=\"{}\"}} {}\n",
-        site_id, gate_send_sum
-    ));
-    output.push_str(&format!(
-        "gateway_gate_send_latency_us_count{{site=\"{}\"}} {}\n",
-        site_id, gate_send_count
-    ));
-
-    output.push_str("# HELP gateway_gate_send_latency_p99_us 99th percentile gate send latency\n");
-    output.push_str("# TYPE gateway_gate_send_latency_p99_us gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_send_latency_p99_us{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_send_latency_p99_us
-    ));
-
-    // Gate enqueue-to-send histogram (total time from enqueue to send complete)
-    output.push_str(
-        "# HELP gateway_gate_enqueue_to_send_us Gate command enqueue to send time in microseconds\n",
+fn write_stitch_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+    write_metric(
+        output,
+        "gateway_stitch_matched_total",
+        "Tracks successfully stitched",
+        MetricType::Counter,
+        site,
+        summary.stitch_matched_total,
     );
-    output.push_str("# TYPE gateway_gate_enqueue_to_send_us histogram\n");
-
-    let mut enqueue_to_send_cumulative = 0u64;
-    for (i, &bound) in METRICS_BUCKET_BOUNDS.iter().enumerate() {
-        enqueue_to_send_cumulative += summary.gate_enqueue_to_send_buckets[i];
-        output.push_str(&format!(
-            "gateway_gate_enqueue_to_send_us_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
-            site_id, bound, enqueue_to_send_cumulative
-        ));
-    }
-    enqueue_to_send_cumulative += summary.gate_enqueue_to_send_buckets[METRICS_NUM_BUCKETS - 1];
-    output.push_str(&format!(
-        "gateway_gate_enqueue_to_send_us_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
-        site_id, enqueue_to_send_cumulative
-    ));
-
-    let enqueue_to_send_count = summary.gate_enqueue_to_send_buckets.iter().sum::<u64>();
-    let enqueue_to_send_sum = summary.gate_enqueue_to_send_avg_us * enqueue_to_send_count;
-    output.push_str(&format!(
-        "gateway_gate_enqueue_to_send_us_sum{{site=\"{}\"}} {}\n",
-        site_id, enqueue_to_send_sum
-    ));
-    output.push_str(&format!(
-        "gateway_gate_enqueue_to_send_us_count{{site=\"{}\"}} {}\n",
-        site_id, enqueue_to_send_count
-    ));
-
-    output.push_str(
-        "# HELP gateway_gate_enqueue_to_send_p99_us 99th percentile gate enqueue to send time\n",
+    write_metric(
+        output,
+        "gateway_stitch_expired_total",
+        "Tracks truly lost (expired without stitch)",
+        MetricType::Counter,
+        site,
+        summary.stitch_expired_total,
     );
-    output.push_str("# TYPE gateway_gate_enqueue_to_send_p99_us gauge\n");
-    output.push_str(&format!(
-        "gateway_gate_enqueue_to_send_p99_us{{site=\"{}\"}} {}\n",
-        site_id, summary.gate_enqueue_to_send_p99_us
-    ));
 
-    output
+    write_histogram(
+        output,
+        "gateway_stitch_distance_cm",
+        "Stitch distance in centimeters",
+        site,
+        &summary.stitch_distance_buckets,
+        &METRICS_STITCH_DIST_BOUNDS,
+        summary.stitch_distance_avg_cm,
+    );
+    write_metric(
+        output,
+        "gateway_stitch_distance_avg_cm",
+        "Average stitch distance",
+        MetricType::Gauge,
+        site,
+        summary.stitch_distance_avg_cm,
+    );
+
+    write_histogram(
+        output,
+        "gateway_stitch_time_ms",
+        "Stitch time in milliseconds",
+        site,
+        &summary.stitch_time_buckets,
+        &METRICS_BUCKET_BOUNDS,
+        summary.stitch_time_avg_ms,
+    );
+    write_metric(
+        output,
+        "gateway_stitch_time_avg_ms",
+        "Average stitch time",
+        MetricType::Gauge,
+        site,
+        summary.stitch_time_avg_ms,
+    );
+}
+
+fn write_drop_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+    write_metric(
+        output,
+        "gateway_mqtt_events_received_total",
+        "MQTT events received (before try_send)",
+        MetricType::Counter,
+        site,
+        summary.mqtt_events_received,
+    );
+    write_metric(
+        output,
+        "gateway_mqtt_events_dropped_total",
+        "MQTT events dropped due to channel full",
+        MetricType::Counter,
+        site,
+        summary.mqtt_events_dropped,
+    );
+    write_gauge_f64(
+        output,
+        "gateway_mqtt_drop_ratio",
+        "MQTT drop ratio (dropped / received)",
+        site,
+        summary.mqtt_drop_ratio,
+    );
+
+    write_metric(
+        output,
+        "gateway_acc_events_received_total",
+        "ACC events received (before try_send)",
+        MetricType::Counter,
+        site,
+        summary.acc_events_received,
+    );
+    write_metric(
+        output,
+        "gateway_acc_events_dropped_total",
+        "ACC events dropped due to channel full",
+        MetricType::Counter,
+        site,
+        summary.acc_events_dropped,
+    );
+    write_gauge_f64(
+        output,
+        "gateway_acc_drop_ratio",
+        "ACC drop ratio (dropped / received)",
+        site,
+        summary.acc_drop_ratio,
+    );
+
+    write_metric(
+        output,
+        "gateway_gate_cmds_dropped_total",
+        "Gate commands dropped due to channel full",
+        MetricType::Counter,
+        site,
+        summary.gate_cmds_dropped,
+    );
+    write_metric(
+        output,
+        "gateway_journey_egress_dropped_total",
+        "Journey egress events dropped",
+        MetricType::Counter,
+        site,
+        summary.journey_egress_dropped,
+    );
+    write_metric(
+        output,
+        "gateway_journey_egress_received_total",
+        "Journey egress events attempted (before try_send)",
+        MetricType::Counter,
+        site,
+        summary.journey_egress_received,
+    );
+    write_gauge_f64(
+        output,
+        "gateway_egress_drop_ratio",
+        "Journey egress drop ratio (dropped / received)",
+        site,
+        summary.egress_drop_ratio,
+    );
+}
+
+fn write_queue_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+    write_histogram(
+        output,
+        "gateway_gate_queue_delay_us",
+        "Gate command queue delay in microseconds",
+        site,
+        &summary.gate_queue_delay_buckets,
+        &METRICS_BUCKET_BOUNDS,
+        summary.gate_queue_delay_avg_us,
+    );
+    write_metric(
+        output,
+        "gateway_gate_queue_delay_p99_us",
+        "99th percentile gate queue delay",
+        MetricType::Gauge,
+        site,
+        summary.gate_queue_delay_p99_us,
+    );
+    write_metric(
+        output,
+        "gateway_gate_queue_delay_max_us",
+        "Maximum gate queue delay",
+        MetricType::Gauge,
+        site,
+        summary.gate_queue_delay_max_us,
+    );
+
+    write_metric(
+        output,
+        "gateway_event_queue_depth",
+        "Current event queue depth",
+        MetricType::Gauge,
+        site,
+        summary.event_queue_depth,
+    );
+    write_metric(
+        output,
+        "gateway_gate_queue_depth",
+        "Current gate queue depth (CloudPlus outbound)",
+        MetricType::Gauge,
+        site,
+        summary.gate_queue_depth,
+    );
+    write_metric(
+        output,
+        "gateway_cloudplus_queue_depth",
+        "Current CloudPlus outbound queue depth",
+        MetricType::Gauge,
+        site,
+        summary.cloudplus_queue_depth,
+    );
+
+    write_metric(
+        output,
+        "gateway_event_queue_utilization_pct",
+        "Event queue utilization percentage (0-100)",
+        MetricType::Gauge,
+        site,
+        summary.event_queue_utilization_pct,
+    );
+    write_metric(
+        output,
+        "gateway_gate_queue_utilization_pct",
+        "Gate queue utilization percentage (0-100)",
+        MetricType::Gauge,
+        site,
+        summary.gate_queue_utilization_pct,
+    );
+
+    write_histogram(
+        output,
+        "gateway_gate_send_latency_us",
+        "Gate command network send latency in microseconds",
+        site,
+        &summary.gate_send_latency_buckets,
+        &METRICS_BUCKET_BOUNDS,
+        summary.gate_send_latency_avg_us,
+    );
+    write_metric(
+        output,
+        "gateway_gate_send_latency_p99_us",
+        "99th percentile gate send latency",
+        MetricType::Gauge,
+        site,
+        summary.gate_send_latency_p99_us,
+    );
+
+    write_histogram(
+        output,
+        "gateway_gate_enqueue_to_send_us",
+        "Gate command enqueue to send time in microseconds",
+        site,
+        &summary.gate_enqueue_to_send_buckets,
+        &METRICS_BUCKET_BOUNDS,
+        summary.gate_enqueue_to_send_avg_us,
+    );
+    write_metric(
+        output,
+        "gateway_gate_enqueue_to_send_p99_us",
+        "99th percentile gate enqueue to send time",
+        MetricType::Gauge,
+        site,
+        summary.gate_enqueue_to_send_p99_us,
+    );
 }
 
 /// Handle HTTP requests

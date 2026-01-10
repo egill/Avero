@@ -20,6 +20,12 @@ use tracing::{debug, info, warn};
 /// Xovis GROUP track bit - track IDs with this bit set are group aggregates, not individuals
 const XOVIS_GROUP_BIT: i64 = 0x80000000;
 
+/// Check if a track ID represents a Xovis GROUP aggregate (not an individual person)
+#[inline]
+fn is_group_track(track_id: TrackId) -> bool {
+    track_id.0 & XOVIS_GROUP_BIT != 0
+}
+
 impl Tracker {
     /// Handle a new track being created by the sensor
     ///
@@ -30,8 +36,7 @@ impl Tracker {
     pub(crate) fn handle_track_create(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks - they represent aggregates, not individual people
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             debug!(track_id = %track_id, "skipping_group_track");
             return;
         }
@@ -175,8 +180,7 @@ impl Tracker {
     pub(crate) fn handle_track_delete(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             return;
         }
 
@@ -256,8 +260,7 @@ impl Tracker {
     pub(crate) fn handle_zone_entry(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             return;
         }
 
@@ -336,8 +339,7 @@ impl Tracker {
     pub(crate) fn handle_zone_exit(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             return;
         }
 
@@ -424,8 +426,7 @@ impl Tracker {
     pub(crate) fn handle_line_cross(&mut self, event: &ParsedEvent, direction: &str) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             return;
         }
 
@@ -518,17 +519,13 @@ impl Tracker {
     }
 
     /// Handle door state change from RS485 monitor
-    ///
-    /// Correlates door open events with recent gate commands.
     pub(crate) fn handle_door_state_change(&mut self, status: DoorStatus) {
         info!(door_status = %status.as_str(), "door_state_change");
 
-        // Update Prometheus gate state metric
         let state_value = match status {
             DoorStatus::Open => GATE_STATE_OPEN,
-            DoorStatus::Closed => GATE_STATE_CLOSED,
             DoorStatus::Moving => GATE_STATE_MOVING,
-            DoorStatus::Unknown => GATE_STATE_CLOSED, // Default to closed for unknown
+            DoorStatus::Closed | DoorStatus::Unknown => GATE_STATE_CLOSED,
         };
         self.metrics.set_gate_state(state_value);
 
@@ -814,88 +811,54 @@ impl Tracker {
 
     /// Determine the journey outcome when a track is deleted
     ///
-    /// Returns a tuple of:
-    /// - `JourneyOutcome`: The outcome classification
-    /// - `bool`: Whether the exit was inferred (track lost in exit corridor)
-    ///
-    /// Outcomes:
-    /// - `ReturnedToStore` if person went back into store (POS zone, STORE zone, or backward entry cross)
-    /// - `Completed` if person was in exit corridor (approach cross + gate zone exit, no exit cross)
-    /// - `Lost` if person disappeared near gate/exit area without clear exit signal
+    /// Returns (outcome, exit_inferred) where exit_inferred is true if track was lost in exit corridor.
     fn determine_journey_outcome(
         &self,
         track_id: TrackId,
         person: &Person,
         last_zone: &str,
     ) -> (JourneyOutcome, bool) {
-        // Check journey events for backward entry line crossing
+        // Check journey events for backward entry line crossing or exit corridor pattern
         if let Some(journey) = self.journey_manager.get_any(track_id) {
-            // Look for backward entry line crossing - strong signal they returned to store
-            for event in journey.events.iter().rev() {
-                if event.t == JourneyEventType::EntryCross {
-                    if let Some(extra) = &event.extra {
-                        if extra.contains("dir=backward") {
-                            debug!(
-                                track_id = %track_id,
-                                "journey_returned_backward_entry"
-                            );
-                            return (JourneyOutcome::ReturnedToStore, false);
-                        }
-                    }
-                }
+            // Backward entry crossing = strong signal they returned to store
+            let has_backward_entry = journey.events.iter().rev().any(|e| {
+                e.t == JourneyEventType::EntryCross
+                    && e.extra.as_ref().is_some_and(|x| x.contains("dir=backward"))
+            });
+
+            if has_backward_entry {
+                debug!(track_id = %track_id, "journey_returned_backward_entry");
+                return (JourneyOutcome::ReturnedToStore, false);
             }
 
-            // Check for exit corridor: approach forward + gate zone + no exit cross yet
-            // This indicates person was heading to exit and got lost in the corridor
+            // Exit corridor pattern: approach forward + gate zone + no exit cross
             let has_approach_forward = journey.events.iter().any(|e| {
                 e.t == JourneyEventType::ApproachCross
                     && e.extra.as_ref().is_some_and(|x| x.contains("dir=forward"))
             });
-
             let has_exit_cross = journey.events.iter().any(|e| e.t == JourneyEventType::ExitCross);
-
             let in_gate_area = last_zone.to_uppercase().contains("GATE");
 
             if has_approach_forward && in_gate_area && !has_exit_cross {
-                debug!(
-                    track_id = %track_id,
-                    zone = %last_zone,
-                    authorized = %person.authorized,
-                    "journey_exit_inferred"
-                );
+                debug!(track_id = %track_id, zone = %last_zone, "journey_exit_inferred");
                 return (JourneyOutcome::Completed, true);
             }
         }
 
-        // Check last zone - if in POS or STORE area, they went back to shopping
-        if let Some(zone_id) = person.current_zone {
-            if self.config.is_pos_zone(zone_id.0) {
-                debug!(
-                    track_id = %track_id,
-                    zone = %last_zone,
-                    "journey_returned_pos_zone"
-                );
-                return (JourneyOutcome::ReturnedToStore, false);
-            }
-        }
-
-        // Check zone name for STORE indication
-        let zone_upper = last_zone.to_uppercase();
-        if zone_upper.contains("STORE") || zone_upper.contains("SHOPPING") {
-            debug!(
-                track_id = %track_id,
-                zone = %last_zone,
-                "journey_returned_store_zone"
-            );
+        // In POS zone = returned to shopping
+        if person.current_zone.is_some_and(|z| self.config.is_pos_zone(z.0)) {
+            debug!(track_id = %track_id, zone = %last_zone, "journey_returned_pos_zone");
             return (JourneyOutcome::ReturnedToStore, false);
         }
 
-        // If near gate/exit or unknown, consider it lost
-        debug!(
-            track_id = %track_id,
-            zone = %last_zone,
-            "journey_lost"
-        );
+        // Zone name indicates store area = returned to shopping
+        let zone_upper = last_zone.to_uppercase();
+        if zone_upper.contains("STORE") || zone_upper.contains("SHOPPING") {
+            debug!(track_id = %track_id, zone = %last_zone, "journey_returned_store_zone");
+            return (JourneyOutcome::ReturnedToStore, false);
+        }
+
+        debug!(track_id = %track_id, zone = %last_zone, "journey_lost");
         (JourneyOutcome::Lost, false)
     }
 }
