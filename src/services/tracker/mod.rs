@@ -14,7 +14,6 @@ use crate::domain::journey::Journey;
 use crate::domain::types::{DoorStatus, EventType, ParsedEvent, Person, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
-use crate::io::egress::{Egress, JourneyWriter};
 use crate::io::EgressSender;
 use crate::services::acc_collector::AccCollector;
 use crate::services::door_correlator::DoorCorrelator;
@@ -27,6 +26,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{interval, Duration};
+use tracing::warn;
 
 /// Central event processor for person tracking and journey management
 pub struct Tracker {
@@ -42,12 +42,12 @@ pub struct Tracker {
     pub(crate) reentry_detector: ReentryDetector,
     /// Correlates ACC (payment) events with journeys
     pub(crate) acc_collector: AccCollector,
-    /// Writes completed journeys to file
-    pub(crate) egress: Egress,
     /// Application configuration
     pub(crate) config: Config,
     /// Gate command sender (commands processed by GateCmdWorker)
     pub(crate) gate_cmd_tx: mpsc::Sender<GateCmd>,
+    /// Journey egress sender (journeys processed by EgressWriter)
+    pub(crate) journey_tx: mpsc::Sender<Journey>,
     /// Metrics collector
     pub(crate) metrics: Arc<Metrics>,
     /// MQTT egress sender (optional)
@@ -64,15 +64,18 @@ impl Tracker {
     /// The `gate_cmd_tx` channel sends gate commands to a `GateCmdWorker` task,
     /// which handles network I/O asynchronously without blocking the tracker.
     ///
+    /// The `journey_tx` channel sends completed journeys to an `EgressWriter` task,
+    /// which handles file I/O asynchronously without blocking the tracker.
+    ///
     /// The `door_rx` watch receiver provides lossless door state updates from RS485.
     pub fn new(
         config: Config,
         gate_cmd_tx: mpsc::Sender<GateCmd>,
+        journey_tx: mpsc::Sender<Journey>,
         metrics: Arc<Metrics>,
         egress_sender: Option<EgressSender>,
         door_rx: watch::Receiver<DoorStatus>,
     ) -> Self {
-        let egress = Egress::new(config.egress_file());
         let acc_collector = AccCollector::new(&config);
         Self {
             persons: FxHashMap::default(),
@@ -81,9 +84,9 @@ impl Tracker {
             door_correlator: DoorCorrelator::new(),
             reentry_detector: ReentryDetector::new(),
             acc_collector,
-            egress,
             config,
             gate_cmd_tx,
+            journey_tx,
             metrics,
             egress_sender,
             door_rx,
@@ -123,18 +126,18 @@ impl Tracker {
         }
     }
 
-    /// Tick journey manager and write ready journeys to egress
+    /// Tick journey manager and send ready journeys to egress worker
     fn tick_and_egress(&mut self) {
         let ready_journeys = self.journey_manager.tick();
-        if !ready_journeys.is_empty() {
-            // Write to file
-            self.egress.write_journeys(&ready_journeys);
-
-            // Publish to MQTT
+        for journey in ready_journeys {
+            // Publish to MQTT (if enabled)
             if let Some(ref sender) = self.egress_sender {
-                for journey in &ready_journeys {
-                    sender.send_journey(journey);
-                }
+                sender.send_journey(&journey);
+            }
+
+            // Send to egress writer via channel (non-blocking)
+            if let Err(e) = self.journey_tx.try_send(journey) {
+                warn!(error = %e, "journey_egress_queue_full");
             }
         }
     }

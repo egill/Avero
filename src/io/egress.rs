@@ -2,12 +2,18 @@
 //!
 //! Journeys are written in JSONL format (one JSON object per line)
 //! to the file specified in config.
+//!
+//! The EgressWriter task decouples file I/O from the tracker loop,
+//! batching journeys and flushing on count or timer.
 
 use crate::domain::journey::Journey;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::Path;
-use tracing::{debug, error, info};
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time::interval;
+use tracing::{debug, error, info, warn};
 
 /// Trait for writing journeys - enables mock implementations for testing
 pub trait JourneyWriter: Send + Sync {
@@ -82,6 +88,144 @@ impl JourneyWriter for Egress {
     fn write_journey(&self, journey: &Journey) -> bool {
         self.write_journey_impl(journey)
     }
+}
+
+/// Batch flush threshold: flush when this many journeys are buffered
+const BATCH_SIZE: usize = 10;
+
+/// Time-based flush interval in milliseconds
+const FLUSH_INTERVAL_MS: u64 = 1000;
+
+/// Async worker that receives journeys via channel and writes to file
+///
+/// Decouples file I/O from the tracker loop. Batches journeys and flushes
+/// on batch size or timer, whichever comes first.
+pub struct EgressWriter {
+    /// Receiver for journeys to write
+    journey_rx: mpsc::Receiver<Journey>,
+    /// File path for JSONL output
+    file_path: String,
+    /// Buffered journeys pending write
+    buffer: Vec<Journey>,
+}
+
+impl EgressWriter {
+    /// Create a new egress writer
+    pub fn new(journey_rx: mpsc::Receiver<Journey>, file_path: String) -> Self {
+        info!(file_path = %file_path, "egress_writer_initialized");
+        Self { journey_rx, file_path, buffer: Vec::with_capacity(BATCH_SIZE) }
+    }
+
+    /// Run the writer, processing journeys until the channel closes
+    pub async fn run(mut self) {
+        info!("egress_writer_started");
+        let mut flush_interval = interval(Duration::from_millis(FLUSH_INTERVAL_MS));
+
+        loop {
+            tokio::select! {
+                // Receive journeys from tracker
+                maybe_journey = self.journey_rx.recv() => {
+                    if let Some(journey) = maybe_journey {
+                        self.buffer.push(journey);
+                        if self.buffer.len() >= BATCH_SIZE {
+                            self.flush();
+                        }
+                    } else {
+                        // Channel closed, flush remaining and exit
+                        self.flush();
+                        break;
+                    }
+                }
+                // Periodic flush timer
+                _ = flush_interval.tick() => {
+                    self.flush();
+                }
+            }
+        }
+
+        info!("egress_writer_stopped");
+    }
+
+    /// Flush buffered journeys to file using spawn_blocking
+    fn flush(&mut self) {
+        if self.buffer.is_empty() {
+            return;
+        }
+
+        let journeys = std::mem::take(&mut self.buffer);
+        self.buffer = Vec::with_capacity(BATCH_SIZE);
+        let file_path = self.file_path.clone();
+        let count = journeys.len();
+
+        // Use spawn_blocking to perform file I/O off the async runtime
+        tokio::task::spawn_blocking(move || {
+            write_journeys_to_file(&file_path, &journeys);
+        });
+
+        debug!(count = count, "egress_batch_flushed");
+    }
+}
+
+/// Write journeys to file (runs in blocking thread pool)
+fn write_journeys_to_file(file_path: &str, journeys: &[Journey]) {
+    let path = Path::new(file_path);
+
+    // Create parent directories if they don't exist
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                error!(error = %e, path = %file_path, "egress_mkdir_failed");
+                return;
+            }
+        }
+    }
+
+    // Open file with BufWriter for efficient batch writes
+    let file = match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            error!(error = %e, path = %file_path, "egress_open_failed");
+            return;
+        }
+    };
+
+    let mut writer = BufWriter::new(file);
+
+    for journey in journeys {
+        let json = journey.to_json();
+        if let Err(e) = writeln!(writer, "{}", json) {
+            error!(
+                jid = %journey.jid,
+                error = %e,
+                "journey_egress_failed"
+            );
+        } else {
+            info!(
+                jid = %journey.jid,
+                pid = %journey.pid,
+                outcome = %journey.outcome.as_str(),
+                events = %journey.events.len(),
+                "journey_egressed"
+            );
+        }
+    }
+
+    // Explicit flush to ensure all data is written
+    if let Err(e) = writer.flush() {
+        warn!(error = %e, "egress_flush_failed");
+    }
+}
+
+/// Create an egress channel and writer
+///
+/// Returns the sender (for tracker) and the writer (to be spawned)
+pub fn create_egress_writer(
+    file_path: String,
+    buffer_size: usize,
+) -> (mpsc::Sender<Journey>, EgressWriter) {
+    let (journey_tx, journey_rx) = mpsc::channel(buffer_size);
+    let writer = EgressWriter::new(journey_rx, file_path);
+    (journey_tx, writer)
 }
 
 #[cfg(test)]

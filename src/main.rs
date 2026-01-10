@@ -21,7 +21,8 @@ struct Args {
     config: String,
 }
 use gateway_poc::io::{
-    create_egress_channel, start_acc_listener, AccListenerConfig, MqttPublisher, Rs485Monitor,
+    create_egress_channel, create_egress_writer, start_acc_listener, AccListenerConfig,
+    MqttPublisher, Rs485Monitor,
 };
 use gateway_poc::services::{create_gate_worker, GateController};
 use std::sync::Arc;
@@ -102,6 +103,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gate_cmd_tx_sampler = gate_cmd_tx.clone();
     tokio::spawn(async move {
         gate_worker.run().await;
+    });
+
+    // Create egress writer (decouples file I/O from tracker loop)
+    let (journey_tx, egress_writer) =
+        create_egress_writer(config.egress_file().to_string(), 100);
+    tokio::spawn(async move {
+        egress_writer.run().await;
     });
 
     // Create event channel (bounded for backpressure)
@@ -227,8 +235,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Start tracker (main event processing loop)
-    let mut tracker =
-        gateway_poc::services::Tracker::new(config, gate_cmd_tx, metrics, egress_sender, door_rx);
+    let mut tracker = gateway_poc::services::Tracker::new(
+        config,
+        gate_cmd_tx,
+        journey_tx,
+        metrics,
+        egress_sender,
+        door_rx,
+    );
     info!("tracker_started");
 
     // Handle shutdown on Ctrl+C

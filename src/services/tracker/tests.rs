@@ -16,10 +16,12 @@ fn create_test_tracker() -> Tracker {
 fn create_test_tracker_with_config(config: Config) -> Tracker {
     // Create a channel for gate commands (we won't consume them in tests)
     let (gate_cmd_tx, _gate_cmd_rx) = mpsc::channel::<GateCmd>(64);
+    // Create a channel for journey egress (we won't consume them in tests)
+    let (journey_tx, _journey_rx) = mpsc::channel::<Journey>(64);
     // Create watch channel for door state (not used in most tests)
     let (_door_tx, door_rx) = watch::channel(DoorStatus::Unknown);
     let metrics = Arc::new(Metrics::new());
-    Tracker::new(config, gate_cmd_tx, metrics, None, door_rx)
+    Tracker::new(config, gate_cmd_tx, journey_tx, metrics, None, door_rx)
 }
 
 fn millis(ms: u64) -> Duration {
