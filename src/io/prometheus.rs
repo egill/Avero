@@ -354,7 +354,9 @@ fn format_prometheus_metrics(
         site_id, summary.event_queue_depth
     ));
 
-    output.push_str("# HELP gateway_gate_queue_depth Current gate command queue depth\n");
+    output.push_str(
+        "# HELP gateway_gate_queue_depth Current gate queue depth (CloudPlus outbound)\n",
+    );
     output.push_str("# TYPE gateway_gate_queue_depth gauge\n");
     output.push_str(&format!(
         "gateway_gate_queue_depth{{site=\"{}\"}} {}\n",

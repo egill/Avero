@@ -107,10 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Create gate command worker (decouples gate I/O from tracker loop)
-    // Keep a clone of the sender for queue depth sampling
     let (gate_cmd_tx, gate_worker) =
         create_gate_worker(gate.clone(), metrics.clone(), 64, egress_sender.clone());
-    let gate_cmd_tx_sampler = gate_cmd_tx.clone();
     tokio::spawn(async move {
         gate_worker.run().await;
     });
@@ -203,11 +201,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Sample queue depths (max_capacity - capacity = current depth)
             let event_depth =
                 (event_tx_sampler.max_capacity() - event_tx_sampler.capacity()) as u64;
-            let gate_depth =
-                (gate_cmd_tx_sampler.max_capacity() - gate_cmd_tx_sampler.capacity()) as u64;
             let cloudplus_depth = gate_for_metrics.cloudplus_queue_depth() as u64;
             metrics_clone.set_event_queue_depth(event_depth);
-            metrics_clone.set_gate_queue_depth(gate_depth);
+            // gate_queue_depth = CloudPlus outbound per PRD US-005
+            metrics_clone.set_gate_queue_depth(cloudplus_depth);
             metrics_clone.set_cloudplus_queue_depth(cloudplus_depth);
 
             // Use full report with placeholder track counts (actual counts are in tracker)
