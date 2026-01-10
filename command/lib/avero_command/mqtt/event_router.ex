@@ -36,9 +36,10 @@ defmodule AveroCommand.MQTT.EventRouter do
         # 1. Persist to store (async)
         Task.start(fn -> Store.insert_event(event) end)
 
-        # 2. Transform to scenario-compatible format and evaluate
+        # 2. Transform to scenario-compatible format, persist for reporting, and evaluate
         scenario_event = normalize_for_scenarios(topic_name, event, event_data)
         if scenario_event do
+          Task.start(fn -> Store.insert_event(scenario_event) end)
           route_to_entities(scenario_event)
           Evaluator.evaluate(scenario_event)
         end

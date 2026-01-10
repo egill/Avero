@@ -33,24 +33,57 @@ fn stitch_dist_bucket_index(dist_cm: u64) -> usize {
     STITCH_DIST_BOUNDS.partition_point(|&bound| bound < dist_cm)
 }
 
+/// Update an atomic max value using compare-and-swap loop
+#[inline]
+fn update_atomic_max(atomic_max: &AtomicU64, new_value: u64) {
+    let mut current_max = atomic_max.load(Ordering::Relaxed);
+    while new_value > current_max {
+        match atomic_max.compare_exchange_weak(
+            current_max,
+            new_value,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(actual) => current_max = actual,
+        }
+    }
+}
+
 /// Swap all buckets to zero and return their values
 #[inline]
 fn swap_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
-    let mut result = [0u64; NUM_BUCKETS];
-    for (i, bucket) in buckets.iter().enumerate() {
-        result[i] = bucket.swap(0, Ordering::Relaxed);
-    }
-    result
+    std::array::from_fn(|i| buckets[i].swap(0, Ordering::Relaxed))
 }
 
 /// Load all bucket values without resetting
 #[inline]
 fn load_buckets(buckets: &[AtomicU64; NUM_BUCKETS]) -> [u64; NUM_BUCKETS] {
-    let mut result = [0u64; NUM_BUCKETS];
-    for (i, bucket) in buckets.iter().enumerate() {
-        result[i] = bucket.load(Ordering::Relaxed);
+    std::array::from_fn(|i| buckets[i].load(Ordering::Relaxed))
+}
+
+/// Upper bounds for each bucket (last bucket uses 2x the previous bound)
+const BUCKET_UPPER_BOUNDS: [u64; NUM_BUCKETS] =
+    [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400];
+
+/// Compute average, returning 0 if count is zero
+#[inline]
+fn avg_or_zero(sum: u64, count: u64) -> u64 {
+    if count > 0 {
+        sum / count
+    } else {
+        0
     }
-    result
+}
+
+/// Compute ratio, returning 0.0 if denominator is zero
+#[inline]
+fn ratio_or_zero(numerator: u64, denominator: u64) -> f64 {
+    if denominator > 0 {
+        numerator as f64 / denominator as f64
+    } else {
+        0.0
+    }
 }
 
 /// Compute percentile from histogram buckets
@@ -63,10 +96,6 @@ fn percentile_from_buckets(buckets: &[u64; NUM_BUCKETS], percentile: f64) -> u64
 
     let target = (total as f64 * percentile) as u64;
     let mut cumulative = 0u64;
-
-    // Upper bounds for each bucket (last bucket uses 2x the previous bound)
-    const BUCKET_UPPER_BOUNDS: [u64; NUM_BUCKETS] =
-        [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400];
 
     for (i, &count) in buckets.iter().enumerate() {
         cumulative += count;
@@ -136,6 +165,60 @@ pub struct Metrics {
     acc_late_total: AtomicU64,
     /// ACC events matched but no journey found
     acc_no_journey_total: AtomicU64,
+    /// MQTT events dropped due to channel full (monotonic)
+    mqtt_events_dropped: AtomicU64,
+    /// ACC events dropped due to channel full (monotonic)
+    acc_events_dropped: AtomicU64,
+    /// Gate commands dropped due to channel full (monotonic)
+    gate_cmds_dropped: AtomicU64,
+    /// MQTT events received (monotonic) - before try_send
+    mqtt_events_received: AtomicU64,
+    /// ACC events received (monotonic) - before try_send
+    acc_events_received: AtomicU64,
+    /// Journey egress events dropped due to channel full (monotonic)
+    journey_egress_dropped: AtomicU64,
+    /// Journeys attempted to enqueue for egress (monotonic)
+    journey_egress_received: AtomicU64,
+    /// Gate command queue delay histogram (time from enqueue to worker pickup)
+    /// Same buckets as latency: 100, 200, 400, ... 51200 µs
+    gate_queue_delay_buckets: [AtomicU64; NUM_BUCKETS],
+    /// Sum of gate queue delays (reset on report)
+    gate_queue_delay_sum_us: AtomicU64,
+    /// Max gate queue delay (reset on report)
+    gate_queue_delay_max_us: AtomicU64,
+    /// Current active tracks count (updated by tracker)
+    active_tracks: AtomicU64,
+    /// Current authorized tracks count (updated by tracker)
+    authorized_tracks: AtomicU64,
+    /// Current event queue depth (updated by sampler)
+    event_queue_depth: AtomicU64,
+    /// Current gate command queue depth (updated by sampler)
+    gate_queue_depth: AtomicU64,
+    /// Current CloudPlus outbound queue depth (updated by sampler)
+    cloudplus_queue_depth: AtomicU64,
+    /// Event queue utilization percentage (0-100) (updated by sampler)
+    event_queue_utilization_pct: AtomicU64,
+    /// Gate queue utilization percentage (0-100) (updated by sampler)
+    gate_queue_utilization_pct: AtomicU64,
+    /// Gate send latency histogram (time for actual network send)
+    gate_send_latency_buckets: [AtomicU64; NUM_BUCKETS],
+    /// Sum of gate send latencies (reset on report)
+    gate_send_latency_sum_us: AtomicU64,
+    /// Max gate send latency (reset on report)
+    gate_send_latency_max_us: AtomicU64,
+    /// Gate enqueue-to-send histogram (total time from enqueue to send complete)
+    gate_enqueue_to_send_buckets: [AtomicU64; NUM_BUCKETS],
+    /// Sum of gate enqueue-to-send times (reset on report)
+    gate_enqueue_to_send_sum_us: AtomicU64,
+    /// Max gate enqueue-to-send time (reset on report)
+    gate_enqueue_to_send_max_us: AtomicU64,
+    /// ACC arrived at empty POS - time since POS became empty (ms)
+    /// Helps diagnose ACC timing issues when payments arrive after customer left
+    acc_empty_pos_time_buckets: [AtomicU64; NUM_BUCKETS],
+    /// Sum of empty POS times (ms) for average calculation
+    acc_empty_pos_time_sum: AtomicU64,
+    /// Max empty POS time (ms)
+    acc_empty_pos_time_max: AtomicU64,
     /// POS zone occupancy (number of people in each zone)
     /// Index is determined by order in pos_zones config
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
@@ -172,6 +255,32 @@ impl Metrics {
             stitch_time_sum: AtomicU64::new(0),
             acc_late_total: AtomicU64::new(0),
             acc_no_journey_total: AtomicU64::new(0),
+            mqtt_events_dropped: AtomicU64::new(0),
+            acc_events_dropped: AtomicU64::new(0),
+            gate_cmds_dropped: AtomicU64::new(0),
+            mqtt_events_received: AtomicU64::new(0),
+            acc_events_received: AtomicU64::new(0),
+            journey_egress_dropped: AtomicU64::new(0),
+            journey_egress_received: AtomicU64::new(0),
+            gate_queue_delay_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            gate_queue_delay_sum_us: AtomicU64::new(0),
+            gate_queue_delay_max_us: AtomicU64::new(0),
+            active_tracks: AtomicU64::new(0),
+            authorized_tracks: AtomicU64::new(0),
+            event_queue_depth: AtomicU64::new(0),
+            gate_queue_depth: AtomicU64::new(0),
+            cloudplus_queue_depth: AtomicU64::new(0),
+            event_queue_utilization_pct: AtomicU64::new(0),
+            gate_queue_utilization_pct: AtomicU64::new(0),
+            gate_send_latency_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            gate_send_latency_sum_us: AtomicU64::new(0),
+            gate_send_latency_max_us: AtomicU64::new(0),
+            gate_enqueue_to_send_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            gate_enqueue_to_send_sum_us: AtomicU64::new(0),
+            gate_enqueue_to_send_max_us: AtomicU64::new(0),
+            acc_empty_pos_time_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            acc_empty_pos_time_sum: AtomicU64::new(0),
+            acc_empty_pos_time_max: AtomicU64::new(0),
             pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
             pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
             zone_id_to_index: parking_lot::RwLock::new(FxHashMap::default()),
@@ -246,19 +355,8 @@ impl Metrics {
         let bucket = bucket_index(latency_us);
         self.latency_buckets[bucket].fetch_add(1, Ordering::Relaxed);
 
-        // Update max using compare-and-swap loop
-        let mut current_max = self.latency_max_us.load(Ordering::Relaxed);
-        while latency_us > current_max {
-            match self.latency_max_us.compare_exchange_weak(
-                current_max,
-                latency_us,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => current_max = actual,
-            }
-        }
+        // Update max
+        update_atomic_max(&self.latency_max_us, latency_us);
     }
 
     /// Record a gate command was sent (lock-free)
@@ -279,19 +377,8 @@ impl Metrics {
         let bucket = bucket_index(latency_us);
         self.gate_latency_buckets[bucket].fetch_add(1, Ordering::Relaxed);
 
-        // Update max using compare-and-swap loop
-        let mut current_max = self.gate_latency_max_us.load(Ordering::Relaxed);
-        while latency_us > current_max {
-            match self.gate_latency_max_us.compare_exchange_weak(
-                current_max,
-                latency_us,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => current_max = actual,
-            }
-        }
+        // Update max
+        update_atomic_max(&self.gate_latency_max_us, latency_us);
     }
 
     /// Get total events processed
@@ -377,6 +464,217 @@ impl Metrics {
         self.acc_no_journey_total.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record an MQTT event dropped due to channel full (lock-free)
+    #[inline]
+    pub fn record_mqtt_event_dropped(&self) {
+        self.mqtt_events_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record an ACC event dropped due to channel full (lock-free)
+    #[inline]
+    pub fn record_acc_event_dropped(&self) {
+        self.acc_events_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get MQTT events dropped total
+    #[inline]
+    #[allow(dead_code)]
+    pub fn mqtt_events_dropped(&self) -> u64 {
+        self.mqtt_events_dropped.load(Ordering::Relaxed)
+    }
+
+    /// Get ACC events dropped total
+    #[inline]
+    #[allow(dead_code)]
+    pub fn acc_events_dropped(&self) -> u64 {
+        self.acc_events_dropped.load(Ordering::Relaxed)
+    }
+
+    /// Record a gate command dropped due to channel full (lock-free)
+    #[inline]
+    pub fn record_gate_cmd_dropped(&self) {
+        self.gate_cmds_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get gate commands dropped total
+    #[inline]
+    #[allow(dead_code)]
+    pub fn gate_cmds_dropped(&self) -> u64 {
+        self.gate_cmds_dropped.load(Ordering::Relaxed)
+    }
+
+    /// Record an MQTT event received (before try_send) (lock-free)
+    #[inline]
+    pub fn record_mqtt_event_received(&self) {
+        self.mqtt_events_received.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get MQTT events received total
+    #[inline]
+    pub fn mqtt_events_received(&self) -> u64 {
+        self.mqtt_events_received.load(Ordering::Relaxed)
+    }
+
+    /// Record an ACC event received (before try_send) (lock-free)
+    #[inline]
+    pub fn record_acc_event_received(&self) {
+        self.acc_events_received.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get ACC events received total
+    #[inline]
+    pub fn acc_events_received(&self) -> u64 {
+        self.acc_events_received.load(Ordering::Relaxed)
+    }
+
+    /// Record a journey egress event dropped due to channel full (lock-free)
+    #[inline]
+    pub fn record_journey_egress_dropped(&self) {
+        self.journey_egress_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a journey egress enqueue attempt (lock-free)
+    #[inline]
+    pub fn record_journey_egress_received(&self) {
+        self.journey_egress_received.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get journey egress dropped total
+    #[inline]
+    pub fn journey_egress_dropped(&self) -> u64 {
+        self.journey_egress_dropped.load(Ordering::Relaxed)
+    }
+
+    /// Get journey egress received total
+    #[inline]
+    pub fn journey_egress_received(&self) -> u64 {
+        self.journey_egress_received.load(Ordering::Relaxed)
+    }
+
+    /// Record gate command queue delay (time from enqueue to worker pickup)
+    #[inline]
+    pub fn record_gate_queue_delay(&self, delay_us: u64) {
+        // Update histogram bucket
+        let bucket = bucket_index(delay_us);
+        self.gate_queue_delay_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        self.gate_queue_delay_sum_us.fetch_add(delay_us, Ordering::Relaxed);
+
+        // Update max
+        update_atomic_max(&self.gate_queue_delay_max_us, delay_us);
+    }
+
+    /// Set current active tracks count (called by tracker)
+    #[inline]
+    pub fn set_active_tracks(&self, count: usize) {
+        self.active_tracks.store(count as u64, Ordering::Relaxed);
+    }
+
+    /// Get current active tracks count
+    #[inline]
+    pub fn active_tracks(&self) -> usize {
+        self.active_tracks.load(Ordering::Relaxed) as usize
+    }
+
+    /// Set current authorized tracks count (called by tracker)
+    #[inline]
+    pub fn set_authorized_tracks(&self, count: usize) {
+        self.authorized_tracks.store(count as u64, Ordering::Relaxed);
+    }
+
+    /// Get current authorized tracks count
+    #[inline]
+    pub fn authorized_tracks(&self) -> usize {
+        self.authorized_tracks.load(Ordering::Relaxed) as usize
+    }
+
+    /// Set current event queue depth (called by sampler)
+    #[inline]
+    pub fn set_event_queue_depth(&self, depth: u64) {
+        self.event_queue_depth.store(depth, Ordering::Relaxed);
+    }
+
+    /// Set current gate command queue depth (called by sampler)
+    #[inline]
+    pub fn set_gate_queue_depth(&self, depth: u64) {
+        self.gate_queue_depth.store(depth, Ordering::Relaxed);
+    }
+
+    /// Get current event queue depth
+    #[inline]
+    pub fn event_queue_depth(&self) -> u64 {
+        self.event_queue_depth.load(Ordering::Relaxed)
+    }
+
+    /// Get current gate queue depth
+    #[inline]
+    pub fn gate_queue_depth(&self) -> u64 {
+        self.gate_queue_depth.load(Ordering::Relaxed)
+    }
+
+    /// Set current CloudPlus outbound queue depth (called by sampler)
+    #[inline]
+    pub fn set_cloudplus_queue_depth(&self, depth: u64) {
+        self.cloudplus_queue_depth.store(depth, Ordering::Relaxed);
+    }
+
+    /// Get current CloudPlus queue depth
+    #[inline]
+    pub fn cloudplus_queue_depth(&self) -> u64 {
+        self.cloudplus_queue_depth.load(Ordering::Relaxed)
+    }
+
+    /// Set current event queue utilization percentage (called by sampler)
+    #[inline]
+    pub fn set_event_queue_utilization_pct(&self, pct: u64) {
+        self.event_queue_utilization_pct.store(pct, Ordering::Relaxed);
+    }
+
+    /// Get current event queue utilization percentage
+    #[inline]
+    pub fn event_queue_utilization_pct(&self) -> u64 {
+        self.event_queue_utilization_pct.load(Ordering::Relaxed)
+    }
+
+    /// Set current gate queue utilization percentage (called by sampler)
+    #[inline]
+    pub fn set_gate_queue_utilization_pct(&self, pct: u64) {
+        self.gate_queue_utilization_pct.store(pct, Ordering::Relaxed);
+    }
+
+    /// Get current gate queue utilization percentage
+    #[inline]
+    pub fn gate_queue_utilization_pct(&self) -> u64 {
+        self.gate_queue_utilization_pct.load(Ordering::Relaxed)
+    }
+
+    /// Record gate send latency (time for actual network send)
+    #[inline]
+    pub fn record_gate_send_latency(&self, latency_us: u64) {
+        let bucket = bucket_index(latency_us);
+        self.gate_send_latency_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        self.gate_send_latency_sum_us.fetch_add(latency_us, Ordering::Relaxed);
+        update_atomic_max(&self.gate_send_latency_max_us, latency_us);
+    }
+
+    /// Record gate enqueue-to-send time (total from enqueue to send complete)
+    #[inline]
+    pub fn record_gate_enqueue_to_send(&self, latency_us: u64) {
+        let bucket = bucket_index(latency_us);
+        self.gate_enqueue_to_send_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        self.gate_enqueue_to_send_sum_us.fetch_add(latency_us, Ordering::Relaxed);
+        update_atomic_max(&self.gate_enqueue_to_send_max_us, latency_us);
+    }
+
+    /// Record ACC arrived at empty POS with time since POS became empty (ms)
+    /// Used for diagnosing ACC timing issues - when payments arrive after customer left
+    #[inline]
+    pub fn record_acc_empty_pos_time(&self, time_ms: u64) {
+        let bucket = bucket_index(time_ms);
+        self.acc_empty_pos_time_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        self.acc_empty_pos_time_sum.fetch_add(time_ms, Ordering::Relaxed);
+        update_atomic_max(&self.acc_empty_pos_time_max, time_ms);
+    }
+
     /// Get ACC events total
     #[inline]
     #[allow(dead_code)]
@@ -409,7 +707,13 @@ impl Metrics {
     ///
     /// This is the only method that resets counters. It uses atomic swap
     /// to get a consistent snapshot while allowing concurrent updates.
+    ///
+    /// Pass 0 for active_tracks/authorized_tracks to use stored values from set_active_tracks/set_authorized_tracks.
     pub fn report(&self, active_tracks: usize, authorized_tracks: usize) -> MetricsSummary {
+        // Use stored values if 0 is passed (for callers without direct tracker access)
+        let active_tracks = if active_tracks == 0 { self.active_tracks() } else { active_tracks };
+        let authorized_tracks =
+            if authorized_tracks == 0 { self.authorized_tracks() } else { authorized_tracks };
         // Swap periodic counters to zero and get their values
         let events_count = self.events_since_report.swap(0, Ordering::Relaxed);
         let latency_sum = self.latency_sum_us.swap(0, Ordering::Relaxed);
@@ -439,13 +743,10 @@ impl Metrics {
         };
 
         // Calculate derived metrics
-        let events_per_sec = if elapsed.as_secs_f64() > 0.0 {
-            events_count as f64 / elapsed.as_secs_f64()
-        } else {
-            0.0
-        };
-
-        let avg_latency = if events_count > 0 { latency_sum / events_count } else { 0 };
+        let elapsed_secs = elapsed.as_secs_f64();
+        let events_per_sec =
+            if elapsed_secs > 0.0 { events_count as f64 / elapsed_secs } else { 0.0 };
+        let avg_latency = avg_or_zero(latency_sum, events_count);
 
         // Compute percentiles from histogram
         let lat_p50 = percentile_from_buckets(&lat_buckets, 0.50);
@@ -453,7 +754,7 @@ impl Metrics {
         let lat_p99 = percentile_from_buckets(&lat_buckets, 0.99);
 
         // Gate latency metrics
-        let gate_avg_latency = if gate_count > 0 { gate_latency_sum / gate_count } else { 0 };
+        let gate_avg_latency = avg_or_zero(gate_latency_sum, gate_count);
         let gate_lat_p99 = percentile_from_buckets(&gate_lat_buckets, 0.99);
 
         // Get current gate state and exits (don't reset)
@@ -468,18 +769,71 @@ impl Metrics {
         let acc_late_total = self.acc_late_total.load(Ordering::Relaxed);
         let acc_no_journey_total = self.acc_no_journey_total.load(Ordering::Relaxed);
 
+        // Get drop and received counters (don't reset)
+        let mqtt_events_dropped = self.mqtt_events_dropped.load(Ordering::Relaxed);
+        let acc_events_dropped = self.acc_events_dropped.load(Ordering::Relaxed);
+        let gate_cmds_dropped = self.gate_cmds_dropped.load(Ordering::Relaxed);
+        let mqtt_events_received = self.mqtt_events_received.load(Ordering::Relaxed);
+        let acc_events_received = self.acc_events_received.load(Ordering::Relaxed);
+        let journey_egress_dropped = self.journey_egress_dropped.load(Ordering::Relaxed);
+        let journey_egress_received = self.journey_egress_received.load(Ordering::Relaxed);
+
+        // Compute drop ratios
+        let mqtt_drop_ratio = ratio_or_zero(mqtt_events_dropped, mqtt_events_received);
+        let acc_drop_ratio = ratio_or_zero(acc_events_dropped, acc_events_received);
+        let egress_drop_ratio = ratio_or_zero(journey_egress_dropped, journey_egress_received);
+
+        // Load gate queue delay histogram (cumulative for Prometheus)
+        let gate_queue_delay_buckets = load_buckets(&self.gate_queue_delay_buckets);
+        let gate_queue_delay_sum = self.gate_queue_delay_sum_us.load(Ordering::Relaxed);
+        let gate_queue_delay_max = self.gate_queue_delay_max_us.load(Ordering::Relaxed);
+        let gate_queue_delay_count: u64 = gate_queue_delay_buckets.iter().sum();
+        let gate_queue_delay_avg_us = avg_or_zero(gate_queue_delay_sum, gate_queue_delay_count);
+        let gate_queue_delay_p99_us = percentile_from_buckets(&gate_queue_delay_buckets, 0.99);
+
+        // Get queue depths and utilization (point-in-time, don't reset)
+        let event_queue_depth = self.event_queue_depth.load(Ordering::Relaxed);
+        let gate_queue_depth = self.gate_queue_depth.load(Ordering::Relaxed);
+        let cloudplus_queue_depth = self.cloudplus_queue_depth.load(Ordering::Relaxed);
+        let event_queue_utilization_pct = self.event_queue_utilization_pct.load(Ordering::Relaxed);
+        let gate_queue_utilization_pct = self.gate_queue_utilization_pct.load(Ordering::Relaxed);
+
+        // Load gate send latency histogram (cumulative for Prometheus)
+        let gate_send_latency_buckets = load_buckets(&self.gate_send_latency_buckets);
+        let gate_send_latency_sum = self.gate_send_latency_sum_us.load(Ordering::Relaxed);
+        let gate_send_latency_max = self.gate_send_latency_max_us.load(Ordering::Relaxed);
+        let gate_send_latency_count: u64 = gate_send_latency_buckets.iter().sum();
+        let gate_send_latency_avg_us = avg_or_zero(gate_send_latency_sum, gate_send_latency_count);
+        let gate_send_latency_p99_us = percentile_from_buckets(&gate_send_latency_buckets, 0.99);
+
+        // Load gate enqueue-to-send histogram (cumulative for Prometheus)
+        let gate_enqueue_to_send_buckets = load_buckets(&self.gate_enqueue_to_send_buckets);
+        let gate_enqueue_to_send_sum = self.gate_enqueue_to_send_sum_us.load(Ordering::Relaxed);
+        let gate_enqueue_to_send_max = self.gate_enqueue_to_send_max_us.load(Ordering::Relaxed);
+        let gate_enqueue_to_send_count: u64 = gate_enqueue_to_send_buckets.iter().sum();
+        let gate_enqueue_to_send_avg_us =
+            avg_or_zero(gate_enqueue_to_send_sum, gate_enqueue_to_send_count);
+        let gate_enqueue_to_send_p99_us =
+            percentile_from_buckets(&gate_enqueue_to_send_buckets, 0.99);
+
         // Get stitch histogram buckets (don't reset - cumulative)
         let stitch_distance_buckets = load_buckets(&self.stitch_distance_buckets);
         let stitch_distance_sum = self.stitch_distance_sum.load(Ordering::Relaxed);
         let stitch_distance_count: u64 = stitch_distance_buckets.iter().sum();
-        let stitch_distance_avg_cm =
-            if stitch_distance_count > 0 { stitch_distance_sum / stitch_distance_count } else { 0 };
+        let stitch_distance_avg_cm = avg_or_zero(stitch_distance_sum, stitch_distance_count);
 
         let stitch_time_buckets = load_buckets(&self.stitch_time_buckets);
         let stitch_time_sum = self.stitch_time_sum.load(Ordering::Relaxed);
         let stitch_time_count: u64 = stitch_time_buckets.iter().sum();
-        let stitch_time_avg_ms =
-            if stitch_time_count > 0 { stitch_time_sum / stitch_time_count } else { 0 };
+        let stitch_time_avg_ms = avg_or_zero(stitch_time_sum, stitch_time_count);
+
+        // Load ACC empty POS time histogram (cumulative for Prometheus)
+        let acc_empty_pos_time_buckets = load_buckets(&self.acc_empty_pos_time_buckets);
+        let acc_empty_pos_time_sum = self.acc_empty_pos_time_sum.load(Ordering::Relaxed);
+        let acc_empty_pos_time_max = self.acc_empty_pos_time_max.load(Ordering::Relaxed);
+        let acc_empty_pos_time_count: u64 = acc_empty_pos_time_buckets.iter().sum();
+        let acc_empty_pos_time_avg_ms =
+            avg_or_zero(acc_empty_pos_time_sum, acc_empty_pos_time_count);
 
         MetricsSummary {
             events_total,
@@ -509,6 +863,37 @@ impl Metrics {
             stitch_time_avg_ms,
             acc_late_total,
             acc_no_journey_total,
+            mqtt_events_dropped,
+            acc_events_dropped,
+            gate_cmds_dropped,
+            mqtt_events_received,
+            acc_events_received,
+            journey_egress_dropped,
+            journey_egress_received,
+            mqtt_drop_ratio,
+            acc_drop_ratio,
+            egress_drop_ratio,
+            gate_queue_delay_buckets,
+            gate_queue_delay_avg_us,
+            gate_queue_delay_max_us: gate_queue_delay_max,
+            gate_queue_delay_p99_us,
+            event_queue_depth,
+            gate_queue_depth,
+            cloudplus_queue_depth,
+            event_queue_utilization_pct,
+            gate_queue_utilization_pct,
+            gate_send_latency_buckets,
+            gate_send_latency_avg_us,
+            gate_send_latency_max_us: gate_send_latency_max,
+            gate_send_latency_p99_us,
+            gate_enqueue_to_send_buckets,
+            gate_enqueue_to_send_avg_us,
+            gate_enqueue_to_send_max_us: gate_enqueue_to_send_max,
+            gate_enqueue_to_send_p99_us,
+            acc_empty_pos_time_buckets,
+            acc_empty_pos_time_avg_ms,
+            acc_empty_pos_time_max_ms: acc_empty_pos_time_max,
+            acc_empty_pos_time_count,
         }
     }
 }
@@ -578,6 +963,68 @@ pub struct MetricsSummary {
     pub acc_late_total: u64,
     /// ACC events matched but no journey found
     pub acc_no_journey_total: u64,
+    /// MQTT events dropped due to channel full
+    pub mqtt_events_dropped: u64,
+    /// ACC events dropped due to channel full
+    pub acc_events_dropped: u64,
+    /// Gate commands dropped due to channel full
+    pub gate_cmds_dropped: u64,
+    /// MQTT events received (before try_send)
+    pub mqtt_events_received: u64,
+    /// ACC events received (before try_send)
+    pub acc_events_received: u64,
+    /// Journey egress events dropped due to channel full
+    pub journey_egress_dropped: u64,
+    /// Journeys attempted to enqueue for egress
+    pub journey_egress_received: u64,
+    /// MQTT drop ratio (dropped / received)
+    pub mqtt_drop_ratio: f64,
+    /// ACC drop ratio (dropped / received)
+    pub acc_drop_ratio: f64,
+    /// Egress drop ratio (dropped / received)
+    pub egress_drop_ratio: f64,
+    /// Gate queue delay histogram buckets (time from enqueue to worker pickup)
+    pub gate_queue_delay_buckets: [u64; NUM_BUCKETS],
+    /// Average gate queue delay (µs)
+    pub gate_queue_delay_avg_us: u64,
+    /// Max gate queue delay (µs)
+    pub gate_queue_delay_max_us: u64,
+    /// 99th percentile gate queue delay (µs)
+    pub gate_queue_delay_p99_us: u64,
+    /// Current event queue depth (snapshot)
+    pub event_queue_depth: u64,
+    /// Current gate command queue depth (snapshot)
+    pub gate_queue_depth: u64,
+    /// Current CloudPlus outbound queue depth (snapshot)
+    pub cloudplus_queue_depth: u64,
+    /// Event queue utilization percentage (0-100)
+    pub event_queue_utilization_pct: u64,
+    /// Gate queue utilization percentage (0-100)
+    pub gate_queue_utilization_pct: u64,
+    /// Gate send latency histogram (time for actual network send)
+    pub gate_send_latency_buckets: [u64; NUM_BUCKETS],
+    /// Average gate send latency (µs)
+    pub gate_send_latency_avg_us: u64,
+    /// Max gate send latency (µs)
+    pub gate_send_latency_max_us: u64,
+    /// 99th percentile gate send latency (µs)
+    pub gate_send_latency_p99_us: u64,
+    /// Gate enqueue-to-send histogram (total time from enqueue to send complete)
+    pub gate_enqueue_to_send_buckets: [u64; NUM_BUCKETS],
+    /// Average gate enqueue-to-send time (µs)
+    pub gate_enqueue_to_send_avg_us: u64,
+    /// Max gate enqueue-to-send time (µs)
+    pub gate_enqueue_to_send_max_us: u64,
+    /// 99th percentile gate enqueue-to-send time (µs)
+    pub gate_enqueue_to_send_p99_us: u64,
+    /// ACC empty POS time histogram (ms since POS became empty when ACC arrived)
+    pub acc_empty_pos_time_buckets: [u64; NUM_BUCKETS],
+    /// Average ACC empty POS time (ms)
+    pub acc_empty_pos_time_avg_ms: u64,
+    /// Max ACC empty POS time (ms)
+    pub acc_empty_pos_time_max_ms: u64,
+    /// Total ACC empty POS events
+    pub acc_empty_pos_time_count: u64,
 }
 
 impl MetricsSummary {
@@ -594,6 +1041,18 @@ impl MetricsSummary {
             authorized_tracks = %self.authorized_tracks,
             gate_cmds = %self.gate_commands_sent,
             gate_p99_us = %self.gate_lat_p99_us,
+            mqtt_recv = %self.mqtt_events_received,
+            mqtt_drop = %self.mqtt_events_dropped,
+            mqtt_drop_pct = format!("{:.2}", self.mqtt_drop_ratio * 100.0),
+            acc_recv = %self.acc_events_received,
+            acc_drop = %self.acc_events_dropped,
+            acc_drop_pct = format!("{:.2}", self.acc_drop_ratio * 100.0),
+            egress_recv = %self.journey_egress_received,
+            egress_drop = %self.journey_egress_dropped,
+            egress_drop_pct = format!("{:.2}", self.egress_drop_ratio * 100.0),
+            gate_drop = %self.gate_cmds_dropped,
+            event_q_pct = %self.event_queue_utilization_pct,
+            gate_q_pct = %self.gate_queue_utilization_pct,
             "metrics"
         );
     }

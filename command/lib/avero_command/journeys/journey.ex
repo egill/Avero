@@ -46,10 +46,11 @@ defmodule AveroCommand.Journeys.Journey do
     field :dwell_threshold_met, :boolean, default: false
     field :dwell_zone, :string  # Zone where dwell threshold was met
 
-    # Group tracking (from Xovis GROUP tracks)
-    field :is_group, :boolean, default: false  # True if this was a GROUP track
-    field :member_count, :integer, default: 1  # Number of people in the group
-    field :group_id, :integer  # Group track ID if part of a group
+    # Group tracking (ACC group = people at POS together when payment arrived)
+    field :is_group, :boolean, default: false  # True if part of ACC group (member_count > 1)
+    field :member_count, :integer, default: 1  # Number of people in the ACC group
+    field :group_id, :integer  # Unused (legacy)
+    field :group_member_ids, {:array, :integer}, default: []  # Track IDs of all group members
 
     # Full path data
     field :zones_visited, {:array, :map}, default: []
@@ -83,6 +84,7 @@ defmodule AveroCommand.Journeys.Journey do
       :is_group,
       :member_count,
       :group_id,
+      :group_member_ids,
       :zones_visited,
       :events
     ])

@@ -293,6 +293,16 @@ impl CloudPlusClient {
         }
     }
 
+    /// Get the current outbound queue depth (for metrics)
+    pub fn outbound_queue_depth(&self) -> usize {
+        self.outbound_tx.max_capacity() - self.outbound_tx.capacity()
+    }
+
+    /// Get the outbound queue max capacity (for utilization calculation)
+    pub fn outbound_max_capacity(&self) -> usize {
+        self.outbound_tx.max_capacity()
+    }
+
     pub async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!(addr = %self.config.addr, "cloudplus_connecting");
 
@@ -561,7 +571,11 @@ impl CloudPlusClient {
         }
     }
 
-    /// Send door open command
+    /// Send door open command (non-blocking).
+    ///
+    /// Uses try_send to avoid blocking the caller. Returns queue latency in microseconds
+    /// on success. If the queue is full or disconnected, the command is dropped - this
+    /// is acceptable as blocking forever would be worse than a missed gate open.
     pub async fn send_open(
         &self,
         door_id: u8,
@@ -571,17 +585,23 @@ impl CloudPlusClient {
         }
 
         let start = Instant::now();
-        let door = if door_id > 1 { 1 } else { door_id + 1 };
-        let frame = build_frame(CMD_OPEN_DOOR, 0xff, door, &[]);
 
-        info!(door_id = door_id, "cloudplus_sending_open_command");
+        // Convert 0-indexed door_id to 1-indexed protocol door, clamped to valid range
+        let protocol_door = door_id.min(1) + 1;
+        let frame = build_frame(CMD_OPEN_DOOR, 0xff, protocol_door, &[]);
 
-        self.outbound_tx.send(frame).await.map_err(|_| "channel closed")?;
-
-        let latency_us = start.elapsed().as_micros() as u64;
-        info!(door_id = door_id, latency_us = latency_us, "cloudplus_open_command_queued");
-
-        Ok(latency_us)
+        match self.outbound_tx.try_send(frame) {
+            Ok(()) => {
+                let queue_latency_us = start.elapsed().as_micros() as u64;
+                info!(door_id, queue_latency_us, "cloudplus_open_queued");
+                Ok(queue_latency_us)
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => Err("queue full".into()),
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                error!(door_id, "cloudplus_channel_closed");
+                Err("channel closed".into())
+            }
+        }
     }
 
     /// Send door close command

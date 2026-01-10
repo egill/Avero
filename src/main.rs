@@ -9,8 +9,20 @@
 //! - `services/` - Business logic (Tracker, JourneyManager, Gate)
 //! - `infra/` - Infrastructure (Config, Metrics, Broker)
 
+use std::sync::Arc;
+
 use clap::Parser;
-use gateway_poc::infra::{Config, GateMode, Metrics};
+use tokio::sync::{mpsc, watch};
+use tracing::info;
+use tracing_subscriber::fmt::time::UtcTime;
+use tracing_subscriber::EnvFilter;
+
+use gateway_poc::infra::{Config, Metrics};
+use gateway_poc::io::{
+    create_egress_channel, create_egress_writer, start_acc_listener, AccListenerConfig,
+    MqttPublisher, Rs485Monitor,
+};
+use gateway_poc::services::{create_gate_worker, GateController};
 
 /// Gateway PoC - Automated retail gate control system
 #[derive(Parser, Debug)]
@@ -20,15 +32,16 @@ struct Args {
     #[arg(short, long, default_value = "config/dev.toml")]
     config: String,
 }
-use gateway_poc::io::{
-    create_egress_channel, start_acc_listener, AccListenerConfig, MqttPublisher, Rs485Monitor,
-};
-use gateway_poc::services::GateController;
-use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
-use tracing::info;
-use tracing_subscriber::fmt::time::UtcTime;
-use tracing_subscriber::EnvFilter;
+
+/// Calculate queue utilization as a percentage (0-100).
+#[inline]
+fn utilization_pct(used: u64, capacity: u64) -> u64 {
+    if capacity > 0 {
+        used * 100 / capacity
+    } else {
+        0
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,11 +70,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start embedded MQTT broker with config
     gateway_poc::infra::broker::start_embedded_broker(&config);
 
-    // Log configuration
-    let gate_mode_str = match config.gate_mode() {
-        GateMode::Tcp => "tcp",
-        GateMode::Http => "http",
-    };
     info!(
         config_file = %config.config_file(),
         mqtt_host = %config.mqtt_host(),
@@ -69,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mqtt_topic = %config.mqtt_topic(),
         mqtt_egress_host = %config.mqtt_egress_host(),
         mqtt_egress_port = %config.mqtt_egress_port(),
-        gate_mode = %gate_mode_str,
+        gate_mode = ?config.gate_mode(),
         gate_tcp_addr = %config.gate_tcp_addr(),
         min_dwell_ms = %config.min_dwell_ms(),
         pos_zones = ?config.pos_zones(),
@@ -82,11 +90,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     // Create shared components
-    let gate = Arc::new(GateController::new(config.clone()));
     let metrics = Arc::new(Metrics::new());
+    let gate = Arc::new(GateController::new(config.clone(), Some(metrics.clone())));
 
     // Initialize POS zone tracking
     metrics.set_pos_zones(config.pos_zones());
+
+    // Create MQTT egress channel early (needed by gate worker for timing events)
+    // The publisher will be started later if mqtt_egress is enabled
+    let (egress_sender, egress_rx) = if config.mqtt_egress_enabled() {
+        let (sender, rx) = create_egress_channel(1000, config.site_id().to_string());
+        (Some(sender), Some(rx))
+    } else {
+        (None, None)
+    };
 
     // Start CloudPlus TCP client if in TCP mode
     if let Some(tcp_client) = gate.tcp_client() {
@@ -96,38 +113,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // Create event channel (bounded for backpressure)
-    let (event_tx, event_rx) = mpsc::channel(1000);
+    // Create gate command worker (decouples gate I/O from tracker loop)
+    let (gate_cmd_tx, gate_worker) =
+        create_gate_worker(gate.clone(), metrics.clone(), 64, egress_sender.clone());
+    tokio::spawn(async move {
+        gate_worker.run().await;
+    });
 
-    // Start RS485 monitor (with event channel for door state changes)
-    let rs485_tx = event_tx.clone();
-    let rs485_monitor = Rs485Monitor::new(&config).with_event_tx(rs485_tx);
+    // Create egress writer (decouples file I/O from tracker loop)
+    let (journey_tx, egress_writer) = create_egress_writer(config.egress_file().to_string(), 100);
+    tokio::spawn(async move {
+        egress_writer.run().await;
+    });
+
+    // Create event channel (bounded for backpressure)
+    // Keep a clone of the sender for queue depth sampling
+    let (event_tx, event_rx) = mpsc::channel(1000);
+    let event_tx_sampler = event_tx.clone();
+
+    // Create watch channel for door state (lossless - latest value always available)
+    let (door_tx, door_rx) = watch::channel(gateway_poc::domain::types::DoorStatus::Unknown);
+
+    // Start RS485 monitor (with watch channel for door state changes)
+    let rs485_monitor = Rs485Monitor::new(&config).with_door_tx(door_tx);
     let rs485_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
         rs485_monitor.run(rs485_shutdown).await;
     });
 
-    // Start MQTT client
+    // Start MQTT client (with metrics for drop tracking)
     let mqtt_config = config.clone();
     let mqtt_tx = event_tx.clone();
+    let mqtt_metrics = metrics.clone();
     let mqtt_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
-        if let Err(e) =
-            gateway_poc::io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_shutdown).await
+        if let Err(e) = gateway_poc::io::mqtt::start_mqtt_client(
+            &mqtt_config,
+            mqtt_tx,
+            mqtt_metrics,
+            mqtt_shutdown,
+        )
+        .await
         {
             tracing::error!(error = %e, "MQTT client error");
         }
     });
 
-    // Start ACC TCP listener
+    // Start ACC TCP listener (with metrics for drop tracking)
     let acc_config = AccListenerConfig {
         port: config.acc_listener_port(),
         enabled: config.acc_listener_enabled(),
     };
     let acc_tx = event_tx;
+    let acc_metrics = metrics.clone();
     let acc_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
-        if let Err(e) = start_acc_listener(acc_config, acc_tx, acc_shutdown).await {
+        if let Err(e) = start_acc_listener(acc_config, acc_tx, acc_metrics, acc_shutdown).await {
             tracing::error!(error = %e, "ACC listener error");
         }
     });
@@ -155,31 +196,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Start metrics reporter (lock-free reads with full summary)
+    // Also samples queue depths for diagnosability
     let metrics_clone = metrics.clone();
+    let gate_for_metrics = gate.clone();
     let metrics_interval = config.metrics_interval_secs();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(metrics_interval));
         loop {
             interval.tick().await;
+
+            // Sample queue depths (max_capacity - capacity = current depth)
+            let event_max_capacity = event_tx_sampler.max_capacity() as u64;
+            let event_depth =
+                (event_tx_sampler.max_capacity() - event_tx_sampler.capacity()) as u64;
+            let cloudplus_depth = gate_for_metrics.cloudplus_queue_depth() as u64;
+            let gate_max_capacity = gate_for_metrics.cloudplus_max_capacity() as u64;
+            metrics_clone.set_event_queue_depth(event_depth);
+            // gate_queue_depth = CloudPlus outbound per PRD US-005
+            metrics_clone.set_gate_queue_depth(cloudplus_depth);
+            metrics_clone.set_cloudplus_queue_depth(cloudplus_depth);
+
+            metrics_clone
+                .set_event_queue_utilization_pct(utilization_pct(event_depth, event_max_capacity));
+            metrics_clone.set_gate_queue_utilization_pct(utilization_pct(
+                cloudplus_depth,
+                gate_max_capacity,
+            ));
+
             // Use full report with placeholder track counts (actual counts are in tracker)
             let summary = metrics_clone.report(0, 0);
             summary.log();
         }
     });
 
-    // Create MQTT egress channel and publisher (if enabled)
-    let egress_sender = if config.mqtt_egress_enabled() {
-        let (egress_sender, egress_rx) = create_egress_channel(1000, config.site_id().to_string());
-
+    // Start MQTT egress publisher (if enabled, channel was created earlier)
+    if let (Some(ref sender), Some(rx)) = (&egress_sender, egress_rx) {
         // Start MQTT egress publisher
-        let publisher = MqttPublisher::new(&config, egress_rx);
+        let publisher = MqttPublisher::new(&config, rx);
         let publisher_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
             publisher.run(publisher_shutdown).await;
         });
 
         // Start metrics egress publisher (separate from logging)
-        let metrics_egress = egress_sender.clone();
+        let metrics_egress = sender.clone();
         let metrics_for_egress = metrics.clone();
         let egress_interval = config.mqtt_egress_metrics_interval_secs();
         tokio::spawn(async move {
@@ -191,14 +251,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 metrics_egress.send_metrics(summary);
             }
         });
-
-        Some(egress_sender)
-    } else {
-        None
-    };
+    }
 
     // Start tracker (main event processing loop)
-    let mut tracker = gateway_poc::services::Tracker::new(config, gate, metrics, egress_sender);
+    let mut tracker = gateway_poc::services::Tracker::new(
+        config,
+        gate_cmd_tx,
+        journey_tx,
+        metrics,
+        egress_sender,
+        door_rx,
+    );
     info!("tracker_started");
 
     // Handle shutdown on Ctrl+C

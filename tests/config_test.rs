@@ -50,7 +50,7 @@ prometheus_port = 9091
     assert_eq!(config.site_id(), "test-site");
     assert_eq!(config.mqtt_host(), "test-host");
     assert_eq!(config.mqtt_port(), 1884);
-    assert_eq!(config.gate_mode(), &GateMode::Http);
+    assert_eq!(config.gate_mode(), GateMode::Http);
     assert_eq!(config.gate_zone(), GeometryId(2003));
     assert_eq!(config.min_dwell_ms(), 5000);
     assert_eq!(config.prometheus_port(), 9091);
@@ -61,5 +61,5 @@ fn test_load_from_path_fallback() {
     let config = Config::load_from_path("/nonexistent/config.toml");
     assert_eq!(config.mqtt_host(), "localhost");
     assert_eq!(config.mqtt_port(), 1883);
-    assert_eq!(config.gate_mode(), &GateMode::Tcp);
+    assert_eq!(config.gate_mode(), GateMode::Tcp);
 }

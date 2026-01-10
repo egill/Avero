@@ -1,0 +1,202 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Gateway Performance
+    folder: Avero
+    interval: 1m
+    rules:
+      - uid: gate-queue-delay-warning
+        title: Gate Queue Delay High
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              expr: gateway_gate_queue_delay_p99_us{site="netto"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: C
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1000]
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Gate queue delay p99 exceeds 1ms
+          description: "Gate command queue delay is {{ $values.A }}µs, threshold 1000µs"
+        labels:
+          severity: warning
+          site: netto
+
+      - uid: gate-e2e-latency-warning
+        title: Gate E2E Latency High
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              expr: gateway_gate_enqueue_to_send_p99_us{site="netto"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: C
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2000]
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Gate E2E latency p99 exceeds 2ms
+          description: "Gate enqueue-to-send latency is {{ $values.A }}µs, threshold 2000µs"
+        labels:
+          severity: warning
+          site: netto
+
+      - uid: event-queue-utilization-warning
+        title: Event Queue Pressure
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              expr: gateway_event_queue_utilization_pct{site="netto"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: C
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [50]
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Event queue utilization above 50%
+          description: "Event queue is {{ $values.A }}% full, may drop events"
+        labels:
+          severity: warning
+          site: netto
+
+      - uid: gate-queue-utilization-warning
+        title: Gate Queue Pressure
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              expr: gateway_gate_queue_utilization_pct{site="netto"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: C
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [50]
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Gate queue utilization above 50%
+          description: "Gate command queue is {{ $values.A }}% full, may drop commands"
+        labels:
+          severity: warning
+          site: netto
+
+      - uid: mqtt-drop-rate-warning
+        title: MQTT Events Dropping
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              expr: gateway_mqtt_drop_ratio{site="netto"} * 100
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: C
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: MQTT event drop rate above 1%
+          description: "MQTT drop rate is {{ $values.A }}%, events are being lost"
+        labels:
+          severity: critical
+          site: netto

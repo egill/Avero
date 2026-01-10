@@ -21,6 +21,7 @@ pub mod rs485;
 
 // Re-export commonly used types
 pub use acc_listener::{start_acc_listener, AccListenerConfig};
+pub use egress::{create_egress_writer, EgressWriter};
 pub use egress_channel::{
     create_egress_channel, AccDebugPending, AccDebugTrack, AccEventPayload, EgressSender,
     GateStatePayload, TrackEventPayload, ZoneEventPayload,

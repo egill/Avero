@@ -71,7 +71,6 @@ struct ZoneEvent {
     dwell_ms: Option<u64>,
     total_dwell_ms: Option<u64>,
     event_time: Option<u64>,
-    received_time: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -109,6 +108,12 @@ struct Metrics {
     gate_lat_avg_us: u64,
     gate_lat_max_us: u64,
     gate_lat_p99_us: u64,
+    // Queue depth and utilization
+    event_queue_depth: u64,
+    gate_queue_depth: u64,
+    cloudplus_queue_depth: u64,
+    event_queue_utilization_pct: u64,
+    gate_queue_utilization_pct: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -118,6 +123,12 @@ struct GateState {
     state: String,
     tid: Option<i64>,
     src: String,
+    /// Queue delay in microseconds (time from enqueue to processing start)
+    queue_delay_us: Option<u64>,
+    /// Send latency in microseconds (time for actual network send)
+    send_latency_us: Option<u64>,
+    /// Total enqueue-to-send time in microseconds
+    enqueue_to_send_us: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -273,7 +284,7 @@ impl GateTimingStats {
 
 #[derive(Debug, Clone, Default)]
 struct TrackProcessingStats {
-    network_latency: LatencyStats,    // event_time -> received_time
+    network_latency: LatencyStats, // ts - event_time = sensor-to-tracker latency
     processing_latency: LatencyStats, // internal processing
 }
 
@@ -740,10 +751,10 @@ impl DashboardState {
     fn handle_zone_event(&mut self, event: ZoneEvent) {
         let now = Instant::now();
 
-        // Track network latency if available
-        if let (Some(event_time), Some(received_time)) = (event.event_time, event.received_time) {
-            if received_time > event_time {
-                self.track_processing.network_latency.add(received_time - event_time);
+        // Track network latency if available (ts - event_time = sensor-to-tracker latency)
+        if let Some(event_time) = event.event_time {
+            if event.ts > event_time {
+                self.track_processing.network_latency.add(event.ts - event_time);
             }
         }
 
@@ -955,6 +966,12 @@ impl DashboardState {
                 if let Some(tid) = event.tid.or(self.gate_zone.occupant_tid) {
                     self.gate_zone_status =
                         GateZoneStatus::Exiting { tid, door_state: "cmd_sent".to_string() };
+                }
+            }
+            "cmd_dropped" => {
+                if let Some(tid) = event.tid.or(self.gate_zone.occupant_tid) {
+                    self.gate_zone_status =
+                        GateZoneStatus::Exiting { tid, door_state: "cmd_dropped".to_string() };
                 }
             }
             "moving" => {
@@ -1586,7 +1603,12 @@ fn draw_zone_status(f: &mut Frame, area: Rect, state: &DashboardState) {
         }
         GateZoneStatus::Blocked { tid } => ("⚠", Color::Red, format!("T{} UNAUTH", tid)),
         GateZoneStatus::Exiting { tid, door_state } => {
-            ("→", Color::Cyan, format!("GATE:T{} {}", tid, door_state))
+            let (icon, color) = if door_state == "cmd_dropped" {
+                ("⚠", Color::Red)
+            } else {
+                ("→", Color::Cyan)
+            };
+            (icon, color, format!("GATE:T{} {}", tid, door_state))
         }
     };
 
@@ -1764,9 +1786,16 @@ fn draw_gate_feed(f: &mut Frame, area: Rect, state: &DashboardState) {
             };
             let tid = e.tid.map(|t| format!("T{}", t)).unwrap_or("-".to_string());
 
+            // Show timing for cmd_sent events if available
+            let timing = if e.state == "cmd_sent" {
+                e.enqueue_to_send_us.map(|us| format!(" {}µs", us)).unwrap_or_default()
+            } else {
+                String::new()
+            };
+
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{:<8}", e.state), Style::default().fg(color)),
-                Span::raw(tid),
+                Span::raw(format!("{}{}", tid, timing)),
             ]))
         })
         .collect();
@@ -2182,7 +2211,7 @@ fn draw_bottom_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
         if hours > 0 { format!("{}h {}m", hours, mins) } else { format!("{}m", mins) };
 
     // Manual test results
-    let manual_test_str = if state.manual_test.last_total.is_some() {
+    let _manual_test_str = if state.manual_test.last_total.is_some() {
         format!(
             "Manual: cmd→mov:{}ms mov→opn:{}ms TOTAL:{}ms",
             state.manual_test.last_cmd_to_moving.unwrap_or(0),

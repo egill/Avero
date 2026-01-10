@@ -2,12 +2,13 @@
 
 use crate::domain::types::TrackId;
 use crate::infra::config::{Config, GateMode};
+use crate::infra::metrics::Metrics;
 use crate::io::cloudplus::{CloudPlusClient, CloudPlusConfig};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// Trait for gate control operations - enables mock implementations for testing
 #[async_trait]
@@ -65,15 +66,17 @@ pub struct GateController {
     http_client: Option<reqwest::Client>,
     // TCP mode
     tcp_client: Option<Arc<CloudPlusClient>>,
+    // Metrics for tracking dropped commands
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl GateController {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, metrics: Option<Arc<Metrics>>) -> Self {
         // Parse credentials from URL if present (e.g., http://user:pass@host/path)
         let (url, username, password) = Self::parse_url_with_auth(config.gate_url());
         let timeout = Duration::from_millis(config.gate_timeout_ms());
 
-        let tcp_client = if *config.gate_mode() == GateMode::Tcp {
+        let tcp_client = if config.gate_mode() == GateMode::Tcp {
             let tcp_config =
                 CloudPlusConfig { addr: config.gate_tcp_addr().to_string(), ..Default::default() };
             Some(Arc::new(CloudPlusClient::new(tcp_config)))
@@ -82,18 +85,28 @@ impl GateController {
         };
 
         // Create HTTP client once for reuse (connection pooling)
-        let http_client = if *config.gate_mode() == GateMode::Http {
+        let http_client = if config.gate_mode() == GateMode::Http {
             reqwest::Client::builder().timeout(timeout).http1_only().build().ok()
         } else {
             None
         };
 
-        Self { mode: config.gate_mode().clone(), url, username, password, http_client, tcp_client }
+        Self { mode: config.gate_mode(), url, username, password, http_client, tcp_client, metrics }
     }
 
     /// Get the TCP client for running in main
     pub fn tcp_client(&self) -> Option<Arc<CloudPlusClient>> {
         self.tcp_client.clone()
+    }
+
+    /// Get the CloudPlus outbound queue depth (for metrics)
+    pub fn cloudplus_queue_depth(&self) -> usize {
+        self.tcp_client.as_ref().map(|c| c.outbound_queue_depth()).unwrap_or(0)
+    }
+
+    /// Get the CloudPlus outbound queue max capacity (for utilization calculation)
+    pub fn cloudplus_max_capacity(&self) -> usize {
+        self.tcp_client.as_ref().map(|c| c.outbound_max_capacity()).unwrap_or(0)
     }
 
     /// Parse URL and extract basic auth credentials if present
@@ -123,19 +136,33 @@ impl GateController {
 
         match client.send_open(0).await {
             Ok(queue_latency_us) => {
-                let total_latency_us = start.elapsed().as_micros() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 info!(
                     track_id = %track_id,
-                    latency_us = %total_latency_us,
+                    latency_us = %latency_us,
                     queue_latency_us = %queue_latency_us,
                     mode = "tcp",
                     "gate_open_command"
                 );
-                total_latency_us
+                latency_us
             }
             Err(e) => {
                 let latency_us = start.elapsed().as_micros() as u64;
-                log_tcp_command_error(track_id, latency_us, e.as_ref());
+                let err_msg = e.to_string();
+                match err_msg.as_str() {
+                    "not connected" => {
+                        warn!(track_id = %track_id, "gate_command_failed_not_connected");
+                    }
+                    "queue full" => {
+                        warn!(track_id = %track_id, latency_us = %latency_us, "gate_command_dropped_queue_full");
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.record_gate_cmd_dropped();
+                        }
+                    }
+                    _ => {
+                        log_tcp_command_error(track_id, latency_us, e.as_ref());
+                    }
+                }
                 latency_us
             }
         }

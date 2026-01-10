@@ -17,6 +17,7 @@ defmodule AveroCommand.Reports.DailySummary do
   alias AveroCommand.Journeys
   alias AveroCommand.Incidents
   alias AveroCommand.Incidents.Manager
+  alias AveroCommand.Reports.SiteDiscovery
 
   @doc """
   Scheduled job to generate daily summary.
@@ -35,12 +36,7 @@ defmodule AveroCommand.Reports.DailySummary do
   end
 
   defp get_active_sites do
-    Store.recent_events(1000, nil)
-    |> Enum.map(& &1.site)
-    |> Enum.uniq()
-    |> Enum.reject(&is_nil/1)
-  rescue
-    _ -> []
+    SiteDiscovery.list_recent_sites()
   end
 
   defp generate_summary(site) do

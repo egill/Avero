@@ -130,11 +130,7 @@ fn parse_frame(buf: &[u8]) -> Option<(u8, u8, Vec<u8>, usize)> {
         return None;
     }
 
-    let data = if data_len > 0 {
-        buf[start + 7..start + 7 + data_len].to_vec()
-    } else {
-        vec![]
-    };
+    let data = if data_len > 0 { buf[start + 7..start + 7 + data_len].to_vec() } else { vec![] };
 
     Some((command, rand, data, start + frame_len))
 }
@@ -166,7 +162,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             if let Some(status) = poll_door_status(&rs485).await? {
                 if status != last_status {
-                    println!("[{}] DOOR: {} -> {}", chrono_time(), last_status.as_str(), status.as_str());
+                    println!(
+                        "[{}] DOOR: {} -> {}",
+                        chrono_time(),
+                        last_status.as_str(),
+                        status.as_str()
+                    );
                     last_status = status;
                 }
             }
@@ -272,8 +273,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cmd = build_open_command();
     tx.send(cmd).await?;
     let send_time = start.elapsed();
-    println!("[{:>6}us] OPEN_CMD sent (queue time: {}us)",
-             start.elapsed().as_micros(), send_time.as_micros());
+    println!(
+        "[{:>6}us] OPEN_CMD sent (queue time: {}us)",
+        start.elapsed().as_micros(),
+        send_time.as_micros()
+    );
 
     // Monitor door state changes
     let mut saw_moving = false;
@@ -289,8 +293,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(status) = poll_door_status(&rs485).await? {
             if status != last_status {
                 let elapsed = start.elapsed();
-                println!("[{:>6}ms] DOOR: {} -> {}",
-                         elapsed.as_millis(), last_status.as_str(), status.as_str());
+                println!(
+                    "[{:>6}ms] DOOR: {} -> {}",
+                    elapsed.as_millis(),
+                    last_status.as_str(),
+                    status.as_str()
+                );
 
                 match status {
                     DoorStatus::Moving if !saw_moving => {
@@ -340,9 +348,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn chrono_time() -> String {
     use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
+    let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     format!("{}.{:03}", now.as_secs() % 100000, now.subsec_millis())
 }
 

@@ -54,6 +54,10 @@ pub struct ZoneEventPayload {
     /// Total accumulated dwell across all POS zones
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_dwell_ms: Option<u64>,
+    /// Original event timestamp from Xovis sensor (epoch ms).
+    /// Compare with `ts` to calculate sensor-to-tracker latency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_time: Option<u64>,
 }
 
 /// Payload for metrics snapshot
@@ -92,6 +96,16 @@ pub struct MetricsPayload {
     pub gate_lat_max_us: u64,
     /// 99th percentile gate command latency (µs)
     pub gate_lat_p99_us: u64,
+    /// Current event queue depth (snapshot)
+    pub event_queue_depth: u64,
+    /// Current gate command queue depth (snapshot)
+    pub gate_queue_depth: u64,
+    /// Current CloudPlus outbound queue depth (snapshot)
+    pub cloudplus_queue_depth: u64,
+    /// Event queue utilization percentage (0-100)
+    pub event_queue_utilization_pct: u64,
+    /// Gate queue utilization percentage (0-100)
+    pub gate_queue_utilization_pct: u64,
 }
 
 impl From<MetricsSummary> for MetricsPayload {
@@ -113,6 +127,11 @@ impl From<MetricsSummary> for MetricsPayload {
             gate_lat_avg_us: summary.gate_lat_avg_us,
             gate_lat_max_us: summary.gate_lat_max_us,
             gate_lat_p99_us: summary.gate_lat_p99_us,
+            event_queue_depth: summary.event_queue_depth,
+            gate_queue_depth: summary.gate_queue_depth,
+            cloudplus_queue_depth: summary.cloudplus_queue_depth,
+            event_queue_utilization_pct: summary.event_queue_utilization_pct,
+            gate_queue_utilization_pct: summary.gate_queue_utilization_pct,
         }
     }
 }
@@ -125,13 +144,60 @@ pub struct GateStatePayload {
     pub site: Option<String>,
     /// Timestamp (epoch ms)
     pub ts: u64,
-    /// Gate state (cmd_sent, open, closed, moving)
+    /// Gate state (cmd_enqueued, cmd_sent, cmd_dropped, open, closed, moving)
     pub state: String,
     /// Associated track ID (if any)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tid: Option<i64>,
     /// Source of the state change (rs485, tcp, cmd)
     pub src: String,
+    /// Queue delay in microseconds (time from enqueue to processing start)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_delay_us: Option<u64>,
+    /// Send latency in microseconds (time for actual network send)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_latency_us: Option<u64>,
+    /// Total enqueue-to-send time in microseconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enqueue_to_send_us: Option<u64>,
+}
+
+impl GateStatePayload {
+    /// Create a new gate state payload without timing info
+    pub fn new(ts: u64, state: &str, tid: Option<i64>, src: &str) -> Self {
+        Self {
+            site: None,
+            ts,
+            state: state.to_string(),
+            tid,
+            src: src.to_string(),
+            queue_delay_us: None,
+            send_latency_us: None,
+            enqueue_to_send_us: None,
+        }
+    }
+
+    /// Create a gate state payload with timing info (for cmd_sent events)
+    pub fn with_timing(
+        ts: u64,
+        state: &str,
+        tid: Option<i64>,
+        src: &str,
+        queue_delay_us: u64,
+        send_latency_us: u64,
+        enqueue_to_send_us: u64,
+    ) -> Self {
+        Self {
+            site: None,
+            ts,
+            state: state.to_string(),
+            tid,
+            src: src.to_string(),
+            queue_delay_us: Some(queue_delay_us),
+            send_latency_us: Some(send_latency_us),
+            enqueue_to_send_us: Some(enqueue_to_send_us),
+        }
+    }
 }
 
 /// Payload for track lifecycle events

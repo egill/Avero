@@ -5,10 +5,13 @@
 //! The peer IP is used to look up the POS zone via ip_to_pos config.
 
 use crate::domain::types::{EventType, ParsedEvent, TrackId};
+use crate::infra::metrics::Metrics;
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
@@ -28,9 +31,11 @@ impl Default for AccListenerConfig {
 /// Start the ACC TCP listener
 ///
 /// Listens for connections from ACC terminals and sends events to the tracker.
+/// Events are sent via try_send to avoid blocking - drops are counted in metrics.
 pub async fn start_acc_listener(
     config: AccListenerConfig,
     event_tx: mpsc::Sender<ParsedEvent>,
+    metrics: Arc<Metrics>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if !config.enabled {
@@ -57,8 +62,9 @@ pub async fn start_acc_listener(
                 match result {
                     Ok((socket, addr)) => {
                         let tx = event_tx.clone();
+                        let m = metrics.clone();
                         tokio::spawn(async move {
-                            handle_acc_connection(socket, addr, tx).await;
+                            handle_acc_connection(socket, addr, tx, m).await;
                         });
                     }
                     Err(e) => {
@@ -74,12 +80,16 @@ async fn handle_acc_connection(
     socket: tokio::net::TcpStream,
     addr: SocketAddr,
     event_tx: mpsc::Sender<ParsedEvent>,
+    metrics: Arc<Metrics>,
 ) {
     let peer_ip = addr.ip().to_string();
     debug!(ip = %peer_ip, "acc_connection_accepted");
 
     let reader = BufReader::new(socket);
     let mut lines = reader.lines();
+
+    // Rate-limit drop warnings to 1 per second
+    let mut last_drop_warn = Instant::now() - Duration::from_secs(2);
 
     // Read lines from the connection
     while let Ok(Some(line)) = lines.next_line().await {
@@ -112,9 +122,22 @@ async fn handle_acc_connection(
                 position: None,
             };
 
-            if event_tx.send(event).await.is_err() {
-                warn!(peer_ip = %peer_ip, "acc_event_channel_closed");
-                break;
+            // Use try_send to never block the connection handler
+            metrics.record_acc_event_received();
+            match event_tx.try_send(event) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    metrics.record_acc_event_dropped();
+                    // Rate-limit warning to 1 per second
+                    if last_drop_warn.elapsed() > Duration::from_secs(1) {
+                        warn!(peer_ip = %peer_ip, "acc_event_dropped: channel full");
+                        last_drop_warn = Instant::now();
+                    }
+                }
+                Err(TrySendError::Closed(_)) => {
+                    warn!(peer_ip = %peer_ip, "acc_event_channel_closed");
+                    break;
+                }
             }
         } else if !line.is_empty() {
             debug!(peer_ip = %peer_ip, line = %line, "acc_unknown_message");

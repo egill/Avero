@@ -13,6 +13,7 @@ defmodule AveroCommand.Reports.LastCustomer do
   alias AveroCommand.Store
   alias AveroCommand.Incidents
   alias AveroCommand.Incidents.Manager
+  alias AveroCommand.Reports.SiteDiscovery
 
   @doc """
   Scheduled job to check for last customer.
@@ -32,13 +33,7 @@ defmodule AveroCommand.Reports.LastCustomer do
   end
 
   defp get_active_sites do
-    # Get sites from recent events
-    Store.recent_events(500, nil)
-    |> Enum.map(& &1.site)
-    |> Enum.uniq()
-    |> Enum.reject(&is_nil/1)
-  rescue
-    _ -> []
+    SiteDiscovery.list_recent_sites()
   end
 
   defp check_last_customer(site) do

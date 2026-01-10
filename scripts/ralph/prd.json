@@ -16,7 +16,7 @@
       "instructions": "Create src/services/gate_worker.rs with GateCmdWorker that owns GateController. Add gate_cmd_tx: mpsc::Sender<GateCmd> to Tracker. send_gate_open_command becomes 'enqueue + record timestamp' and returns immediately. Worker does actual send_open_command, measures latency, updates metrics. Adjust src/main.rs to spawn worker.",
       "files": ["src/services/tracker/handlers.rs", "src/services/gate_worker.rs (new)", "src/main.rs"],
       "priority": 0,
-      "passes": false,
+      "passes": true,
       "notes": "CRITICAL: Primary cause of 'gate open too late'. Creates new gate_worker.rs module."
     },
     {
@@ -34,7 +34,7 @@
       "instructions": "In src/io/mqtt.rs:60 and src/io/acc_listener.rs, change send().await to try_send(). On TrySendError::Full, increment source-specific counter and log rate-limited warning. Add mqtt_events_dropped and acc_events_dropped AtomicU64 to Metrics.",
       "files": ["src/io/mqtt.rs", "src/io/acc_listener.rs", "src/infra/metrics.rs"],
       "priority": 0,
-      "passes": false,
+      "passes": true,
       "notes": "CRITICAL: MQTT stalls cause disconnects. Combined MQTT+ACC in one story since same pattern."
     },
     {
@@ -52,7 +52,7 @@
       "instructions": "RS485 door state is stateful (latest value matters, not event stream). Replace mpsc channel with watch channel. RS485Monitor sends via watch::Sender. Tracker/DoorCorrelator receives via watch::Receiver. This ensures door state is never dropped. Also reduce MAX_READ_ATTEMPTS from 50 to 10 to cap stall time at ~500ms.",
       "files": ["src/io/rs485.rs", "src/main.rs", "src/services/tracker/mod.rs"],
       "priority": 0,
-      "passes": false,
+      "passes": true,
       "notes": "CRITICAL: Door state is stateful - must be lossless. Watch channel guarantees latest value."
     },
     {
@@ -70,7 +70,7 @@
       "instructions": "In src/io/cloudplus.rs:579, change to try_send(). On Full, log and return Err('queue full'). In gate.rs caller, log WARN that gate command was dropped. Add gate_cmds_dropped to Metrics. This is acceptable: if TCP is so backed up, dropping is better than blocking forever.",
       "files": ["src/io/cloudplus.rs", "src/services/gate.rs", "src/infra/metrics.rs"],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "HIGH: Explicit failure handling - dropped command = customer waits."
     },
     {
@@ -87,7 +87,7 @@
       "instructions": "Add queue depth tracking: wrap channels with Arc to share capacity checks, or periodically sample len(). For gate latency, record timestamp at enqueue (in GateCmd struct), measure delta at send time. Add to Prometheus output. This makes backlog visible.",
       "files": ["src/infra/metrics.rs", "src/services/gate_worker.rs", "src/io/prometheus.rs"],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "HIGH: Without queue metrics, 'late gate open' is inferred not diagnosed."
     },
     {
@@ -105,7 +105,7 @@
       "instructions": "Create EgressWriter task with mpsc::Receiver<Journey>. In tracker, replace direct egress.write_journeys() with channel send. Writer uses spawn_blocking for actual file I/O, or dedicated thread with BufWriter. Flush on batch size or timer.",
       "files": ["src/io/egress.rs", "src/services/tracker/mod.rs", "src/main.rs"],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "MEDIUM: SSD is fast but sync I/O in async context blocks the runtime."
     },
     {
@@ -123,7 +123,7 @@
       "instructions": "In Config, change zone_names HashMap value from String to Arc<str>. zone_name() returns Arc<str> clone (cheap) or creates new Arc for unknown zones. Update callers to accept impl AsRef<str>.",
       "files": ["src/infra/config.rs", "src/services/tracker/handlers.rs"],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "LOW: Per-event String clone adds up under high load."
     },
     {
@@ -139,7 +139,7 @@
       "instructions": "Review src/services/tracker/handlers.rs for info! on per-event paths. Demote zone_entry/zone_exit to debug! or add sampling (log every Nth event). Keep gate_open_command, gate_open_correlated at info!.",
       "files": ["src/services/tracker/handlers.rs"],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "LOW: Logging overhead can be significant at high event rates."
     },
     {
@@ -154,8 +154,43 @@
       "instructions": "In src/io/mqtt.rs:129, replace HashMap with linear search: for each event, find matching track_id with tracked_objects.iter().find(). O(n²) is fine for small n (typically <10 objects per frame).",
       "files": ["src/io/mqtt.rs"],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "LOW: Avoids allocation, O(n²) acceptable for small n."
+    },
+    {
+      "id": "US-010",
+      "title": "Expose drop counters and drop ratios for ingress/egress",
+      "category": "performance",
+      "acceptanceCriteria": [
+        "Metrics track mqtt_events_received, acc_events_received, mqtt_events_dropped, acc_events_dropped",
+        "Metrics track gate_cmds_dropped and journey_egress_dropped",
+        "Prometheus exposes *_received_total and *_dropped_total counters",
+        "Prometheus exposes drop ratio gauges (mqtt_drop_ratio, acc_drop_ratio, egress_drop_ratio)",
+        "Metrics summary log includes drop counters and ratios",
+        "All existing tests pass"
+      ],
+      "instructions": "Add received counters in src/infra/metrics.rs and increment them in src/io/mqtt.rs and src/io/acc_listener.rs before try_send. Add journey_egress_dropped counter in tracker when journey_tx.try_send fails. Compute drop ratios in Metrics::report (dropped / received, guard divide-by-zero). Update Prometheus output in src/io/prometheus.rs to expose counters and ratios. Update MetricsSummary::log to include drops/ratios.",
+      "files": ["src/infra/metrics.rs", "src/io/mqtt.rs", "src/io/acc_listener.rs", "src/services/tracker/mod.rs", "src/io/prometheus.rs"],
+      "priority": 1,
+      "passes": true,
+      "notes": "HIGH: Needed to quantify whether we're dropping a small vs large portion of events."
+    },
+    {
+      "id": "US-011",
+      "title": "Expose queue utilization percentages for pressure monitoring",
+      "category": "performance",
+      "acceptanceCriteria": [
+        "Metric: event_queue_utilization_pct (0-100)",
+        "Metric: gate_queue_utilization_pct (0-100)",
+        "Prometheus exposes utilization gauges",
+        "Metrics summary log includes utilization",
+        "All existing tests pass"
+      ],
+      "instructions": "In src/main.rs sampler, compute utilization = depth / max_capacity * 100 for event and gate queues. Add setters and fields in Metrics, include in MetricsSummary and Prometheus output. Use u64 or f64 as appropriate, keep units clear.",
+      "files": ["src/main.rs", "src/infra/metrics.rs", "src/io/prometheus.rs"],
+      "priority": 1,
+      "passes": true,
+      "notes": "MEDIUM: Helps identify when we're close to capacity even before drops occur."
     }
   ]
 }

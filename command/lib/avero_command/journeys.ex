@@ -454,10 +454,11 @@ defmodule AveroCommand.Journeys do
       dwell_threshold_met: dwell_threshold_met,
       dwell_zone: dwell_zone,
 
-      # Group tracking
-      is_group: false,
-      member_count: 1,
+      # Group tracking (ACC group = people at POS together when payment arrived)
+      is_group: (data["acc_group"] || 1) > 1,
+      member_count: data["acc_group"] || 1,
       group_id: nil,
+      group_member_ids: data["acc_group_tids"] || [],
 
       # Full data - store transformed events
       zones_visited: extract_zones_visited(events),

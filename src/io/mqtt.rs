@@ -1,21 +1,27 @@
 //! MQTT client for receiving Xovis sensor data
 
 use crate::domain::types::{
-    EventAttributes, EventType, Frame, GeometryId, ParsedEvent, TimestampValue, TrackId,
-    XovisMessage,
+    EventType, Frame, GeometryId, ParsedEvent, TimestampValue, TrackId, XovisMessage,
 };
 use crate::infra::config::Config;
+use crate::infra::metrics::Metrics;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
 /// Start the MQTT client and send parsed events to the channel
+///
+/// Events are sent via try_send to avoid blocking the MQTT eventloop.
+/// Dropped events are counted in metrics and logged (rate-limited).
 pub async fn start_mqtt_client(
     config: &Config,
     event_tx: mpsc::Sender<ParsedEvent>,
+    metrics: Arc<Metrics>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut mqttoptions = MqttOptions::new("gateway-poc", config.mqtt_host(), config.mqtt_port());
@@ -30,6 +36,9 @@ pub async fn start_mqtt_client(
     client.subscribe(config.mqtt_topic(), QoS::AtMostOnce).await?;
 
     info!(topic = %config.mqtt_topic(), host = %config.mqtt_host(), port = %config.mqtt_port(), "MQTT client subscribed");
+
+    // Rate-limit drop warnings to 1 per second
+    let mut last_drop_warn = Instant::now() - Duration::from_secs(2);
 
     loop {
         tokio::select! {
@@ -51,15 +60,26 @@ pub async fn start_mqtt_client(
                         match payload {
                             Ok(json_str) => {
                                 let events = parse_xovis_message(json_str, received_at);
-                                // Only log if there are actual events (not just position updates)
                                 if !events.is_empty() {
                                     debug!(topic = %topic, event_count = %events.len(), "MQTT message with events");
                                 }
                                 for event in events {
                                     debug!(track_id = %event.track_id, event_type = ?event.event_type, "Parsed event");
-                                    if event_tx.send(event).await.is_err() {
-                                        warn!("Event channel closed");
-                                        return Ok(());
+                                    metrics.record_mqtt_event_received();
+                                    if let Err(e) = event_tx.try_send(event) {
+                                        match e {
+                                            TrySendError::Full(_) => {
+                                                metrics.record_mqtt_event_dropped();
+                                                if last_drop_warn.elapsed() > Duration::from_secs(1) {
+                                                    warn!("mqtt_event_dropped: channel full");
+                                                    last_drop_warn = Instant::now();
+                                                }
+                                            }
+                                            TrySendError::Closed(_) => {
+                                                warn!("Event channel closed");
+                                                return Ok(());
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -125,39 +145,32 @@ fn timestamp_to_epoch_ms(ts: &TimestampValue) -> u64 {
 fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
     let mut events = Vec::with_capacity(8);
 
-    // Build position map from tracked_objects
-    let mut positions: std::collections::HashMap<i64, [f64; 3]> = std::collections::HashMap::new();
-    for obj in &frame.tracked_objects {
-        if obj.position.len() >= 3 {
-            positions.insert(obj.track_id, [obj.position[0], obj.position[1], obj.position[2]]);
-        }
-    }
-
     // Extract event time from frame timestamp (handles both ISO string and epoch ms)
     let event_time = timestamp_to_epoch_ms(&frame.time);
 
     for xovis_event in &frame.events {
         let event_type: EventType = xovis_event.event_type.parse().unwrap();
 
-        let attrs = xovis_event.attributes.as_ref().unwrap_or(&EventAttributes {
-            track_id: None,
-            geometry_id: None,
-            direction: None,
-        });
+        let Some(attrs) = xovis_event.attributes.as_ref() else { continue };
+        let Some(track_id) = attrs.track_id else { continue };
 
-        if let Some(track_id) = attrs.track_id {
-            // Get position for this track if available
-            let position = positions.get(&track_id).copied();
-            events.push(ParsedEvent {
-                event_type,
-                track_id: TrackId(track_id),
-                geometry_id: attrs.geometry_id.map(GeometryId),
-                direction: attrs.direction.clone(),
-                event_time,
-                received_at,
-                position,
-            });
-        }
+        // Linear search for position - frames typically have <10 tracked objects
+        let position = frame
+            .tracked_objects
+            .iter()
+            .find(|obj| obj.track_id == track_id)
+            .filter(|obj| obj.position.len() >= 3)
+            .map(|obj| [obj.position[0], obj.position[1], obj.position[2]]);
+
+        events.push(ParsedEvent {
+            event_type,
+            track_id: TrackId(track_id),
+            geometry_id: attrs.geometry_id.map(GeometryId),
+            direction: attrs.direction.clone(),
+            event_time,
+            received_at,
+            position,
+        });
     }
 
     events

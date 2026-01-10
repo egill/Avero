@@ -76,6 +76,23 @@ ssh avero@HOST "sudo systemctl start gateway-poc"
 ssh avero@HOST "sudo journalctl -u gateway-poc -f"  # Live logs
 ```
 
+### Grafana Dashboard
+
+Dashboards are stored locally and deployed to e18n.net.
+
+- **Host:** `root@e18n.net` (docker container: `avero-grafana`)
+- **Local dashboards:** `grafana/*.json`
+- **Server dashboards:** `/opt/avero/grafana/dashboards/`
+- **Prometheus datasource UID:** `PBFA97CFB590B2093`
+- **TimescaleDB datasource UID:** `P40AE60E18F02DE32`
+- **Grafana URL:** https://grafana.e18n.net
+
+```bash
+# Deploy dashboard: copy file AND update via API (database version takes precedence)
+scp grafana/netto-grandi.json root@e18n.net:/opt/avero/grafana/dashboards/
+ssh root@e18n.net 'jq "{dashboard: ., overwrite: true}" /opt/avero/grafana/dashboards/netto-grandi.json | curl -s -X POST -H "Content-Type: application/json" -u "admin:avero" -d @- "http://localhost:3000/api/dashboards/db"'
+```
+
 ## Architecture
 
 ### Data Flow Pipeline

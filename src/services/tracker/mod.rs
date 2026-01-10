@@ -11,22 +11,22 @@ mod handlers;
 mod tests;
 
 use crate::domain::journey::Journey;
-use crate::domain::types::{EventType, ParsedEvent, Person, TrackId};
+use crate::domain::types::{DoorStatus, EventType, ParsedEvent, Person, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
-use crate::io::egress::{Egress, JourneyWriter};
 use crate::io::EgressSender;
 use crate::services::acc_collector::AccCollector;
 use crate::services::door_correlator::DoorCorrelator;
-use crate::services::gate::GateController;
+use crate::services::gate_worker::GateCmd;
 use crate::services::journey_manager::JourneyManager;
 use crate::services::reentry_detector::ReentryDetector;
 use crate::services::stitcher::Stitcher;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time::{interval, Duration};
+use tracing::warn;
 
 /// Central event processor for person tracking and journey management
 pub struct Tracker {
@@ -42,28 +42,41 @@ pub struct Tracker {
     pub(crate) reentry_detector: ReentryDetector,
     /// Correlates ACC (payment) events with journeys
     pub(crate) acc_collector: AccCollector,
-    /// Writes completed journeys to file
-    pub(crate) egress: Egress,
     /// Application configuration
     pub(crate) config: Config,
-    /// Gate control interface
-    pub(crate) gate: Arc<GateController>,
+    /// Gate command sender (commands processed by GateCmdWorker)
+    pub(crate) gate_cmd_tx: mpsc::Sender<GateCmd>,
+    /// Journey egress sender (journeys processed by EgressWriter)
+    pub(crate) journey_tx: mpsc::Sender<Journey>,
     /// Metrics collector
     pub(crate) metrics: Arc<Metrics>,
     /// MQTT egress sender (optional)
     pub(crate) egress_sender: Option<EgressSender>,
+    /// Watch receiver for door state (RS485 monitor publishes here)
+    pub(crate) door_rx: watch::Receiver<DoorStatus>,
+    /// Last processed door status (to detect changes)
+    pub(crate) last_door_status: DoorStatus,
 }
 
 impl Tracker {
     /// Create a new Tracker with the given configuration and dependencies
+    ///
+    /// The `gate_cmd_tx` channel sends gate commands to a `GateCmdWorker` task,
+    /// which handles network I/O asynchronously without blocking the tracker.
+    ///
+    /// The `journey_tx` channel sends completed journeys to an `EgressWriter` task,
+    /// which handles file I/O asynchronously without blocking the tracker.
+    ///
+    /// The `door_rx` watch receiver provides lossless door state updates from RS485.
     pub fn new(
         config: Config,
-        gate: Arc<GateController>,
+        gate_cmd_tx: mpsc::Sender<GateCmd>,
+        journey_tx: mpsc::Sender<Journey>,
         metrics: Arc<Metrics>,
         egress_sender: Option<EgressSender>,
+        door_rx: watch::Receiver<DoorStatus>,
     ) -> Self {
-        let egress = Egress::new(config.egress_file());
-        let acc_collector = AccCollector::new(&config);
+        let acc_collector = AccCollector::new(&config, metrics.clone());
         Self {
             persons: FxHashMap::default(),
             stitcher: Stitcher::with_metrics(metrics.clone()),
@@ -71,11 +84,13 @@ impl Tracker {
             door_correlator: DoorCorrelator::new(),
             reentry_detector: ReentryDetector::new(),
             acc_collector,
-            egress,
             config,
-            gate,
+            gate_cmd_tx,
+            journey_tx,
             metrics,
             egress_sender,
+            door_rx,
+            last_door_status: DoorStatus::Unknown,
         }
     }
 
@@ -86,11 +101,21 @@ impl Tracker {
 
         loop {
             tokio::select! {
-                // Process incoming events
+                // Process incoming events (MQTT, ACC)
                 event = event_rx.recv() => {
                     match event {
-                        Some(e) => self.process_event(e).await,
+                        Some(e) => self.process_event(e),
                         None => break, // Channel closed
+                    }
+                }
+                // Watch for door state changes (RS485 via watch channel)
+                result = self.door_rx.changed() => {
+                    if result.is_ok() {
+                        let status = *self.door_rx.borrow();
+                        if status != self.last_door_status {
+                            self.handle_door_state_change(status);
+                            self.last_door_status = status;
+                        }
                     }
                 }
                 // Periodic tick for journey egress
@@ -101,57 +126,48 @@ impl Tracker {
         }
     }
 
-    /// Tick journey manager and write ready journeys to egress
+    /// Tick journey manager and send ready journeys to egress worker
     fn tick_and_egress(&mut self) {
         let ready_journeys = self.journey_manager.tick();
-        if !ready_journeys.is_empty() {
-            // Write to file
-            self.egress.write_journeys(&ready_journeys);
-
-            // Publish to MQTT
+        for journey in ready_journeys {
+            // Publish to MQTT (if enabled)
             if let Some(ref sender) = self.egress_sender {
-                for journey in &ready_journeys {
-                    sender.send_journey(journey);
-                }
+                sender.send_journey(&journey);
+            }
+
+            // Send to egress writer via channel (non-blocking)
+            self.metrics.record_journey_egress_received();
+            if let Err(e) = self.journey_tx.try_send(journey) {
+                self.metrics.record_journey_egress_dropped();
+                warn!(error = %e, "journey_egress_queue_full");
             }
         }
     }
 
     /// Process a single event, dispatching to the appropriate handler
-    pub async fn process_event(&mut self, event: ParsedEvent) {
+    ///
+    /// All handlers are synchronous - gate commands are enqueued to a worker task.
+    pub fn process_event(&mut self, event: ParsedEvent) {
         let process_start = Instant::now();
 
         match event.event_type {
-            EventType::TrackCreate => {
-                self.handle_track_create(&event);
-            }
-            EventType::TrackDelete => {
-                self.handle_track_delete(&event);
-            }
-            EventType::ZoneEntry => {
-                self.handle_zone_entry(&event).await;
-            }
-            EventType::ZoneExit => {
-                self.handle_zone_exit(&event);
-            }
-            EventType::LineCrossForward => {
-                self.handle_line_cross(&event, "forward");
-            }
-            EventType::LineCrossBackward => {
-                self.handle_line_cross(&event, "backward");
-            }
-            EventType::DoorStateChange(status) => {
-                self.handle_door_state_change(status);
-            }
-            EventType::AccEvent(ip) => {
-                self.handle_acc_event(&ip, event.received_at).await;
-            }
-            EventType::Unknown(_) => {}
+            EventType::TrackCreate => self.handle_track_create(&event),
+            EventType::TrackDelete => self.handle_track_delete(&event),
+            EventType::ZoneEntry => self.handle_zone_entry(&event),
+            EventType::ZoneExit => self.handle_zone_exit(&event),
+            EventType::LineCrossForward => self.handle_line_cross(&event, "forward"),
+            EventType::LineCrossBackward => self.handle_line_cross(&event, "backward"),
+            EventType::AccEvent(ip) => self.handle_acc_event(&ip, event.received_at),
+            // Door state comes via watch channel, not event channel
+            EventType::DoorStateChange(_) | EventType::Unknown(_) => {}
         }
 
-        // Record processing latency (lock-free)
         let latency_us = process_start.elapsed().as_micros() as u64;
         self.metrics.record_event_processed(latency_us);
+
+        // Update track counts for Prometheus/MQTT metrics (non-blocking atomic stores)
+        self.metrics.set_active_tracks(self.active_tracks());
+        self.metrics.set_authorized_tracks(self.authorized_tracks());
     }
 
     /// Get current active track count

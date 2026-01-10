@@ -11,13 +11,20 @@ use crate::io::{
     AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload,
     ZoneEventPayload,
 };
-use crate::services::gate::GateCommand;
+use crate::services::gate_worker::GateCmd;
 use crate::services::stitcher::StitchMatch;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
 /// Xovis GROUP track bit - track IDs with this bit set are group aggregates, not individuals
 const XOVIS_GROUP_BIT: i64 = 0x80000000;
+
+/// Check if a track ID represents a Xovis GROUP aggregate (not an individual person)
+#[inline]
+fn is_group_track(track_id: TrackId) -> bool {
+    track_id.0 & XOVIS_GROUP_BIT != 0
+}
 
 impl Tracker {
     /// Handle a new track being created by the sensor
@@ -29,8 +36,7 @@ impl Tracker {
     pub(crate) fn handle_track_create(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks - they represent aggregates, not individual people
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             debug!(track_id = %track_id, "skipping_group_track");
             return;
         }
@@ -41,18 +47,32 @@ impl Tracker {
         // If the track appears in a zone (geometry_id present), it might be spawned
         // True spawn detection happens later (no STORE zone, no ENTRY line), but we enable
         // relaxed height matching here for all track creates to help catch re-detections
-        let zone_context = event.geometry_id.map(|gid| self.config.zone_name(gid));
-        let current_zone = zone_context.as_deref();
-        let spawn_hint = current_zone.is_some_and(|z| z.starts_with("POS_"));
+        let current_zone: Option<Arc<str>> =
+            event.geometry_id.map(|gid| self.config.zone_name(gid));
+        let spawn_hint = current_zone.as_deref().is_some_and(|z| z.starts_with("POS_"));
+
+        // Fresh store entry: track appears in STORE zone = new customer from store side.
+        // Don't stitch these to pending tracks - they're starting a fresh journey.
+        let is_fresh_store_entry = current_zone.as_deref() == Some("STORE");
 
         // Try to find a stitch candidate with spawn-hint context
         // When spawn_hint is true and pending was in POS zone, uses:
         // - 15cm height tolerance (vs 10cm base)
         // - 10s time window if same zone (vs 8s)
         // - 190cm distance if same zone (vs 180cm base)
-        if let Some(stitch) =
-            self.stitcher.find_match_with_context(event.position, current_zone, spawn_hint)
-        {
+        // Skip stitch attempt entirely for fresh store entries.
+        let stitch_match = if is_fresh_store_entry {
+            debug!(track_id = %track_id, "skip_stitch_fresh_store_entry");
+            None
+        } else {
+            self.stitcher.find_match_with_context(
+                event.position,
+                current_zone.as_deref(),
+                spawn_hint,
+            )
+        };
+
+        if let Some(stitch) = stitch_match {
             let StitchMatch { mut person, time_ms, distance_cm } = stitch;
             self.metrics.record_stitch_matched();
             self.metrics.record_stitch_distance(distance_cm as u64);
@@ -63,7 +83,7 @@ impl Tracker {
             person.track_id = track_id;
             person.last_position = event.position;
 
-            info!(
+            debug!(
                 new_track_id = %track_id,
                 old_track_id = %old_track_id,
                 authorized = %person.authorized,
@@ -172,8 +192,7 @@ impl Tracker {
     pub(crate) fn handle_track_delete(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             return;
         }
 
@@ -185,10 +204,12 @@ impl Tracker {
                 person.last_position = event.position;
             }
 
-            let last_zone =
-                person.current_zone.map(|id| self.config.zone_name(id)).unwrap_or_default();
+            let last_zone: String = person
+                .current_zone
+                .map(|id| self.config.zone_name(id).to_string())
+                .unwrap_or_default();
 
-            info!(
+            debug!(
                 track_id = %track_id,
                 authorized = %person.authorized,
                 dwell_ms = %person.accumulated_dwell_ms,
@@ -237,9 +258,21 @@ impl Tracker {
             }
             self.journey_manager.end_journey(track_id, outcome);
 
-            // Add to stitcher for potential re-connection (with zone context)
-            let last_zone_name = if last_zone.is_empty() { None } else { Some(last_zone.clone()) };
-            self.stitcher.add_pending(person, event.position, last_zone_name);
+            // Add to stitcher ONLY for genuinely lost tracks (sensor gap).
+            // Don't stitch when:
+            // - Completed: exited via gate, they're gone
+            // - ReturnedToStore: walked into store, can't verify identity of returning track
+            // The reentry_detector handles proper re-entry matching by height for store returns.
+            if outcome == JourneyOutcome::Lost {
+                let last_zone_name = if last_zone.is_empty() { None } else { Some(last_zone) };
+                self.stitcher.add_pending(person, event.position, last_zone_name);
+            } else {
+                debug!(
+                    track_id = %track_id,
+                    outcome = %outcome.as_str(),
+                    "skip_stitch_not_lost"
+                );
+            }
         }
     }
 
@@ -248,11 +281,10 @@ impl Tracker {
     /// Special handling for:
     /// - POS zones: start dwell timer
     /// - Gate zone (when authorized): send gate open command
-    pub(crate) async fn handle_zone_entry(&mut self, event: &ParsedEvent) {
+    pub(crate) fn handle_zone_entry(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             return;
         }
 
@@ -288,11 +320,12 @@ impl Tracker {
                 site: None,
                 tid: track_id.0,
                 t: "zone_entry".to_string(),
-                z: Some(zone.clone()),
+                z: Some(zone.to_string()),
                 ts,
                 auth: person.authorized,
                 dwell_ms: None,
                 total_dwell_ms: Some(person.accumulated_dwell_ms),
+                event_time: Some(event.event_time),
             });
         }
 
@@ -305,7 +338,7 @@ impl Tracker {
         } else if geometry_id == self.config.gate_zone() {
             // Gate zone - check authorization and send command or blocked event
             if authorized && !gate_already_opened {
-                self.send_gate_open_command(track_id, ts, "tracker", event.received_at).await;
+                self.send_gate_open_command(track_id, ts, "tracker", event.received_at);
             } else if !authorized {
                 // Emit gate blocked event for TUI visibility
                 info!(
@@ -314,13 +347,12 @@ impl Tracker {
                     "gate_entry_not_authorized"
                 );
                 if let Some(ref sender) = self.egress_sender {
-                    sender.send_gate_state(GateStatePayload {
-                        site: None,
+                    sender.send_gate_state(GateStatePayload::new(
                         ts,
-                        state: "blocked".to_string(),
-                        tid: Some(track_id.0),
-                        src: "tracker".to_string(),
-                    });
+                        "blocked",
+                        Some(track_id.0),
+                        "tracker",
+                    ));
                 }
             }
         }
@@ -332,8 +364,7 @@ impl Tracker {
     pub(crate) fn handle_zone_exit(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             return;
         }
 
@@ -401,11 +432,12 @@ impl Tracker {
                 site: None,
                 tid: track_id.0,
                 t: "zone_exit".to_string(),
-                z: Some(zone.clone()),
+                z: Some(zone.to_string()),
                 ts,
                 auth: person.authorized,
                 dwell_ms: zone_dwell_ms,
                 total_dwell_ms: Some(person.accumulated_dwell_ms),
+                event_time: Some(event.event_time),
             });
         }
 
@@ -420,8 +452,7 @@ impl Tracker {
     pub(crate) fn handle_line_cross(&mut self, event: &ParsedEvent, direction: &str) {
         let track_id = event.track_id;
 
-        // Skip Xovis GROUP tracks
-        if track_id.0 & XOVIS_GROUP_BIT != 0 {
+        if is_group_track(track_id) {
             return;
         }
 
@@ -462,7 +493,7 @@ impl Tracker {
                     journey.crossed_entry = true;
                 }
             } else if direction == "backward" {
-                info!(
+                debug!(
                     track_id = %track_id,
                     "entry_line_backward_returning_to_store"
                 );
@@ -514,35 +545,24 @@ impl Tracker {
     }
 
     /// Handle door state change from RS485 monitor
-    ///
-    /// Correlates door open events with recent gate commands.
     pub(crate) fn handle_door_state_change(&mut self, status: DoorStatus) {
         info!(door_status = %status.as_str(), "door_state_change");
 
-        // Update Prometheus gate state metric
         let state_value = match status {
             DoorStatus::Open => GATE_STATE_OPEN,
-            DoorStatus::Closed => GATE_STATE_CLOSED,
             DoorStatus::Moving => GATE_STATE_MOVING,
-            DoorStatus::Unknown => GATE_STATE_CLOSED, // Default to closed for unknown
+            DoorStatus::Closed | DoorStatus::Unknown => GATE_STATE_CLOSED,
         };
         self.metrics.set_gate_state(state_value);
 
         // Publish gate state change to MQTT
         if let Some(ref sender) = self.egress_sender {
-            let state = match status {
-                DoorStatus::Open => "open",
-                DoorStatus::Closed => "closed",
-                DoorStatus::Moving => "moving",
-                DoorStatus::Unknown => "unknown",
-            };
-            sender.send_gate_state(GateStatePayload {
-                site: None,
-                ts: epoch_ms(),
-                state: state.to_string(),
-                tid: self.door_correlator.last_gate_cmd_track_id().map(|t| t.0),
-                src: "rs485".to_string(),
-            });
+            sender.send_gate_state(GateStatePayload::new(
+                epoch_ms(),
+                status.as_str(),
+                self.door_correlator.last_gate_cmd_track_id().map(|t| t.0),
+                "rs485",
+            ));
         }
 
         // Correlate door state with recent gate commands
@@ -554,7 +574,7 @@ impl Tracker {
     /// The ip is the peer IP address of the ACC terminal connection.
     /// It's mapped to a POS zone via the ip_to_pos config.
     /// If a group is detected (co-presence), all group members are authorized.
-    pub(crate) async fn handle_acc_event(&mut self, ip: &str, received_at: Instant) {
+    pub(crate) fn handle_acc_event(&mut self, ip: &str, received_at: Instant) {
         let ts = epoch_ms();
 
         // Look up POS zone from IP
@@ -611,6 +631,17 @@ impl Tracker {
             }
         }
 
+        // Set ACC group size and member track IDs on all matched journeys (for Command display)
+        let group_size = matched_tracks.len() as u8;
+        if group_size > 1 {
+            for &track_id in &matched_tracks {
+                if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+                    journey.acc_group_size = group_size;
+                    journey.acc_group_tids = matched_tracks.iter().copied().collect();
+                }
+            }
+        }
+
         let gate_zone = self.config.gate_zone();
         let gate_zone_name = self.config.zone_name(gate_zone);
         for &track_id in &matched_tracks {
@@ -621,7 +652,7 @@ impl Tracker {
                     .rev()
                     .find(|e| {
                         e.t == JourneyEventType::ZoneEntry
-                            && e.z.as_deref() == Some(gate_zone_name.as_str())
+                            && e.z.as_deref() == Some(&*gate_zone_name)
                     })
                     .map(|e| e.ts);
                 if let Some(entry_ts) = gate_entry_ts {
@@ -651,7 +682,7 @@ impl Tracker {
                                     .persons
                                     .get(&track_id)
                                     .map(|p| p.accumulated_dwell_ms),
-                                gate_zone: Some(gate_zone_name.clone()),
+                                gate_zone: Some(gate_zone_name.to_string()),
                                 gate_entry_ts: Some(entry_ts),
                                 delta_ms: Some(delta_ms),
                                 gate_cmd_at: journey.gate_cmd_at,
@@ -671,7 +702,7 @@ impl Tracker {
             let gate_already_opened =
                 self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
             if in_gate_zone && !gate_already_opened {
-                self.send_gate_open_command(track_id, ts, "acc", received_at).await;
+                self.send_gate_open_command(track_id, ts, "acc", received_at);
             }
         }
 
@@ -713,7 +744,7 @@ impl Tracker {
                     .iter()
                     .map(|(tid, p)| AccDebugTrack {
                         tid: tid.0,
-                        zone: p.current_zone.map(|z| self.config.zone_name(z)),
+                        zone: p.current_zone.map(|z| self.config.zone_name(z).to_string()),
                         dwell_ms: p.accumulated_dwell_ms,
                         auth: p.authorized,
                     })
@@ -763,130 +794,121 @@ impl Tracker {
         }
     }
 
-    /// Send gate open command and record E2E latency
+    /// Enqueue gate open command to worker and record E2E latency
     ///
     /// `received_at` is when the triggering event was received (zone entry or ACC).
-    /// This allows us to measure the full E2E latency from event reception to gate command.
-    async fn send_gate_open_command(
+    /// This allows us to measure the full E2E latency from event reception to command enqueue.
+    ///
+    /// This method returns immediately after enqueueing - the actual network I/O
+    /// is handled by the GateCmdWorker task asynchronously.
+    ///
+    /// State/metrics are only updated on successful enqueue to avoid recording
+    /// commands that were dropped due to channel full.
+    fn send_gate_open_command(
         &mut self,
         track_id: TrackId,
         ts: u64,
         src: &str,
         received_at: Instant,
     ) {
-        let cmd_latency_us = self.gate.send_open_command(track_id).await;
-        self.metrics.record_gate_command();
+        // Enqueue command to worker - never blocks on network I/O
+        let cmd = GateCmd { track_id, enqueued_at: Instant::now() };
+        match self.gate_cmd_tx.try_send(cmd) {
+            Ok(()) => {
+                // Record E2E gate latency only on successful enqueue
+                let e2e_latency_us = received_at.elapsed().as_micros() as u64;
+                self.metrics.record_gate_latency(e2e_latency_us);
+                self.metrics.record_gate_command();
 
-        // Record E2E gate latency (from event received to command queued)
-        let e2e_latency_us = received_at.elapsed().as_micros() as u64;
-        self.metrics.record_gate_latency(e2e_latency_us);
+                // Update journey state
+                if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+                    journey.gate_cmd_at = Some(ts);
+                }
+                self.journey_manager.add_event(
+                    track_id,
+                    JourneyEvent::new(JourneyEventType::GateCmd, ts)
+                        .with_extra(&format!("e2e_us={e2e_latency_us}")),
+                );
 
-        if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
-            journey.gate_cmd_at = Some(ts);
+                // Emit state for TUI and record for door correlation
+                if let Some(ref sender) = self.egress_sender {
+                    sender.send_gate_state(GateStatePayload::new(
+                        ts,
+                        "cmd_enqueued",
+                        Some(track_id.0),
+                        src,
+                    ));
+                }
+                self.door_correlator.record_gate_cmd(track_id);
+            }
+            Err(e) => {
+                // Command dropped - gate won't open for this customer
+                self.metrics.record_gate_cmd_dropped();
+                warn!(track_id = %track_id, error = %e, "gate_cmd_enqueue_failed");
+
+                // Emit dropped state for TUI visibility
+                if let Some(ref sender) = self.egress_sender {
+                    sender.send_gate_state(GateStatePayload::new(
+                        ts,
+                        "cmd_dropped",
+                        Some(track_id.0),
+                        src,
+                    ));
+                }
+            }
         }
-        self.journey_manager.add_event(
-            track_id,
-            JourneyEvent::new(JourneyEventType::GateCmd, ts)
-                .with_extra(&format!("cmd_us={cmd_latency_us},e2e_us={e2e_latency_us}")),
-        );
-
-        if let Some(ref sender) = self.egress_sender {
-            sender.send_gate_state(GateStatePayload {
-                site: None,
-                ts,
-                state: "cmd_sent".to_string(),
-                tid: Some(track_id.0),
-                src: src.to_string(),
-            });
-        }
-
-        self.door_correlator.record_gate_cmd(track_id);
     }
 
     /// Determine the journey outcome when a track is deleted
     ///
-    /// Returns a tuple of:
-    /// - `JourneyOutcome`: The outcome classification
-    /// - `bool`: Whether the exit was inferred (track lost in exit corridor)
-    ///
-    /// Outcomes:
-    /// - `ReturnedToStore` if person went back into store (POS zone, STORE zone, or backward entry cross)
-    /// - `Completed` if person was in exit corridor (approach cross + gate zone exit, no exit cross)
-    /// - `Lost` if person disappeared near gate/exit area without clear exit signal
+    /// Returns (outcome, exit_inferred) where exit_inferred is true if track was lost in exit corridor.
     fn determine_journey_outcome(
         &self,
         track_id: TrackId,
         person: &Person,
         last_zone: &str,
     ) -> (JourneyOutcome, bool) {
-        // Check journey events for backward entry line crossing
+        // Check journey events for backward entry line crossing or exit corridor pattern
         if let Some(journey) = self.journey_manager.get_any(track_id) {
-            // Look for backward entry line crossing - strong signal they returned to store
-            for event in journey.events.iter().rev() {
-                if event.t == JourneyEventType::EntryCross {
-                    if let Some(extra) = &event.extra {
-                        if extra.contains("dir=backward") {
-                            info!(
-                                track_id = %track_id,
-                                "journey_returned_backward_entry"
-                            );
-                            return (JourneyOutcome::ReturnedToStore, false);
-                        }
-                    }
-                }
+            // Backward entry crossing = strong signal they returned to store
+            let has_backward_entry = journey.events.iter().rev().any(|e| {
+                e.t == JourneyEventType::EntryCross
+                    && e.extra.as_ref().is_some_and(|x| x.contains("dir=backward"))
+            });
+
+            if has_backward_entry {
+                debug!(track_id = %track_id, "journey_returned_backward_entry");
+                return (JourneyOutcome::ReturnedToStore, false);
             }
 
-            // Check for exit corridor: approach forward + gate zone + no exit cross yet
-            // This indicates person was heading to exit and got lost in the corridor
+            // Exit corridor pattern: approach forward + gate zone + no exit cross
             let has_approach_forward = journey.events.iter().any(|e| {
                 e.t == JourneyEventType::ApproachCross
                     && e.extra.as_ref().is_some_and(|x| x.contains("dir=forward"))
             });
-
             let has_exit_cross = journey.events.iter().any(|e| e.t == JourneyEventType::ExitCross);
-
             let in_gate_area = last_zone.to_uppercase().contains("GATE");
 
             if has_approach_forward && in_gate_area && !has_exit_cross {
-                info!(
-                    track_id = %track_id,
-                    zone = %last_zone,
-                    authorized = %person.authorized,
-                    "journey_exit_inferred"
-                );
+                debug!(track_id = %track_id, zone = %last_zone, "journey_exit_inferred");
                 return (JourneyOutcome::Completed, true);
             }
         }
 
-        // Check last zone - if in POS or STORE area, they went back to shopping
-        if let Some(zone_id) = person.current_zone {
-            if self.config.is_pos_zone(zone_id.0) {
-                info!(
-                    track_id = %track_id,
-                    zone = %last_zone,
-                    "journey_returned_pos_zone"
-                );
-                return (JourneyOutcome::ReturnedToStore, false);
-            }
-        }
-
-        // Check zone name for STORE indication
-        let zone_upper = last_zone.to_uppercase();
-        if zone_upper.contains("STORE") || zone_upper.contains("SHOPPING") {
-            info!(
-                track_id = %track_id,
-                zone = %last_zone,
-                "journey_returned_store_zone"
-            );
+        // In POS zone = returned to shopping
+        if person.current_zone.is_some_and(|z| self.config.is_pos_zone(z.0)) {
+            debug!(track_id = %track_id, zone = %last_zone, "journey_returned_pos_zone");
             return (JourneyOutcome::ReturnedToStore, false);
         }
 
-        // If near gate/exit or unknown, consider it lost
-        info!(
-            track_id = %track_id,
-            zone = %last_zone,
-            "journey_lost"
-        );
+        // Zone name indicates store area = returned to shopping
+        let zone_upper = last_zone.to_uppercase();
+        if zone_upper.contains("STORE") || zone_upper.contains("SHOPPING") {
+            debug!(track_id = %track_id, zone = %last_zone, "journey_returned_store_zone");
+            return (JourneyOutcome::ReturnedToStore, false);
+        }
+
+        debug!(track_id = %track_id, zone = %last_zone, "journey_lost");
         (JourneyOutcome::Lost, false)
     }
 }

@@ -932,6 +932,17 @@ defmodule AveroCommandWeb.JourneyFeedLive do
             <span class="font-mono font-semibold text-gray-900 tabular-nums">
               #<%= @journey.person_id %>
             </span>
+            <%= if is_stitched?(@journey) do %>
+              <span class="px-1 py-0.5 text-[10px] font-medium rounded bg-purple-100 text-purple-700" title="Track stitched">
+                🔗
+              </span>
+            <% end %>
+            <%= if @journey.member_count > 1 do %>
+              <% other_members = Enum.reject(@journey.group_member_ids || [], &(&1 == @journey.person_id)) %>
+              <span class="px-1 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700" title={"ACC group with ##{Enum.join(other_members, ", #")}"}>
+                👥 w/ <%= Enum.map_join(other_members, ", ", &"##{&1}") %>
+              </span>
+            <% end %>
             <.payment_status
               authorized={@journey.authorized}
               payment_zone={@journey.payment_zone}
@@ -1021,6 +1032,13 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     has_pos_stop = journey.total_pos_dwell_ms != nil and journey.total_pos_dwell_ms >= @min_dwell_ms
     # Quick = no meaningful POS stop AND not authorized
     not has_pos_stop and journey.authorized != true
+  end
+
+  # Check if journey had track stitching (track ID changed mid-journey)
+  defp is_stitched?(journey) do
+    Enum.any?(journey.events || [], fn event ->
+      event["type"] == "stitch"
+    end)
   end
 
   # Timing summary shown in expanded view
