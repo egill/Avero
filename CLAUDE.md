@@ -53,6 +53,13 @@ rsync -avz --exclude target --exclude .git ./ avero@HOST:~/gateway-poc/
 ssh avero@HOST "cd ~/gateway-poc && cargo build --release"
 ```
 
+### Deployment Hosts
+
+| Site | SSH Host | CloudPlus TCP | RS485 |
+|------|----------|---------------|-------|
+| Netto | `avero@100.80.187.3` | `10.120.48.9:8000` | `/dev/ttyAMA4` |
+| Avero HQ | `avero@100.65.110.63` | `192.168.0.245:8000` | `/dev/ttyAMA4` |
+
 ### Deployment
 
 ```bash

@@ -1,3 +1,0 @@
-All 44 user stories have been implemented and verified. Every story in `prd.json` now has `passes: true`.
-
-<promise>COMPLETE</promise>

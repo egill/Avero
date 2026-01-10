@@ -1,412 +1,132 @@
-# Ralph Progress Log - Test Coverage Analysis
-Started: 2026-01-08
+# Ralph Progress Log - Performance Fixes
+Started: 2026-01-10
+Branch: ralph/perf-fixes
 
 ---
 
-## Deployment Log
+## Codebase Patterns (READ FIRST!)
 
-### 2026-01-08 10:27:54 UTC - Gate Correlation Fix Deployed (netto-grandi)
+### Channel Selection Guide
+| Data Type | Channel | Reason |
+|-----------|---------|--------|
+| Events (MQTT/ACC) | mpsc + try_send | High volume, drops acceptable |
+| Door state (RS485) | watch | Stateful, latest value matters, lossless |
+| Gate commands | mpsc to worker | Decouples from tracker, worker owns network I/O |
+| Journey egress | mpsc to writer | Decouples from tracker, writer owns file I/O |
 
-**Issue**: Gate latency showing 2-3 seconds instead of expected ~250ms
+### Non-Blocking Pattern
+```rust
+// BAD: blocks caller
+event_tx.send(event).await?;
 
-**Root Cause**: Old binary (`gateway-poc-bin` from Jan 7 19:52) correlated on `Moving` state,
-which happens TWICE per door cycle (opening AND closing). The 2-3s "latency" was actually
-measuring from gate_cmd to door CLOSING, not opening.
-
-**Fix**: Deployed newer binary (Jan 7 23:17) that correlates on `Open` state instead.
-
-**Change**: `gate_moving_correlated` → `gate_open_correlated`
-
-**Expected Result**: Gate latency should now show actual door open time (~250-600ms)
-
-**Data Analysis**: Compare journeys before vs after 10:27:54 UTC to verify improvement.
-
-### 2026-01-08 10:45:54 UTC - ACC Dwell Matching Fix Deployed (netto-grandi)
-
-**Issue**: ACC events not matching customers who had sufficient session dwell but 0 accumulated dwell
-
-**Root Cause**: Commit 59ad8ab introduced a bug - `members_with_sufficient_dwell()` used accumulated_dwell_ms
-exclusively, but accumulated_dwell_ms only updates on POS zone EXIT. While IN a zone, it stays at 0 (or
-previous value). So customers with 90s+ session dwell in a POS zone weren't matching because accumulated=0.
-
-**Symptom**: Logs showed `acc_group_exists_but_no_qualified_members` with `dwells_ms=[(track, 90058, Some(0))]`
-meaning 90s session dwell but 0 accumulated.
-
-**Fix**: Use MAX(session_dwell, accumulated_dwell) instead of just accumulated_dwell.
-- session_dwell handles "still in zone" case (accumulated hasn't updated yet)
-- accumulated_dwell handles zone flicker (re-entry after brief exit)
-
-**Change**: `members_with_sufficient_dwell()` now computes `effective_dwell = session_dwell.max(accumulated)`
-
-**Expected Result**: ACC events should match customers who are currently in POS zone with sufficient time.
-
----
-
-## Test Gap Analysis Summary
-
-Analysis Date: 2026-01-08
-Current Test Count: ~100 tests
-Overall Coverage: ~35% (estimated by module analysis)
-
-### Coverage by Layer
-
-| Layer | Tests | Coverage | Risk Level |
-|-------|-------|----------|------------|
-| Domain | 12 | ~40% | Medium |
-| Services | 55 | ~60% | High |
-| IO | 22 | ~20% | CRITICAL |
-| Infrastructure | 18 | ~10% | CRITICAL |
-
-### Zero-Test Modules (CRITICAL)
-
-1. `io/acc_listener.rs` - Accepts untrusted network input from payment terminals
-2. `io/egress_channel.rs` - Data pipeline to cloud
-3. `io/mqtt_egress.rs` - MQTT publishing with QoS levels
-4. `infra/broker.rs` - Embedded MQTT broker startup
-
-### Business Logic Boundaries Untested (CRITICAL)
-
-These time-sensitive boundaries determine customer authorization:
-
-| Boundary | Module | Value | Impact |
-|----------|--------|-------|--------|
-| ACC group window | acc_collector | 10s | Customers grouped for payment matching |
-| ACC recent exit | acc_collector | 1.5s | Authorization after leaving POS |
-| Stitch grace time | stitcher | 4.5s/8s | Track identity continuity |
-| Stitch distance | stitcher | 180cm/300cm | Spatial matching threshold |
-| Door correlation | door_correlator | 5s | Gate command matching |
-| Re-entry window | reentry_detector | 30s | Repeat visit linking |
-| Height tolerance | stitcher/reentry | 10cm | Person height matching |
-
-### Key Untested Scenarios
-
-1. **Gate Blocked**: Unauthorized customer enters gate zone - common in production
-2. **Chain Stitching**: Track A→B→C through multiple sensor gaps
-3. **GROUP Bit Filtering**: Xovis group tracks (0x80000000 bit) should be skipped
-4. **Re-entry Flow**: Customer exits and re-enters - journey should have parent reference
-5. **Config Silent Fallback**: Invalid config silently uses defaults - masks production issues
-
-### User Stories (US-001 to US-012)
-
-All priority 1 (testing category):
-
-- US-001: ACC Collector time boundary tests
-- US-002: Stitcher time and distance boundary tests
-- US-003: Door Correlator boundary tests
-- US-004: Re-entry Detection tests
-- US-005: Tracker edge case tests
-- US-006: ACC Listener unit tests
-- US-007: Egress Channel and MQTT Egress tests
-- US-008: Protocol error handling tests
-- US-009: Config validation tests
-- US-010: Broker startup tests
-- US-011: Domain type parsing tests
-- US-012: Journey Manager state tests
-- US-013: Barcode Fallback TDD tests (NEW)
-- US-014: Journey scenario pattern tests (NEW)
-
-### Barcode Fallback Feature (TDD)
-
-New feature to implement with tests first:
-- Receipt ID from ACC becomes barcode
-- 45-minute TTL, single use
-- Invalidated on physical exit (EXIT line cross)
-- If Xovis loses track, barcode scan still opens gate
-- API endpoint: POST /api/v1/barcode/scan (spec in ~/Documents/GitHub/Avero/docs/openapi.yaml)
-- Stats: generated, scanned, invalidated_by_exit (both totals + time-series)
-
-### Journey Patterns from TimescaleDB
-
-Production data analysis (1343 journeys):
-- **paid_exit** (782): entry_cross → POS dwell → ACC → gate_cmd → exit_cross
-- **unpaid_exit** (270): entry_cross → brief POS → backward entry_cross
-- **lost_unauthorized** (291): entry_cross → POS → tracking_lost
-
-Event counts: 4-138 events per journey, most have 10-20
-
-Key patterns to test:
-- Multiple entry crosses (forward/backward/forward)
-- Stitched journeys (pending → stitch → continue)
-- Re-entry journeys (reentry_from parent reference)
-- Mid-store spawn (track_create without entry_cross)
-- Multi-POS visits with accumulated dwell
-
-### Test Philosophy
-
-Focus on meaningful business logic tests, not coverage metrics:
-- Time boundary tests at critical authorization thresholds
-- State machine transitions for door/journey lifecycle
-- Error handling for network/protocol failures
-- Validation of config to prevent production misconfigurations
-
-Avoid:
-- Testing trivial getters/setters
-- Duplicating existing integration coverage
-- Tests that just exercise code without business value
-
----
-
-## Architecture Reference
-
-### Data Flow
-```
-Ingress → Processing → Egress
-
-Ingress:
-  - MQTT (Xovis sensor) → ParsedEvent
-  - RS485 (door state) → DoorStateChange
-  - ACC TCP (payment terminal) → AccEvent
-
-Processing (Tracker):
-  - Person state management
-  - Stitcher: track identity across gaps
-  - JourneyManager: journey lifecycle
-  - DoorCorrelator: gate command ↔ door state
-  - AccCollector: payment event correlation
-
-Egress:
-  - JSONL file (journeys)
-  - MQTT (events, metrics)
-  - Prometheus HTTP
+// GOOD: returns immediately, tracks drops
+match event_tx.try_send(event) {
+    Ok(()) => {},
+    Err(TrySendError::Full(_)) => {
+        metrics.events_dropped.fetch_add(1, Ordering::Relaxed);
+        if last_warn.elapsed() > Duration::from_secs(1) {
+            warn!("event dropped: channel full");
+            last_warn = Instant::now();
+        }
+    }
+    Err(TrySendError::Disconnected(_)) => return,
+}
 ```
 
-### Key Modules
+### Watch Channel for Stateful Data
+```rust
+// RS485 door state - latest value always available
+let (door_tx, door_rx) = watch::channel(DoorStatus::Unknown);
 
-| Module | Purpose | Test Status |
-|--------|---------|-------------|
-| tracker/ | Central orchestrator | Good coverage, edge cases missing |
-| acc_collector | Payment matching | Time boundaries untested |
-| stitcher | Track identity | Distance/time boundaries untested |
-| door_correlator | Gate state matching | Window boundary untested |
-| journey_manager | Journey lifecycle | Chain stitching untested |
-| config | TOML loading | Validation untested |
-| acc_listener | TCP protocol | ZERO tests |
-| egress_channel | Data pipeline | ZERO tests |
-| broker | MQTT broker | ZERO tests |
+// Sender (RS485 monitor): never blocks, never fails
+door_tx.send_replace(new_status);
+
+// Receiver (Tracker): get latest, never blocks
+let status = *door_rx.borrow();
+```
+
+### Worker Task Pattern
+```rust
+// Create channel and spawn worker
+let (cmd_tx, cmd_rx) = mpsc::channel(64);
+let worker = GateCmdWorker::new(gate_controller, cmd_rx, metrics);
+tokio::spawn(async move { worker.run().await });
+
+// In tracker: enqueue and return immediately
+cmd_tx.try_send(GateCmd { track_id, received_at }).ok();
+```
+
+### Metrics Patterns
+- Use `AtomicU64` for lock-free counters
+- Add per-source drop counters: `mqtt_events_dropped`, `acc_events_dropped`, `gate_cmds_dropped`
+- Queue depth: sample channel len() periodically or wrap in Arc
+- Latency: record timestamp at enqueue, measure delta at processing
+
+### Key Files
+| File | Purpose | Changes Needed |
+|------|---------|----------------|
+| `src/services/tracker/handlers.rs:770` | Gate command logic | Enqueue instead of await |
+| `src/services/tracker/mod.rs:83` | Main event loop | Add watch receiver for door state |
+| `src/services/gate_worker.rs` (NEW) | Gate command worker | Owns GateController, measures latency |
+| `src/io/mqtt.rs:60` | MQTT client | try_send + drop counter |
+| `src/io/acc_listener.rs` | ACC listener | try_send + drop counter |
+| `src/io/rs485.rs` | Door state monitor | watch channel instead of mpsc |
+| `src/io/cloudplus.rs:579` | TCP gate queue | try_send with explicit error |
+| `src/io/egress.rs` | Journey writer | Async worker, spawn_blocking |
+| `src/infra/metrics.rs` | Metrics | Add drop counters, queue depth |
+
+### Problem Context
+The tracker loop blocks on network I/O:
+1. `send_gate_open_command` awaits TCP (up to 5s timeout)
+2. MQTT/ACC use `send().await` (blocks if tracker slow)
+3. RS485 uses mpsc + try_send (drops door state on full channel)
+
+Consequences:
+- Gate commands arrive late ("gate open too late")
+- MQTT eventloop stalls → missed keepalives → disconnects
+- Door state can be lost, breaking correlation
+
+### Solution Architecture
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        INGRESS                               │
+├─────────────────────────────────────────────────────────────┤
+│  MQTT ──try_send──> │                                        │
+│  ACC  ──try_send──> │  event_rx (mpsc, 1000 capacity)        │
+│                     │                                        │
+│  RS485 ──watch───> door_rx (watch, always latest)            │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       TRACKER                                │
+│  - Receives events from event_rx                            │
+│  - Reads door state from door_rx.borrow()                   │
+│  - Enqueues gate commands to gate_cmd_tx (never awaits)     │
+│  - Enqueues journeys to egress_tx (never awaits)            │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       WORKERS                                │
+├─────────────────────────────────────────────────────────────┤
+│  GateCmdWorker: gate_cmd_rx → gate.send_open_command()      │
+│    - Measures queue delay + send latency                    │
+│    - Updates metrics                                        │
+│                                                             │
+│  EgressWriter: egress_rx → spawn_blocking file write        │
+│    - Batches journeys                                       │
+│    - Flushes on count or timer                              │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Completed Work
+## Completed Stories
 
-## 2026-01-07 - US-007 - Add Vec::with_capacity to hot-path allocations
-- Files changed: src/io/mqtt.rs, src/domain/journey.rs
-- **Learnings:**
-  - `Vec::with_capacity(n)` pre-allocates memory, avoiding reallocations during push operations
-  - Use for Vecs where typical size is known: mqtt events ~8, journey events ~16
-  - Both `parse_xovis_message` and `parse_frame` get capacity(8) since typical frame has 0-10 events
-  - `Journey::new()` events get capacity(16) since typical journey has 5-15 events
+(none yet)
+
 ---
 
-## 2026-01-07 - US-008 - Add Copy derive to JourneyOutcome enum
-- Files changed: src/domain/journey.rs, src/services/journey_manager.rs
-- **Learnings:**
-  - Fieldless enums (no data in variants) can implement Copy for zero-cost pass-by-value
-  - Adding Copy to a type causes clippy to warn on unnecessary .clone() calls
-  - Clippy `clone_on_copy` lint catches this: `using clone on type which implements Copy`
-  - Found and removed `outcome.clone()` in journey_manager.rs:171
----
+## Story Progress
 
-## 2026-01-07 - US-009 - Implement FromStr trait for EventType
-- Files changed: src/domain/types.rs, src/io/mqtt.rs
-- **Learnings:**
-  - Implement `std::str::FromStr` trait instead of inherent `from_str` method for idiomatic Rust
-  - Use `std::convert::Infallible` as error type when parsing can never fail (e.g., returns Unknown variant for unmatched values)
-  - Call sites change from `EventType::from_str(s)` to `s.parse::<EventType>().unwrap()` or `s.parse().unwrap()` with type annotation
-  - With `Infallible` error type, `.unwrap()` is always safe and optimizes away
----
-
-## 2026-01-07 - US-010 - Add #[cold] attribute to error handling paths
-- Files changed: src/services/gate.rs, src/io/cloudplus.rs
-- **Learnings:**
-  - `#[cold]` attribute tells the compiler a function is unlikely to be called, helping optimize the hot path
-  - Extract error logging into dedicated `#[cold]` functions instead of inline error! macros
-  - Useful for error paths that should rarely execute: connection failures, read/write errors, timeouts
-  - Works best when the function is called from a single location, so the compiler can optimize the branch
-  - Use with `&(dyn std::error::Error + Send + Sync)` for generic error types that implement Display
----
-
-## 2026-01-08 - US-013 - Fix Box::leak memory leak in gate_test.rs
-- Files changed: src/bin/gate_test.rs
-- **Learnings:**
-  - `Box::leak()` converts `Box<T>` to `&'static T` by leaking the memory - use sparingly
-  - When storing strings in a Vec alongside results, use `Vec<(String, T)>` instead of `Vec<(&str, T)>`
-  - Pattern: `results.push((name, result))` instead of `results.push((Box::leak(name.into_boxed_str()), result))`
-  - For static string literals, use `.to_string()`: `results.push(("Test Name".to_string(), result))`
----
-
-## 2026-01-08 - US-011 - Add clippy.toml configuration
-- Files changed: clippy.toml (new), CLAUDE.md
-- **Learnings:**
-  - `clippy.toml` configures project-specific lint thresholds: https://doc.rust-lang.org/clippy/lint_configuration.html
-  - Key settings: `too-many-arguments-threshold` (default 7), `cognitive-complexity-threshold` (default 25)
-  - `trivial-copy-size-limit` controls when clippy suggests passing by value vs reference
-  - `type-complexity-threshold` controls when clippy warns about complex types
-  - Document the clippy.toml in CLAUDE.md for discoverability
----
-
-## 2026-01-08 - US-012 - Add rustfmt.toml configuration
-- Files changed: rustfmt.toml (new), CLAUDE.md, 24 source files reformatted
-- **Learnings:**
-  - `rustfmt.toml` configures code formatting: https://rust-lang.github.io/rustfmt/
-  - Key settings: `max_width` (default 100), `use_small_heuristics` (controls various width limits)
-  - `use_small_heuristics = "Max"` allows longer function signatures, array literals, etc.
-  - `edition = "2021"` should match the edition in Cargo.toml/rust-toolchain.toml
-  - Running `cargo fmt` after creating rustfmt.toml will reformat existing code to match new preferences
-  - Many files were reformatted due to `max_width = 100` vs default (often 80 in practice)
----
-
-## 2026-01-08 - US-014 - Consolidate CloudPlusClient locks into single state struct
-- Files changed: src/io/cloudplus.rs
-- **Learnings:**
-  - Consolidating multiple `Arc<Mutex<_>>` and `Arc<RwLock<_>>` into single state struct eliminates deadlock risk from inconsistent lock ordering
-  - Pattern: Create `CloudPlusState` struct with `#[derive(Default)]` containing all connection-related fields
-  - For stream halves (`ReadHalf`/`WriteHalf`) used concurrently, use `Option::take()` to transfer ownership to spawned tasks
-  - Loops can receive owned halves directly (`mut read_half: ReadHalf<TcpStream>`) instead of `Arc<Mutex<Option<...>>>`
-  - This simplifies the read/write loops by removing the lock acquisition on every iteration
-  - State access for flags like `request_mode` uses single lock: `state.lock().await.request_mode`
-  - Clippy lint `derivable_impls` catches when `impl Default` can be replaced with `#[derive(Default)]`
----
-
-## 2026-01-08 - US-015 - Add anyhow crate for better error handling
-- Files changed: Cargo.toml, Cargo.lock, src/infra/config.rs
-- **Learnings:**
-  - `anyhow::Result<T>` is shorthand for `Result<T, anyhow::Error>` - more ergonomic than `Result<T, String>`
-  - Use `.with_context(|| format!(...))` instead of `.map_err(|e| format!(...))` to add context while preserving the original error
-  - `with_context` takes a closure that lazily constructs the context string (only evaluated on error)
-  - `anyhow::Error` displays the full error chain when printed, making debugging easier
-  - Import `use anyhow::Context;` to get access to the `.context()` and `.with_context()` methods on `Result` types
----
-
-## 2026-01-08 - US-016 - Create TrackId newtype wrapper
-- Files changed: src/domain/types.rs, src/services/tracker/handlers.rs, src/services/stitcher.rs
-- **Learnings:**
-  - Newtype pattern uses `pub struct TypeName(pub InnerType);` with `#[repr(transparent)]` for zero-cost abstraction
-  - Required derives for ID newtypes: `Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize`
-  - Implement `std::fmt::Display` for newtypes used in tracing `%` format specifiers
-  - Phase-1 approach: update struct definition and its constructor, then fix call sites that create instances
-  - Extract inner value with `.0` when passing to APIs that still expect the raw type (e.g., `old_track_id.0`)
-  - Wrap raw values with `TrackId(value)` at construction/assignment sites
-  - Test assertions use the newtype: `assert_eq!(person.track_id, TrackId(100))`
----
-
-## 2026-01-08 - US-017 - Expand TrackId newtype to tracker module
-- Files changed: src/services/tracker/mod.rs, src/services/tracker/handlers.rs, src/services/tracker/tests.rs
-- **Learnings:**
-  - Change HashMap key type from `i64` to `TrackId`: `FxHashMap<TrackId, Person>`
-  - When inserting/getting from HashMap, wrap raw i64 with `TrackId(track_id)`
-  - When iterating, the key is now `TrackId`: use `(tid, p)` and extract raw value with `tid.0`
-  - Test imports need to include `TrackId` explicitly: `use crate::domain::types::{EventType, TrackId};`
-  - All HashMap access patterns updated: `.insert(TrackId(id), ...)`, `.get(&TrackId(id))`, `.get_mut(&TrackId(id))`, `.remove(&TrackId(id))`, `.entry(TrackId(id))`
----
-
-## 2026-01-08 - US-018 - Expand TrackId newtype to journey_manager
-- Files changed: src/services/journey_manager.rs, src/services/tracker/handlers.rs, src/services/tracker/tests.rs, src/services/door_correlator.rs, src/services/acc_collector.rs
-- **Learnings:**
-  - Update method signatures to take `TrackId` instead of `i64`: `pub fn new_journey(&mut self, track_id: TrackId)`
-  - Callers must wrap raw track_id with `TrackId(track_id)` when calling journey_manager methods
-  - When Journey still uses `i64` for `tids` (Vec<i64>), extract inner value with `.0` when needed: `journey.add_track_id(new_track_id.0)`
-  - For pending_egress iteration where `current_track_id()` returns `i64`, compare with `track_id.0`
-  - Other modules that use journey_manager (door_correlator, acc_collector) also need TrackId import and wrapping
-  - Tests in multiple modules need updating: `jm.new_journey(TrackId(100))`, `jm.get(TrackId(100))`
----
-
-## 2026-01-08 - US-019 - Expand TrackId newtype to remaining modules
-- Files changed: src/services/gate.rs, src/services/stitcher.rs, src/services/door_correlator.rs, src/services/acc_collector.rs, src/domain/journey.rs, src/domain/types.rs, src/services/tracker/handlers.rs, src/services/tracker/tests.rs, src/services/journey_manager.rs, src/io/mqtt.rs, src/io/rs485.rs, src/io/acc_listener.rs, src/io/egress.rs
-- **Learnings:**
-  - When ParsedEvent.track_id changes from `i64` to `TrackId`, avoid double-wrapping: use `event.track_id` directly (not `TrackId(event.track_id)`)
-  - For bitwise operations on newtype inner value: `track_id.0 & XOVIS_GROUP_BIT` (not `track_id & XOVIS_GROUP_BIT`)
-  - Struct fields that serialize to external APIs (e.g., JSON payloads with `tid: i64`) need `.0` to extract inner value
-  - HashMap key types must match: when function expects `HashMap<TrackId, u64>`, construct with `iter().map(|(tid, val)| (*tid, val))`
-  - Journey.tids changed to `Vec<TrackId>` - update `to_json()` to extract raw values: `self.tids.iter().map(|t| t.0).collect()`
-  - Test assertions need TrackId wrapper: `assert_eq!(journey.tids, vec![TrackId(100)])`
-  - I/O modules constructing ParsedEvent need `TrackId(track_id)` for new events, `TrackId(0)` for non-track events (e.g., door state changes)
----
-
-## 2026-01-08 - US-020 - Create GeometryId newtype wrapper
-- Files changed: src/domain/types.rs, src/io/mqtt.rs, src/services/tracker/handlers.rs, src/services/tracker/tests.rs
-- **Learnings:**
-  - Pattern matches US-016 (TrackId): `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]` with `#[repr(transparent)]`
-  - ParsedEvent.geometry_id becomes `Option<GeometryId>` - update construction: `attrs.geometry_id.map(GeometryId)`
-  - Person.current_zone also changed to `Option<GeometryId>` for consistency
-  - Config methods (`is_pos_zone()`, `zone_name()`, `gate_zone()`) and Metrics methods still expect `i32` - extract with `.0`
-  - Comparison patterns: `geometry_id.0 == self.config.gate_zone()` and `Some(geometry_id.0)` for Option comparisons
-  - Test helper functions keep `i32` parameter but wrap internally: `geometry_id.map(GeometryId)`
-  - Test assertions need newtype wrapper: `Some(GeometryId(1001))`
----
-
-## 2026-01-08 - US-021 - Replace Option<&String> with Option<&str> in acc_collector
-- Files changed: src/services/acc_collector.rs, src/services/tracker/handlers.rs
-- **Learnings:**
-  - Return `Option<&str>` instead of `Option<&String>` for more idiomatic Rust API
-  - Use `.map(|s| s.as_str())` to convert `Option<&String>` from HashMap lookup to `Option<&str>`
-  - Call sites using `.cloned()` on `Option<&String>` need to change to `.map(|s| s.to_string())` for `Option<&str>`
-  - Test assertions simplify: `Some("POS_1")` instead of `Some(&"POS_1".to_string())`
----
-
-## 2026-01-08 - US-022 - Add TryFrom for timestamp i64 to u64 conversion
-- Files changed: src/domain/types.rs
-- **Learnings:**
-  - `value as u64` on negative i64 silently wraps to large u64 (e.g., -1 becomes 18446744073709551615)
-  - Use `u64::try_from(value).unwrap_or(0)` for safe conversion that defaults to 0 for negative values
-  - No warning log added since timestamps should never be negative in normal operation
----
-
-## 2026-01-08 - US-023 - Add #[inline] to small hot-path functions
-- Files changed: src/domain/journey.rs, src/domain/types.rs
-- **Learnings:**
-  - `#[inline]` hints the compiler to inline small functions at call sites
-  - Good candidates: `epoch_ms()` (called throughout), `Person::new()`, `JourneyOutcome::as_str()`
-  - Place `#[inline]` attribute directly above the `pub fn` declaration
-  - No performance impact visible in tests, but helps release builds with LTO
----
-
-## 2026-01-08 - US-024 - Add smallvec for Journey.tids
-- Files changed: Cargo.toml, src/domain/journey.rs, src/services/journey_manager.rs
-- **Learnings:**
-  - SmallVec stores up to N elements inline (on stack) without heap allocation
-  - Type changed from `Vec<TrackId>` to `SmallVec<[TrackId; 4]>` - stores up to 4 track IDs inline
-  - Use `smallvec![]` macro in construction: `tids: smallvec![track_id]`
-  - For test assertions, use `.as_slice()` instead of `smallvec![]` to avoid type inference issues: `assert_eq!(tids.as_slice(), &[TrackId(100)])`
-  - Import both macro and type: `use smallvec::{smallvec, SmallVec};`
----
-
-## 2026-01-08 - US-025 - Add smallvec for DoorCorrelator.pending_cmds
-- Files changed: src/services/door_correlator.rs
-- **Learnings:**
-  - SmallVec works well for bounded collections: `pending_cmds` typically has 0-2 elements
-  - Type changed from `Vec<PendingGateCmd>` to `SmallVec<[PendingGateCmd; 2]>`
-  - Use `SmallVec::new()` instead of `smallvec![]` for empty initialization (avoids macro import)
-  - All Vec methods work the same: `.push()`, `.len()`, `.retain()`, `.iter()`, `.swap_remove()`
-  - No test changes needed since tests access the SmallVec through its standard API
----
-
-## 2026-01-08 - US-026 - Update Cargo.toml release profile with panic=abort
-- Files changed: Cargo.toml
-- **Learnings:**
-  - `panic = "abort"` in `[profile.release]` makes panics immediately terminate without unwinding
-  - Reduces binary size by removing unwinding tables and panic runtime
-  - Appropriate for embedded/embedded-like targets like RPi5 where clean shutdown is preferred over recovery
-  - Build with `cargo build --release` completes successfully with this setting
----
-
-## 2026-01-08 - US-027 - Add target-cpu optimization for RPi5
-- Files changed: .cargo/config.toml (new)
-- **Learnings:**
-  - `.cargo/config.toml` allows per-target compiler flags without modifying Cargo.toml
-  - `target-cpu=cortex-a76` enables RPi5-specific CPU optimizations for ARM Cortex-A76 cores
-  - Only affects cross-compilation to `aarch64-unknown-linux-gnu` target, not local builds
-  - File format: `[target.TRIPLE]\nrustflags = ["-C", "flag=value"]`
-  - Native builds on macOS/x86 are unaffected by this config
----
-
-## 2026-01-08 - US-029 - Use clap derive macro for CLI arguments
-- Files changed: src/main.rs, src/infra/config.rs
-- **Learnings:**
-  - clap with `features = ["derive"]` enables `#[derive(Parser)]` macro for declarative CLI args
-  - Add `use clap::Parser;` and create struct with `#[derive(Parser, Debug)]`
-  - Use `#[command(name = "...", version, about)]` for top-level options
-  - Use `#[arg(short, long, default_value = "...")]` for individual arguments
-  - Call `Args::parse()` to get parsed arguments
-  - Old manual parsing can be kept with `#[allow(dead_code)]` for backward compatibility with tests
-  - Add `Config::load_from_path()` method to accept parsed config path directly
----

@@ -1,266 +1,161 @@
 {
-  "branchPrefix": "ralph/",
+  "branchName": "ralph/perf-fixes",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add ACC Collector time boundary tests",
-      "category": "testing",
+      "title": "Decouple gate commands from tracker loop",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test GROUP_WINDOW_MS (10s): 9.99s grouped vs 10.01s separate",
-        "Test RECENT_EXIT_WINDOW (1.5s): 1.499s match vs 1.501s no match",
-        "Test POS empty condition blocks matching when occupied",
-        "Test newest exit selection when multiple recent exits exist",
-        "Test group member authorization propagates to all members",
-        "All tests pass"
+        "Gate command sends via spawned GateCmdWorker task",
+        "Tracker enqueues command and returns immediately (never awaits network)",
+        "Worker measures queue delay + send latency",
+        "Metrics updated: queue_delay_us, send_latency_us",
+        "Gate state payloads include timing info",
+        "All existing tests pass"
       ],
-      "instructions": "In services/acc_collector.rs tests, add boundary tests for GROUP_WINDOW_MS=10000 and recent exit window=1500ms. These are critical authorization timing boundaries. Use precise timestamps to test boundary behavior. Test that when ACC fires, all group members get authorized, not just the one with sufficient dwell.",
-      "priority": 1,
-      "estimatedMinutes": 45,
+      "instructions": "Create src/services/gate_worker.rs with GateCmdWorker that owns GateController. Add gate_cmd_tx: mpsc::Sender<GateCmd> to Tracker. send_gate_open_command becomes 'enqueue + record timestamp' and returns immediately. Worker does actual send_open_command, measures latency, updates metrics. Adjust src/main.rs to spawn worker.",
+      "files": ["src/services/tracker/handlers.rs", "src/services/gate_worker.rs (new)", "src/main.rs"],
+      "priority": 0,
       "passes": false,
-      "notes": "Critical: These time boundaries determine whether customers get authorized"
+      "notes": "CRITICAL: Primary cause of 'gate open too late'. Creates new gate_worker.rs module."
     },
     {
       "id": "US-002",
-      "title": "Add Stitcher time and distance boundary tests",
-      "category": "testing",
+      "title": "Make MQTT/ACC event sending non-blocking with drop metrics",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test base grace time: 4.499s (pass) vs 4.501s (fail)",
-        "Test POS zone grace time: 7.999s (pass) vs 8.001s (fail)",
-        "Test base distance: 179cm (pass) vs 181cm (fail)",
-        "Test same-zone distance: 299cm (pass) vs 301cm (fail)",
-        "Test height tolerance: 9.9cm (pass) vs 10.1cm (fail)",
-        "Test same-zone preference over closer non-zone match",
-        "All tests pass"
+        "MQTT uses try_send instead of send().await",
+        "ACC uses try_send instead of send().await",
+        "Dropped events counted per-source (mqtt_events_dropped, acc_events_dropped)",
+        "Warning logged on drop (rate-limited to 1/sec per source)",
+        "MQTT eventloop never stalls on tracker backpressure",
+        "All existing tests pass"
       ],
-      "instructions": "In services/stitcher.rs tests, add boundary tests for GRACE_TIME_MS=4500, POS_GRACE_TIME_MS=8000, MAX_DISTANCE_CM=180, SAME_ZONE_DISTANCE_CM=300, HEIGHT_TOLERANCE_CM=10. These determine track identity continuity. Verify POS zones get extended time window.",
-      "priority": 1,
-      "estimatedMinutes": 40,
+      "instructions": "In src/io/mqtt.rs:60 and src/io/acc_listener.rs, change send().await to try_send(). On TrySendError::Full, increment source-specific counter and log rate-limited warning. Add mqtt_events_dropped and acc_events_dropped AtomicU64 to Metrics.",
+      "files": ["src/io/mqtt.rs", "src/io/acc_listener.rs", "src/infra/metrics.rs"],
+      "priority": 0,
       "passes": false,
-      "notes": "Critical: Stitching determines if customer identity is preserved across sensor gaps"
+      "notes": "CRITICAL: MQTT stalls cause disconnects. Combined MQTT+ACC in one story since same pattern."
     },
     {
       "id": "US-003",
-      "title": "Add Door Correlator boundary tests",
-      "category": "testing",
+      "title": "RS485 door state: use watch channel for lossless delivery",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test correlation window: 4999ms (correlates) vs 5001ms (no correlation)",
-        "Test full door cycle: Closed → Moving → Open → Moving → Closed",
-        "Test Unknown door status handling",
-        "Test multiple rapid gate commands queued correctly",
-        "Test door re-opening within correlation window",
-        "All tests pass"
+        "RS485 uses tokio::sync::watch for door state (not mpsc)",
+        "Latest door state always available, never dropped",
+        "Tracker reads door state from watch receiver",
+        "Remove try_send failure path (watch never fails)",
+        "Cap read latency: reduce MAX_READ_ATTEMPTS or timeout",
+        "All existing tests pass"
       ],
-      "instructions": "In services/door_correlator.rs tests, add boundary test for CORRELATION_WINDOW_MS=5000. Add state machine tests for full door cycles. Test that flow track is preserved across the cycle and cleared on close.",
-      "priority": 1,
-      "estimatedMinutes": 35,
+      "instructions": "RS485 door state is stateful (latest value matters, not event stream). Replace mpsc channel with watch channel. RS485Monitor sends via watch::Sender. Tracker/DoorCorrelator receives via watch::Receiver. This ensures door state is never dropped. Also reduce MAX_READ_ATTEMPTS from 50 to 10 to cap stall time at ~500ms.",
+      "files": ["src/io/rs485.rs", "src/main.rs", "src/services/tracker/mod.rs"],
+      "priority": 0,
       "passes": false,
-      "notes": "Critical: Door correlation matches gate commands to actual door opens for metrics"
+      "notes": "CRITICAL: Door state is stateful - must be lossless. Watch channel guarantees latest value."
     },
     {
       "id": "US-004",
-      "title": "Add Re-entry Detection tests",
-      "category": "testing",
+      "title": "CloudPlus gate queue: try_send with explicit failure handling",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test time window: 29.99s (match) vs 30.01s (no match)",
-        "Test height tolerance: 9.9cm (match) vs 10.1cm (no match)",
-        "Test cleanup timing at 60s",
-        "Test best height match selection",
-        "Test graceful skip when person has no position data",
-        "All tests pass"
+        "send_open uses try_send instead of send().await",
+        "On queue full: log error, increment gate_cmd_dropped counter, return Err",
+        "Caller logs 'gate command dropped due to queue full' at WARN level",
+        "Metric: gate_cmds_dropped counter added",
+        "Document: dropped command means gate won't open for this customer",
+        "All existing tests pass"
       ],
-      "instructions": "In services/reentry_detector.rs tests, add boundary tests for MATCH_WINDOW_MS=30000 and HEIGHT_TOLERANCE_CM=10. Re-entry detection links repeat customer visits. Test that when height is missing, the exit is silently skipped.",
+      "instructions": "In src/io/cloudplus.rs:579, change to try_send(). On Full, log and return Err('queue full'). In gate.rs caller, log WARN that gate command was dropped. Add gate_cmds_dropped to Metrics. This is acceptable: if TCP is so backed up, dropping is better than blocking forever.",
+      "files": ["src/io/cloudplus.rs", "src/services/gate.rs", "src/infra/metrics.rs"],
       "priority": 1,
-      "estimatedMinutes": 30,
       "passes": false,
-      "notes": "Re-entry detection links customer journeys across store exits/re-entries"
+      "notes": "HIGH: Explicit failure handling - dropped command = customer waits."
     },
     {
       "id": "US-005",
-      "title": "Add Tracker edge case tests",
-      "category": "testing",
+      "title": "Add queue depth and lag metrics for diagnosability",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test gate zone entry when unauthorized (should log 'blocked' event)",
-        "Test gate zone entry when gate already opened (should skip command)",
-        "Test Xovis GROUP bit filtering (track_id with 0x80000000 bit should be skipped)",
-        "Test re-entry flow: exit → re-enter → journey has parent reference",
-        "Test chain stitching: A→B→C track progression preserves state",
-        "All tests pass"
+        "Metric: event_queue_depth (current channel size)",
+        "Metric: gate_queue_depth (CloudPlus outbound channel size)",
+        "Metric: gate_enqueue_to_send_latency_us histogram",
+        "Metrics exposed via Prometheus endpoint",
+        "Can diagnose 'late gate open' by observing queue lag"
       ],
-      "instructions": "In services/tracker/tests.rs, add tests for: (1) unauthorized customer entering gate zone logs event but doesn't open gate, (2) GROUP bit tracks are filtered out, (3) re-entry detection creates journey with parent, (4) chain stitching A→B→C works. These are real-world scenarios currently untested.",
+      "instructions": "Add queue depth tracking: wrap channels with Arc to share capacity checks, or periodically sample len(). For gate latency, record timestamp at enqueue (in GateCmd struct), measure delta at send time. Add to Prometheus output. This makes backlog visible.",
+      "files": ["src/infra/metrics.rs", "src/services/gate_worker.rs", "src/io/prometheus.rs"],
       "priority": 1,
-      "estimatedMinutes": 50,
       "passes": false,
-      "notes": "Critical: Gate blocked scenario is common in production - unauthorized customers at gate"
+      "notes": "HIGH: Without queue metrics, 'late gate open' is inferred not diagnosed."
     },
     {
       "id": "US-006",
-      "title": "Add ACC Listener unit tests",
-      "category": "testing",
+      "title": "Move journey egress to async worker",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test valid ACC message parsing: 'ACC receipt123' extracts receipt_id",
-        "Test malformed line (no space after ACC) is logged and ignored",
-        "Test empty receipt_id 'ACC ' is warned but handled",
-        "Test unknown format (not starting with ACC) is logged",
-        "Test peer IP is correctly extracted from connection",
-        "All tests pass"
+        "EgressWriter task owns file handle and receives Journey via channel",
+        "Tracker tick_and_egress enqueues to channel, returns immediately",
+        "No std::fs on tracker hot path",
+        "Batch flush every N journeys or M milliseconds",
+        "Write errors logged but don't affect tracker",
+        "All existing tests pass"
       ],
-      "instructions": "Create tests in io/acc_listener.rs. Currently has ZERO tests. Focus on parse_acc_line logic (extract from handle_acc_connection if needed). Test that malformed inputs are handled gracefully without panics. This module accepts untrusted network input.",
-      "priority": 1,
-      "estimatedMinutes": 35,
+      "instructions": "Create EgressWriter task with mpsc::Receiver<Journey>. In tracker, replace direct egress.write_journeys() with channel send. Writer uses spawn_blocking for actual file I/O, or dedicated thread with BufWriter. Flush on batch size or timer.",
+      "files": ["src/io/egress.rs", "src/services/tracker/mod.rs", "src/main.rs"],
+      "priority": 2,
       "passes": false,
-      "notes": "Zero test coverage. Accepts network input from payment terminals."
+      "notes": "MEDIUM: SSD is fast but sync I/O in async context blocks the runtime."
     },
     {
       "id": "US-007",
-      "title": "Add Egress Channel and MQTT Egress tests",
-      "category": "testing",
+      "title": "Cache zone names to avoid per-event allocation",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test create_egress_channel returns working sender/receiver pair",
-        "Test site_id is correctly injected into payloads",
-        "Test try_send drops silently when channel is full (no panic)",
-        "Test JourneyPayload serialization includes all required fields",
-        "Test MQTT QoS levels: journeys use QoS 1, events use QoS 0",
+        "Zone names stored as Arc<str> in config",
+        "zone_name returns Arc<str> or &str, not String",
+        "No allocation on zone_name lookup for known zones",
+        "Fallback for unknown zones still works",
+        "All callers updated",
         "All tests pass"
       ],
-      "instructions": "Create tests in io/egress_channel.rs and io/mqtt_egress.rs. Both have ZERO tests. Test channel semantics (bounded, try_send behavior). Verify site_id injection. For MQTT egress, verify correct QoS assignment by topic type.",
-      "priority": 1,
-      "estimatedMinutes": 40,
+      "instructions": "In Config, change zone_names HashMap value from String to Arc<str>. zone_name() returns Arc<str> clone (cheap) or creates new Arc for unknown zones. Update callers to accept impl AsRef<str>.",
+      "files": ["src/infra/config.rs", "src/services/tracker/handlers.rs"],
+      "priority": 3,
       "passes": false,
-      "notes": "Zero test coverage. Egress channel is the data pipeline to cloud."
+      "notes": "LOW: Per-event String clone adds up under high load."
     },
     {
       "id": "US-008",
-      "title": "Add protocol error handling tests",
-      "category": "testing",
+      "title": "Reduce per-event logging or add sampling",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test MQTT malformed JSON returns empty events (no panic)",
-        "Test MQTT missing timestamp defaults to 0 (not current time)",
-        "Test RS485 checksum mismatch is detected and frame rejected",
-        "Test RS485 partial frame handling (waits for more data)",
-        "Test CloudPlus data length > MAX_DATA_LEN marks frame invalid",
-        "Test CloudPlus missing ETX marks frame invalid",
-        "All tests pass"
+        "info! logs for zone entry/exit demoted to debug! or sampled",
+        "High-frequency events don't spam logs",
+        "Critical events (gate_cmd, door state) remain at info!",
+        "Optional: add sampling rate config"
       ],
-      "instructions": "Add tests to io/mqtt.rs, io/rs485.rs, io/cloudplus.rs for error paths. Focus on malformed input handling - these are production failure modes. Test that invalid protocol data doesn't cause panics or incorrect state.",
-      "priority": 1,
-      "estimatedMinutes": 45,
+      "instructions": "Review src/services/tracker/handlers.rs for info! on per-event paths. Demote zone_entry/zone_exit to debug! or add sampling (log every Nth event). Keep gate_open_command, gate_open_correlated at info!.",
+      "files": ["src/services/tracker/handlers.rs"],
+      "priority": 3,
       "passes": false,
-      "notes": "Protocol errors happen in production. Verify graceful degradation."
+      "notes": "LOW: Logging overhead can be significant at high event rates."
     },
     {
       "id": "US-009",
-      "title": "Add Config validation tests",
-      "category": "testing",
+      "title": "Remove MQTT parse_frame HashMap allocation",
+      "category": "performance",
       "acceptanceCriteria": [
-        "Test missing config file falls back to defaults (with warning log)",
-        "Test invalid TOML syntax returns error, not silent fallback",
-        "Test empty pos_zones array is detected as invalid",
-        "Test zone ID conflicts (gate_zone == pos_zone) are detected",
-        "Test port 0 is detected as invalid for prometheus/acc/broker",
-        "Test min_dwell_ms = 0 is detected as invalid",
-        "All tests pass"
+        "No HashMap allocation per frame",
+        "Position lookup uses linear search over tracked_objects",
+        "All MQTT parsing tests pass"
       ],
-      "instructions": "In infra/config.rs tests, add validation tests. Currently Config::load() silently falls back to defaults on ANY error - this masks production misconfigurations. Consider adding a Config::validate() method that can be tested independently.",
-      "priority": 1,
-      "estimatedMinutes": 40,
+      "instructions": "In src/io/mqtt.rs:129, replace HashMap with linear search: for each event, find matching track_id with tracked_objects.iter().find(). O(n²) is fine for small n (typically <10 objects per frame).",
+      "files": ["src/io/mqtt.rs"],
+      "priority": 3,
       "passes": false,
-      "notes": "Critical: Silent config fallback has caused production issues"
-    },
-    {
-      "id": "US-010",
-      "title": "Add Broker startup tests",
-      "category": "testing",
-      "acceptanceCriteria": [
-        "Test invalid bind address (e.g., '999.999.999.999') logs error and returns",
-        "Test port 0 behavior is documented (binds to ephemeral port)",
-        "Test valid address parses correctly",
-        "All tests pass"
-      ],
-      "instructions": "In infra/broker.rs, add basic tests. Currently has ZERO tests. The broker startup has a 100ms arbitrary sleep that doesn't guarantee readiness. At minimum, test that address parsing works and invalid addresses are handled gracefully.",
-      "priority": 1,
-      "estimatedMinutes": 25,
-      "passes": false,
-      "notes": "Zero test coverage. Broker failure prevents all MQTT communication."
-    },
-    {
-      "id": "US-011",
-      "title": "Add Domain type parsing tests",
-      "category": "testing",
-      "acceptanceCriteria": [
-        "Test TimestampValue::IsoString parsing with various formats",
-        "Test TimestampValue::EpochMs with valid and edge case values",
-        "Test TimestampValue::None (default) handling",
-        "Test epoch_ms() returns current time in milliseconds",
-        "Test EventType::as_str() round-trips with from_str",
-        "Test ParsedEvent creation with all field combinations",
-        "All tests pass"
-      ],
-      "instructions": "In domain/types.rs tests, add tests for TimestampValue deserialization (currently untested), epoch_ms() function, and EventType round-trip. These are foundational types used throughout the system.",
-      "priority": 1,
-      "estimatedMinutes": 35,
-      "passes": false,
-      "notes": "Domain types are used everywhere. Parsing errors cascade to all modules."
-    },
-    {
-      "id": "US-012",
-      "title": "Add Journey Manager state tests",
-      "category": "testing",
-      "acceptanceCriteria": [
-        "Test chain stitching A→B→C: all track IDs in tids, state preserved",
-        "Test stitch from pending resets outcome to InProgress",
-        "Test stitch from pending clears ended_at",
-        "Test tick with multiple journeys ready at same time",
-        "Test pid_by_track consistency after stitch operations",
-        "All tests pass"
-      ],
-      "instructions": "In services/journey_manager.rs tests, add tests for multi-hop stitching and state consistency. Chain stitching (A→B→C) is common when sensor loses track multiple times. Verify all track IDs are preserved and state is correctly transferred.",
-      "priority": 1,
-      "estimatedMinutes": 35,
-      "passes": false,
-      "notes": "Chain stitching is common in production - sensor loses track multiple times"
-    },
-    {
-      "id": "US-013",
-      "title": "Add Barcode Fallback TDD tests",
-      "category": "testing",
-      "acceptanceCriteria": [
-        "Test BarcodeStore: store barcode with 45min TTL",
-        "Test BarcodeStore: barcode lookup returns valid/invalid/expired status",
-        "Test BarcodeStore: barcode single-use - second lookup fails",
-        "Test BarcodeStore: invalidate barcode on physical exit (EXIT line cross)",
-        "Test BarcodeStore: Xovis gate-open exit invalidates associated barcode",
-        "Test barcode scan without active Xovis track: logs warning, opens gate anyway",
-        "Test barcode scan with active track: associates barcode with journey",
-        "Test barcode statistics: generated, scanned, invalidated_by_exit counters",
-        "Test barcode TTL boundary: 44:59 (valid) vs 45:01 (expired)",
-        "All tests pass"
-      ],
-      "instructions": "Create services/barcode_store.rs with TDD approach - write tests first. BarcodeStore should: (1) Store receipt_id from ACC events as barcodes with 45min TTL, (2) Track single-use status, (3) Provide lookup for /api/scan endpoint (TODO: implement endpoint later), (4) Invalidate on physical exit. Stats should include both running totals and time-bucketed metrics for Prometheus. API endpoint POST /api/v1/barcode/scan spec available in ~/Documents/GitHub/Avero/docs/openapi.yaml.",
-      "priority": 1,
-      "estimatedMinutes": 60,
-      "passes": false,
-      "notes": "TDD: Write tests first. Barcode invalidation happens on EXIT line cross only. If Xovis loses track briefly, barcode scan should still work."
-    },
-    {
-      "id": "US-014",
-      "title": "Add Journey scenario pattern tests",
-      "category": "testing",
-      "acceptanceCriteria": [
-        "Test paid_exit pattern: entry_cross → POS dwell → ACC → gate_cmd → exit_cross",
-        "Test unpaid_exit pattern: entry_cross → brief POS → backward entry_cross (no gate)",
-        "Test lost_unauthorized pattern: entry_cross → POS → tracking_lost (pending event)",
-        "Test multiple entry crosses: forward → backward → forward progression",
-        "Test stitched journey: pending → stitch event → continue to paid_exit",
-        "Test re-entry journey: track_create with reentry_from parent reference",
-        "Test mid-store spawn: track_create without entry_cross → normal authorization flow",
-        "Test multi-POS journey: visit POS_1, POS_3, POS_4 in sequence, dwell accumulates",
-        "All tests pass"
-      ],
-      "instructions": "Create integration tests based on real journey patterns from TimescaleDB. Each test should replay a sequence of events and verify the expected outcome. Patterns extracted from production data: (1) paid_exit with ACC+gate, (2) unpaid_exit with backward exit, (3) lost_unauthorized with tracking_lost, (4) stitched journeys, (5) re-entry journeys. Test that journey.events matches expected sequence and outcome is correct.",
-      "priority": 1,
-      "estimatedMinutes": 75,
-      "passes": false,
-      "notes": "Based on TimescaleDB analysis: 782 paid_exit, 291 lost_unauthorized, 270 unpaid_exit. Journeys have 4-138 events, most have 10-20."
+      "notes": "LOW: Avoids allocation, O(n²) acceptable for small n."
     }
   ]
 }
