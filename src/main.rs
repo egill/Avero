@@ -23,7 +23,7 @@ struct Args {
 use gateway_poc::io::{
     create_egress_channel, start_acc_listener, AccListenerConfig, MqttPublisher, Rs485Monitor,
 };
-use gateway_poc::services::GateController;
+use gateway_poc::services::{create_gate_worker, GateController};
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tracing::info;
@@ -95,6 +95,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tcp_client.run(tcp_shutdown).await;
         });
     }
+
+    // Create gate command worker (decouples gate I/O from tracker loop)
+    let (gate_cmd_tx, gate_worker) = create_gate_worker(gate.clone(), metrics.clone(), 64);
+    tokio::spawn(async move {
+        gate_worker.run().await;
+    });
 
     // Create event channel (bounded for backpressure)
     let (event_tx, event_rx) = mpsc::channel(1000);
@@ -198,7 +204,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Start tracker (main event processing loop)
-    let mut tracker = gateway_poc::services::Tracker::new(config, gate, metrics, egress_sender);
+    let mut tracker = gateway_poc::services::Tracker::new(config, gate_cmd_tx, metrics, egress_sender);
     info!("tracker_started");
 
     // Handle shutdown on Ctrl+C

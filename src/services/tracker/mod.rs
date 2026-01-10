@@ -18,7 +18,7 @@ use crate::io::egress::{Egress, JourneyWriter};
 use crate::io::EgressSender;
 use crate::services::acc_collector::AccCollector;
 use crate::services::door_correlator::DoorCorrelator;
-use crate::services::gate::GateController;
+use crate::services::gate_worker::GateCmd;
 use crate::services::journey_manager::JourneyManager;
 use crate::services::reentry_detector::ReentryDetector;
 use crate::services::stitcher::Stitcher;
@@ -46,8 +46,8 @@ pub struct Tracker {
     pub(crate) egress: Egress,
     /// Application configuration
     pub(crate) config: Config,
-    /// Gate control interface
-    pub(crate) gate: Arc<GateController>,
+    /// Gate command sender (commands processed by GateCmdWorker)
+    pub(crate) gate_cmd_tx: mpsc::Sender<GateCmd>,
     /// Metrics collector
     pub(crate) metrics: Arc<Metrics>,
     /// MQTT egress sender (optional)
@@ -56,9 +56,12 @@ pub struct Tracker {
 
 impl Tracker {
     /// Create a new Tracker with the given configuration and dependencies
+    ///
+    /// The `gate_cmd_tx` channel sends gate commands to a `GateCmdWorker` task,
+    /// which handles network I/O asynchronously without blocking the tracker.
     pub fn new(
         config: Config,
-        gate: Arc<GateController>,
+        gate_cmd_tx: mpsc::Sender<GateCmd>,
         metrics: Arc<Metrics>,
         egress_sender: Option<EgressSender>,
     ) -> Self {
@@ -73,7 +76,7 @@ impl Tracker {
             acc_collector,
             egress,
             config,
-            gate,
+            gate_cmd_tx,
             metrics,
             egress_sender,
         }
@@ -89,7 +92,7 @@ impl Tracker {
                 // Process incoming events
                 event = event_rx.recv() => {
                     match event {
-                        Some(e) => self.process_event(e).await,
+                        Some(e) => self.process_event(e),
                         None => break, // Channel closed
                     }
                 }
@@ -118,7 +121,10 @@ impl Tracker {
     }
 
     /// Process a single event, dispatching to the appropriate handler
-    pub async fn process_event(&mut self, event: ParsedEvent) {
+    ///
+    /// All handlers are now synchronous - gate commands are enqueued to
+    /// a worker task, not awaited inline.
+    pub fn process_event(&mut self, event: ParsedEvent) {
         let process_start = Instant::now();
 
         match event.event_type {
@@ -129,7 +135,7 @@ impl Tracker {
                 self.handle_track_delete(&event);
             }
             EventType::ZoneEntry => {
-                self.handle_zone_entry(&event).await;
+                self.handle_zone_entry(&event);
             }
             EventType::ZoneExit => {
                 self.handle_zone_exit(&event);
@@ -144,7 +150,7 @@ impl Tracker {
                 self.handle_door_state_change(status);
             }
             EventType::AccEvent(ip) => {
-                self.handle_acc_event(&ip, event.received_at).await;
+                self.handle_acc_event(&ip, event.received_at);
             }
             EventType::Unknown(_) => {}
         }

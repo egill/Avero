@@ -8,10 +8,12 @@
 //! - `reentry_detector` - Detects re-entry patterns
 //! - `acc_collector` - ACC payment correlation
 //! - `gate` - Gate controller interface
+//! - `gate_worker` - Async gate command worker
 
 pub mod acc_collector;
 pub mod door_correlator;
 pub mod gate;
+pub mod gate_worker;
 pub mod journey_manager;
 pub mod reentry_detector;
 pub mod stitcher;
@@ -19,4 +21,5 @@ pub mod tracker;
 
 // Re-export commonly used types
 pub use gate::GateController;
+pub use gate_worker::{create_gate_worker, GateCmd, GateCmdWorker};
 pub use tracker::Tracker;

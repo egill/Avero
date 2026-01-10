@@ -11,7 +11,7 @@ use crate::io::{
     AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload,
     ZoneEventPayload,
 };
-use crate::services::gate::GateCommand;
+use crate::services::gate_worker::GateCmd;
 use crate::services::stitcher::StitchMatch;
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -248,7 +248,7 @@ impl Tracker {
     /// Special handling for:
     /// - POS zones: start dwell timer
     /// - Gate zone (when authorized): send gate open command
-    pub(crate) async fn handle_zone_entry(&mut self, event: &ParsedEvent) {
+    pub(crate) fn handle_zone_entry(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
 
         // Skip Xovis GROUP tracks
@@ -305,7 +305,7 @@ impl Tracker {
         } else if geometry_id == self.config.gate_zone() {
             // Gate zone - check authorization and send command or blocked event
             if authorized && !gate_already_opened {
-                self.send_gate_open_command(track_id, ts, "tracker", event.received_at).await;
+                self.send_gate_open_command(track_id, ts, "tracker", event.received_at);
             } else if !authorized {
                 // Emit gate blocked event for TUI visibility
                 info!(
@@ -554,7 +554,7 @@ impl Tracker {
     /// The ip is the peer IP address of the ACC terminal connection.
     /// It's mapped to a POS zone via the ip_to_pos config.
     /// If a group is detected (co-presence), all group members are authorized.
-    pub(crate) async fn handle_acc_event(&mut self, ip: &str, received_at: Instant) {
+    pub(crate) fn handle_acc_event(&mut self, ip: &str, received_at: Instant) {
         let ts = epoch_ms();
 
         // Look up POS zone from IP
@@ -671,7 +671,7 @@ impl Tracker {
             let gate_already_opened =
                 self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
             if in_gate_zone && !gate_already_opened {
-                self.send_gate_open_command(track_id, ts, "acc", received_at).await;
+                self.send_gate_open_command(track_id, ts, "acc", received_at);
             }
         }
 
@@ -763,23 +763,30 @@ impl Tracker {
         }
     }
 
-    /// Send gate open command and record E2E latency
+    /// Enqueue gate open command to worker and record E2E latency
     ///
     /// `received_at` is when the triggering event was received (zone entry or ACC).
-    /// This allows us to measure the full E2E latency from event reception to gate command.
-    async fn send_gate_open_command(
-        &mut self,
-        track_id: TrackId,
-        ts: u64,
-        src: &str,
-        received_at: Instant,
-    ) {
-        let cmd_latency_us = self.gate.send_open_command(track_id).await;
-        self.metrics.record_gate_command();
-
-        // Record E2E gate latency (from event received to command queued)
+    /// This allows us to measure the full E2E latency from event reception to command enqueue.
+    ///
+    /// This method returns immediately after enqueueing - the actual network I/O
+    /// is handled by the GateCmdWorker task asynchronously.
+    fn send_gate_open_command(&mut self, track_id: TrackId, ts: u64, src: &str, received_at: Instant) {
+        // Record E2E gate latency (from event received to command enqueued)
         let e2e_latency_us = received_at.elapsed().as_micros() as u64;
         self.metrics.record_gate_latency(e2e_latency_us);
+        self.metrics.record_gate_command();
+
+        // Enqueue command to worker - never blocks on network I/O
+        let cmd = GateCmd { track_id, enqueued_at: Instant::now() };
+        if let Err(e) = self.gate_cmd_tx.try_send(cmd) {
+            warn!(
+                track_id = %track_id,
+                error = %e,
+                "gate_cmd_enqueue_failed"
+            );
+            // Command dropped - gate won't open for this customer
+            // This is logged but we continue processing
+        }
 
         if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
             journey.gate_cmd_at = Some(ts);
@@ -787,14 +794,14 @@ impl Tracker {
         self.journey_manager.add_event(
             track_id,
             JourneyEvent::new(JourneyEventType::GateCmd, ts)
-                .with_extra(&format!("cmd_us={cmd_latency_us},e2e_us={e2e_latency_us}")),
+                .with_extra(&format!("e2e_us={e2e_latency_us}")),
         );
 
         if let Some(ref sender) = self.egress_sender {
             sender.send_gate_state(GateStatePayload {
                 site: None,
                 ts,
-                state: "cmd_sent".to_string(),
+                state: "cmd_enqueued".to_string(),
                 tid: Some(track_id.0),
                 src: src.to_string(),
             });
