@@ -82,8 +82,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     // Create shared components
-    let gate = Arc::new(GateController::new(config.clone()));
     let metrics = Arc::new(Metrics::new());
+    let gate = Arc::new(GateController::new(config.clone(), Some(metrics.clone())));
 
     // Initialize POS zone tracking
     metrics.set_pos_zones(config.pos_zones());

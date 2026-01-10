@@ -2,12 +2,13 @@
 
 use crate::domain::types::TrackId;
 use crate::infra::config::{Config, GateMode};
+use crate::infra::metrics::Metrics;
 use crate::io::cloudplus::{CloudPlusClient, CloudPlusConfig};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// Trait for gate control operations - enables mock implementations for testing
 #[async_trait]
@@ -65,10 +66,12 @@ pub struct GateController {
     http_client: Option<reqwest::Client>,
     // TCP mode
     tcp_client: Option<Arc<CloudPlusClient>>,
+    // Metrics for tracking dropped commands
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl GateController {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, metrics: Option<Arc<Metrics>>) -> Self {
         // Parse credentials from URL if present (e.g., http://user:pass@host/path)
         let (url, username, password) = Self::parse_url_with_auth(config.gate_url());
         let timeout = Duration::from_millis(config.gate_timeout_ms());
@@ -88,7 +91,15 @@ impl GateController {
             None
         };
 
-        Self { mode: config.gate_mode().clone(), url, username, password, http_client, tcp_client }
+        Self {
+            mode: config.gate_mode().clone(),
+            url,
+            username,
+            password,
+            http_client,
+            tcp_client,
+            metrics,
+        }
     }
 
     /// Get the TCP client for running in main
@@ -115,13 +126,13 @@ impl GateController {
         (url.to_string(), None, None)
     }
 
-    async fn send_open_tcp(&self, track_id: TrackId, start: Instant) -> u64 {
+    fn send_open_tcp(&self, track_id: TrackId, start: Instant) -> u64 {
         let Some(ref client) = self.tcp_client else {
             log_tcp_client_not_initialized(track_id);
             return start.elapsed().as_micros() as u64;
         };
 
-        match client.send_open(0).await {
+        match client.send_open(0) {
             Ok(queue_latency_us) => {
                 let total_latency_us = start.elapsed().as_micros() as u64;
                 info!(
@@ -135,7 +146,21 @@ impl GateController {
             }
             Err(e) => {
                 let latency_us = start.elapsed().as_micros() as u64;
-                log_tcp_command_error(track_id, latency_us, e.as_ref());
+                // Check if this is a queue full error
+                let err_str = e.to_string();
+                if err_str.contains("queue full") {
+                    // Gate command dropped - customer will have to wait
+                    warn!(
+                        track_id = %track_id,
+                        latency_us = %latency_us,
+                        "gate_command_dropped_queue_full"
+                    );
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.record_gate_cmd_dropped();
+                    }
+                } else {
+                    log_tcp_command_error(track_id, latency_us, e.as_ref());
+                }
                 latency_us
             }
         }
@@ -186,7 +211,7 @@ impl GateCommand for GateController {
     async fn send_open_command(&self, track_id: TrackId) -> u64 {
         let start = Instant::now();
         match self.mode {
-            GateMode::Tcp => self.send_open_tcp(track_id, start).await,
+            GateMode::Tcp => self.send_open_tcp(track_id, start),
             GateMode::Http => self.send_open_http(track_id, start).await,
         }
     }

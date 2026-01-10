@@ -562,26 +562,29 @@ impl CloudPlusClient {
     }
 
     /// Send door open command
-    pub async fn send_open(
-        &self,
-        door_id: u8,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        if !self.is_connected().await {
-            return Err("not connected".into());
-        }
-
+    ///
+    /// Uses try_send to avoid blocking. If queue is full, returns Err("queue full").
+    /// A dropped command means the gate won't open for this customer - this is
+    /// acceptable if TCP is so backed up, as dropping is better than blocking forever.
+    pub fn send_open(&self, door_id: u8) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let start = Instant::now();
         let door = if door_id > 1 { 1 } else { door_id + 1 };
         let frame = build_frame(CMD_OPEN_DOOR, 0xff, door, &[]);
 
         info!(door_id = door_id, "cloudplus_sending_open_command");
 
-        self.outbound_tx.send(frame).await.map_err(|_| "channel closed")?;
-
-        let latency_us = start.elapsed().as_micros() as u64;
-        info!(door_id = door_id, latency_us = latency_us, "cloudplus_open_command_queued");
-
-        Ok(latency_us)
+        match self.outbound_tx.try_send(frame) {
+            Ok(()) => {
+                let latency_us = start.elapsed().as_micros() as u64;
+                info!(door_id = door_id, latency_us = latency_us, "cloudplus_open_command_queued");
+                Ok(latency_us)
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => Err("queue full".into()),
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                error!(door_id = door_id, "cloudplus_channel_closed");
+                Err("channel closed".into())
+            }
+        }
     }
 
     /// Send door close command
