@@ -105,9 +105,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create event channel (bounded for backpressure)
     let (event_tx, event_rx) = mpsc::channel(1000);
 
-    // Start RS485 monitor (with event channel for door state changes)
-    let rs485_tx = event_tx.clone();
-    let rs485_monitor = Rs485Monitor::new(&config).with_event_tx(rs485_tx);
+    // Create watch channel for door state (lossless - latest value always available)
+    let (door_tx, door_rx) = watch::channel(gateway_poc::domain::types::DoorStatus::Unknown);
+
+    // Start RS485 monitor (with watch channel for door state changes)
+    let rs485_monitor = Rs485Monitor::new(&config).with_door_tx(door_tx);
     let rs485_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
         rs485_monitor.run(rs485_shutdown).await;
@@ -119,8 +121,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mqtt_metrics = metrics.clone();
     let mqtt_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
-        if let Err(e) =
-            gateway_poc::io::mqtt::start_mqtt_client(&mqtt_config, mqtt_tx, mqtt_metrics, mqtt_shutdown).await
+        if let Err(e) = gateway_poc::io::mqtt::start_mqtt_client(
+            &mqtt_config,
+            mqtt_tx,
+            mqtt_metrics,
+            mqtt_shutdown,
+        )
+        .await
         {
             tracing::error!(error = %e, "MQTT client error");
         }
@@ -206,7 +213,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Start tracker (main event processing loop)
-    let mut tracker = gateway_poc::services::Tracker::new(config, gate_cmd_tx, metrics, egress_sender);
+    let mut tracker =
+        gateway_poc::services::Tracker::new(config, gate_cmd_tx, metrics, egress_sender, door_rx);
     info!("tracker_started");
 
     // Handle shutdown on Ctrl+C

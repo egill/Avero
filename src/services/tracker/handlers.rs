@@ -770,7 +770,13 @@ impl Tracker {
     ///
     /// This method returns immediately after enqueueing - the actual network I/O
     /// is handled by the GateCmdWorker task asynchronously.
-    fn send_gate_open_command(&mut self, track_id: TrackId, ts: u64, src: &str, received_at: Instant) {
+    fn send_gate_open_command(
+        &mut self,
+        track_id: TrackId,
+        ts: u64,
+        src: &str,
+        received_at: Instant,
+    ) {
         // Record E2E gate latency (from event received to command enqueued)
         let e2e_latency_us = received_at.elapsed().as_micros() as u64;
         self.metrics.record_gate_latency(e2e_latency_us);

@@ -2182,7 +2182,7 @@ fn draw_bottom_panels(f: &mut Frame, area: Rect, state: &DashboardState) {
         if hours > 0 { format!("{}h {}m", hours, mins) } else { format!("{}m", mins) };
 
     // Manual test results
-    let manual_test_str = if state.manual_test.last_total.is_some() {
+    let _manual_test_str = if state.manual_test.last_total.is_some() {
         format!(
             "Manual: cmd→mov:{}ms mov→opn:{}ms TOTAL:{}ms",
             state.manual_test.last_cmd_to_moving.unwrap_or(0),

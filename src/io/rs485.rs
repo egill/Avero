@@ -6,20 +6,15 @@
 //! - Response frame: 18 bytes, starts with 0x7F
 //! - Checksum: sum all bytes, bitwise NOT
 
-use crate::domain::types::{DoorStatus, EventType, ParsedEvent, TrackId};
+use crate::domain::types::DoorStatus;
 use crate::infra::config::Config;
 use std::io::ErrorKind;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tokio::time::interval;
 use tokio_serial::SerialPortBuilderExt;
 use tracing::{error, info, warn};
-
-#[inline]
-fn epoch_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
-}
 
 // Protocol constants
 const START_BYTE_COMMAND: u8 = 0x7E;
@@ -36,7 +31,8 @@ const DOOR_IN_MOTION: u8 = 0x03;
 const DOOR_FIRE_SIGNAL_OPENING: u8 = 0x04;
 
 /// Maximum read attempts before giving up (prevents infinite loop)
-const MAX_READ_ATTEMPTS: usize = 50;
+/// Reduced from 50 to 10 to cap stall time at ~500ms (10 * 50ms timeout)
+const MAX_READ_ATTEMPTS: usize = 10;
 
 pub struct Rs485Monitor {
     device: String,
@@ -45,7 +41,8 @@ pub struct Rs485Monitor {
     poll_interval: Duration,
     last_status: DoorStatus,
     last_poll_time: Option<Instant>,
-    event_tx: Option<mpsc::Sender<ParsedEvent>>,
+    /// Watch channel sender for door state (latest value always available, never dropped)
+    door_tx: Option<watch::Sender<DoorStatus>>,
     /// Persistent read buffer that accumulates bytes across reads.
     /// RS485 responses can arrive in chunks (e.g., 16 bytes + 2 bytes),
     /// so we need to keep partial data for the next read.
@@ -61,14 +58,15 @@ impl Rs485Monitor {
             poll_interval: Duration::from_millis(config.rs485_poll_interval_ms()),
             last_status: DoorStatus::Unknown,
             last_poll_time: None,
-            event_tx: None,
+            door_tx: None,
             read_buffer: Vec::with_capacity(64),
         }
     }
 
-    /// Set the event sender for door state changes
-    pub fn with_event_tx(mut self, tx: mpsc::Sender<ParsedEvent>) -> Self {
-        self.event_tx = Some(tx);
+    /// Set the watch channel sender for door state updates.
+    /// Uses watch channel for lossless delivery - latest value always available.
+    pub fn with_door_tx(mut self, tx: watch::Sender<DoorStatus>) -> Self {
+        self.door_tx = Some(tx);
         self
     }
 
@@ -301,19 +299,9 @@ impl Rs485Monitor {
                     "rs485_status"
                 );
 
-                if let Some(ref tx) = self.event_tx {
-                    let event = ParsedEvent {
-                        event_type: EventType::DoorStateChange(status),
-                        track_id: TrackId(0),
-                        geometry_id: None,
-                        direction: None,
-                        event_time: epoch_ms(),
-                        received_at: Instant::now(),
-                        position: None,
-                    };
-                    if let Err(e) = tx.try_send(event) {
-                        warn!(error = %e, "failed to send door state event");
-                    }
+                // Send via watch channel - never blocks, never fails (just overwrites)
+                if let Some(ref tx) = self.door_tx {
+                    tx.send_replace(status);
                 }
 
                 self.last_status = status;

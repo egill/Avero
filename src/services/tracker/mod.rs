@@ -11,7 +11,7 @@ mod handlers;
 mod tests;
 
 use crate::domain::journey::Journey;
-use crate::domain::types::{EventType, ParsedEvent, Person, TrackId};
+use crate::domain::types::{DoorStatus, EventType, ParsedEvent, Person, TrackId};
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
 use crate::io::egress::{Egress, JourneyWriter};
@@ -25,7 +25,7 @@ use crate::services::stitcher::Stitcher;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time::{interval, Duration};
 
 /// Central event processor for person tracking and journey management
@@ -52,6 +52,10 @@ pub struct Tracker {
     pub(crate) metrics: Arc<Metrics>,
     /// MQTT egress sender (optional)
     pub(crate) egress_sender: Option<EgressSender>,
+    /// Watch receiver for door state (RS485 monitor publishes here)
+    pub(crate) door_rx: watch::Receiver<DoorStatus>,
+    /// Last processed door status (to detect changes)
+    pub(crate) last_door_status: DoorStatus,
 }
 
 impl Tracker {
@@ -59,11 +63,14 @@ impl Tracker {
     ///
     /// The `gate_cmd_tx` channel sends gate commands to a `GateCmdWorker` task,
     /// which handles network I/O asynchronously without blocking the tracker.
+    ///
+    /// The `door_rx` watch receiver provides lossless door state updates from RS485.
     pub fn new(
         config: Config,
         gate_cmd_tx: mpsc::Sender<GateCmd>,
         metrics: Arc<Metrics>,
         egress_sender: Option<EgressSender>,
+        door_rx: watch::Receiver<DoorStatus>,
     ) -> Self {
         let egress = Egress::new(config.egress_file());
         let acc_collector = AccCollector::new(&config);
@@ -79,6 +86,8 @@ impl Tracker {
             gate_cmd_tx,
             metrics,
             egress_sender,
+            door_rx,
+            last_door_status: DoorStatus::Unknown,
         }
     }
 
@@ -89,11 +98,21 @@ impl Tracker {
 
         loop {
             tokio::select! {
-                // Process incoming events
+                // Process incoming events (MQTT, ACC)
                 event = event_rx.recv() => {
                     match event {
                         Some(e) => self.process_event(e),
                         None => break, // Channel closed
+                    }
+                }
+                // Watch for door state changes (RS485 via watch channel)
+                result = self.door_rx.changed() => {
+                    if result.is_ok() {
+                        let status = *self.door_rx.borrow();
+                        if status != self.last_door_status {
+                            self.handle_door_state_change(status);
+                            self.last_door_status = status;
+                        }
                     }
                 }
                 // Periodic tick for journey egress
@@ -146,8 +165,9 @@ impl Tracker {
             EventType::LineCrossBackward => {
                 self.handle_line_cross(&event, "backward");
             }
-            EventType::DoorStateChange(status) => {
-                self.handle_door_state_change(status);
+            EventType::DoorStateChange(_) => {
+                // Door state now comes via watch channel, not event channel.
+                // This arm is unreachable but kept for exhaustive matching.
             }
             EventType::AccEvent(ip) => {
                 self.handle_acc_event(&ip, event.received_at);
