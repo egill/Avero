@@ -170,6 +170,20 @@ pub struct Metrics {
     event_queue_depth: AtomicU64,
     /// Current gate command queue depth (updated by sampler)
     gate_queue_depth: AtomicU64,
+    /// Current CloudPlus outbound queue depth (updated by sampler)
+    cloudplus_queue_depth: AtomicU64,
+    /// Gate send latency histogram (time for actual network send)
+    gate_send_latency_buckets: [AtomicU64; NUM_BUCKETS],
+    /// Sum of gate send latencies (reset on report)
+    gate_send_latency_sum_us: AtomicU64,
+    /// Max gate send latency (reset on report)
+    gate_send_latency_max_us: AtomicU64,
+    /// Gate enqueue-to-send histogram (total time from enqueue to send complete)
+    gate_enqueue_to_send_buckets: [AtomicU64; NUM_BUCKETS],
+    /// Sum of gate enqueue-to-send times (reset on report)
+    gate_enqueue_to_send_sum_us: AtomicU64,
+    /// Max gate enqueue-to-send time (reset on report)
+    gate_enqueue_to_send_max_us: AtomicU64,
     /// POS zone occupancy (number of people in each zone)
     /// Index is determined by order in pos_zones config
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
@@ -214,6 +228,13 @@ impl Metrics {
             gate_queue_delay_max_us: AtomicU64::new(0),
             event_queue_depth: AtomicU64::new(0),
             gate_queue_depth: AtomicU64::new(0),
+            cloudplus_queue_depth: AtomicU64::new(0),
+            gate_send_latency_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            gate_send_latency_sum_us: AtomicU64::new(0),
+            gate_send_latency_max_us: AtomicU64::new(0),
+            gate_enqueue_to_send_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            gate_enqueue_to_send_sum_us: AtomicU64::new(0),
+            gate_enqueue_to_send_max_us: AtomicU64::new(0),
             pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
             pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
             zone_id_to_index: parking_lot::RwLock::new(FxHashMap::default()),
@@ -472,6 +493,36 @@ impl Metrics {
         self.gate_queue_depth.load(Ordering::Relaxed)
     }
 
+    /// Set current CloudPlus outbound queue depth (called by sampler)
+    #[inline]
+    pub fn set_cloudplus_queue_depth(&self, depth: u64) {
+        self.cloudplus_queue_depth.store(depth, Ordering::Relaxed);
+    }
+
+    /// Get current CloudPlus queue depth
+    #[inline]
+    pub fn cloudplus_queue_depth(&self) -> u64 {
+        self.cloudplus_queue_depth.load(Ordering::Relaxed)
+    }
+
+    /// Record gate send latency (time for actual network send)
+    #[inline]
+    pub fn record_gate_send_latency(&self, latency_us: u64) {
+        let bucket = bucket_index(latency_us);
+        self.gate_send_latency_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        self.gate_send_latency_sum_us.fetch_add(latency_us, Ordering::Relaxed);
+        update_atomic_max(&self.gate_send_latency_max_us, latency_us);
+    }
+
+    /// Record gate enqueue-to-send time (total from enqueue to send complete)
+    #[inline]
+    pub fn record_gate_enqueue_to_send(&self, latency_us: u64) {
+        let bucket = bucket_index(latency_us);
+        self.gate_enqueue_to_send_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        self.gate_enqueue_to_send_sum_us.fetch_add(latency_us, Ordering::Relaxed);
+        update_atomic_max(&self.gate_enqueue_to_send_max_us, latency_us);
+    }
+
     /// Get ACC events total
     #[inline]
     #[allow(dead_code)]
@@ -583,6 +634,32 @@ impl Metrics {
         // Get queue depths (point-in-time, don't reset)
         let event_queue_depth = self.event_queue_depth.load(Ordering::Relaxed);
         let gate_queue_depth = self.gate_queue_depth.load(Ordering::Relaxed);
+        let cloudplus_queue_depth = self.cloudplus_queue_depth.load(Ordering::Relaxed);
+
+        // Swap gate send latency histogram (reset on report)
+        let gate_send_latency_buckets = swap_buckets(&self.gate_send_latency_buckets);
+        let gate_send_latency_sum = self.gate_send_latency_sum_us.swap(0, Ordering::Relaxed);
+        let gate_send_latency_max = self.gate_send_latency_max_us.swap(0, Ordering::Relaxed);
+        let gate_send_latency_count: u64 = gate_send_latency_buckets.iter().sum();
+        let gate_send_latency_avg_us = if gate_send_latency_count > 0 {
+            gate_send_latency_sum / gate_send_latency_count
+        } else {
+            0
+        };
+        let gate_send_latency_p99_us = percentile_from_buckets(&gate_send_latency_buckets, 0.99);
+
+        // Swap gate enqueue-to-send histogram (reset on report)
+        let gate_enqueue_to_send_buckets = swap_buckets(&self.gate_enqueue_to_send_buckets);
+        let gate_enqueue_to_send_sum = self.gate_enqueue_to_send_sum_us.swap(0, Ordering::Relaxed);
+        let gate_enqueue_to_send_max = self.gate_enqueue_to_send_max_us.swap(0, Ordering::Relaxed);
+        let gate_enqueue_to_send_count: u64 = gate_enqueue_to_send_buckets.iter().sum();
+        let gate_enqueue_to_send_avg_us = if gate_enqueue_to_send_count > 0 {
+            gate_enqueue_to_send_sum / gate_enqueue_to_send_count
+        } else {
+            0
+        };
+        let gate_enqueue_to_send_p99_us =
+            percentile_from_buckets(&gate_enqueue_to_send_buckets, 0.99);
 
         // Get stitch histogram buckets (don't reset - cumulative)
         let stitch_distance_buckets = load_buckets(&self.stitch_distance_buckets);
@@ -634,6 +711,15 @@ impl Metrics {
             gate_queue_delay_p99_us,
             event_queue_depth,
             gate_queue_depth,
+            cloudplus_queue_depth,
+            gate_send_latency_buckets,
+            gate_send_latency_avg_us,
+            gate_send_latency_max_us: gate_send_latency_max,
+            gate_send_latency_p99_us,
+            gate_enqueue_to_send_buckets,
+            gate_enqueue_to_send_avg_us,
+            gate_enqueue_to_send_max_us: gate_enqueue_to_send_max,
+            gate_enqueue_to_send_p99_us,
         }
     }
 }
@@ -721,6 +807,24 @@ pub struct MetricsSummary {
     pub event_queue_depth: u64,
     /// Current gate command queue depth (snapshot)
     pub gate_queue_depth: u64,
+    /// Current CloudPlus outbound queue depth (snapshot)
+    pub cloudplus_queue_depth: u64,
+    /// Gate send latency histogram (time for actual network send)
+    pub gate_send_latency_buckets: [u64; NUM_BUCKETS],
+    /// Average gate send latency (µs)
+    pub gate_send_latency_avg_us: u64,
+    /// Max gate send latency (µs)
+    pub gate_send_latency_max_us: u64,
+    /// 99th percentile gate send latency (µs)
+    pub gate_send_latency_p99_us: u64,
+    /// Gate enqueue-to-send histogram (total time from enqueue to send complete)
+    pub gate_enqueue_to_send_buckets: [u64; NUM_BUCKETS],
+    /// Average gate enqueue-to-send time (µs)
+    pub gate_enqueue_to_send_avg_us: u64,
+    /// Max gate enqueue-to-send time (µs)
+    pub gate_enqueue_to_send_max_us: u64,
+    /// 99th percentile gate enqueue-to-send time (µs)
+    pub gate_enqueue_to_send_p99_us: u64,
 }
 
 impl MetricsSummary {

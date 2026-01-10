@@ -293,6 +293,11 @@ impl CloudPlusClient {
         }
     }
 
+    /// Get the current outbound queue depth (for metrics)
+    pub fn outbound_queue_depth(&self) -> usize {
+        self.outbound_tx.max_capacity() - self.outbound_tx.capacity()
+    }
+
     pub async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!(addr = %self.config.addr, "cloudplus_connecting");
 

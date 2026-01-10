@@ -63,8 +63,13 @@ impl GateCmdWorker {
                 "gate_cmd_processed"
             );
 
-            // Record queue delay to metrics histogram
+            // Record metrics histograms
             self.metrics.record_gate_queue_delay(queue_delay_us);
+            self.metrics.record_gate_send_latency(send_latency_us);
+
+            // Record total enqueue-to-send time (after send completes)
+            let enqueue_to_send_us = cmd.enqueued_at.elapsed().as_micros() as u64;
+            self.metrics.record_gate_enqueue_to_send(enqueue_to_send_us);
 
             // Warn if queue delay exceeds 1ms - indicates backlog
             if queue_delay_us > 1000 {

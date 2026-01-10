@@ -107,6 +107,11 @@ impl GateController {
         self.tcp_client.clone()
     }
 
+    /// Get the CloudPlus outbound queue depth (for metrics)
+    pub fn cloudplus_queue_depth(&self) -> usize {
+        self.tcp_client.as_ref().map(|c| c.outbound_queue_depth()).unwrap_or(0)
+    }
+
     /// Parse URL and extract basic auth credentials if present
     fn parse_url_with_auth(url: &str) -> (String, Option<String>, Option<String>) {
         // Try to parse http://user:pass@host/path format

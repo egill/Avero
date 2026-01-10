@@ -361,6 +361,91 @@ fn format_prometheus_metrics(
         site_id, summary.gate_queue_depth
     ));
 
+    output.push_str("# HELP gateway_cloudplus_queue_depth Current CloudPlus outbound queue depth\n");
+    output.push_str("# TYPE gateway_cloudplus_queue_depth gauge\n");
+    output.push_str(&format!(
+        "gateway_cloudplus_queue_depth{{site=\"{}\"}} {}\n",
+        site_id, summary.cloudplus_queue_depth
+    ));
+
+    // Gate send latency histogram (time for actual network send)
+    output.push_str(
+        "# HELP gateway_gate_send_latency_us Gate command network send latency in microseconds\n",
+    );
+    output.push_str("# TYPE gateway_gate_send_latency_us histogram\n");
+
+    let mut gate_send_cumulative = 0u64;
+    for (i, &bound) in METRICS_BUCKET_BOUNDS.iter().enumerate() {
+        gate_send_cumulative += summary.gate_send_latency_buckets[i];
+        output.push_str(&format!(
+            "gateway_gate_send_latency_us_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
+            site_id, bound, gate_send_cumulative
+        ));
+    }
+    gate_send_cumulative += summary.gate_send_latency_buckets[METRICS_NUM_BUCKETS - 1];
+    output.push_str(&format!(
+        "gateway_gate_send_latency_us_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
+        site_id, gate_send_cumulative
+    ));
+
+    let gate_send_count = summary.gate_send_latency_buckets.iter().sum::<u64>();
+    let gate_send_sum = summary.gate_send_latency_avg_us * gate_send_count;
+    output.push_str(&format!(
+        "gateway_gate_send_latency_us_sum{{site=\"{}\"}} {}\n",
+        site_id, gate_send_sum
+    ));
+    output.push_str(&format!(
+        "gateway_gate_send_latency_us_count{{site=\"{}\"}} {}\n",
+        site_id, gate_send_count
+    ));
+
+    output.push_str("# HELP gateway_gate_send_latency_p99_us 99th percentile gate send latency\n");
+    output.push_str("# TYPE gateway_gate_send_latency_p99_us gauge\n");
+    output.push_str(&format!(
+        "gateway_gate_send_latency_p99_us{{site=\"{}\"}} {}\n",
+        site_id, summary.gate_send_latency_p99_us
+    ));
+
+    // Gate enqueue-to-send histogram (total time from enqueue to send complete)
+    output.push_str(
+        "# HELP gateway_gate_enqueue_to_send_us Gate command enqueue to send time in microseconds\n",
+    );
+    output.push_str("# TYPE gateway_gate_enqueue_to_send_us histogram\n");
+
+    let mut enqueue_to_send_cumulative = 0u64;
+    for (i, &bound) in METRICS_BUCKET_BOUNDS.iter().enumerate() {
+        enqueue_to_send_cumulative += summary.gate_enqueue_to_send_buckets[i];
+        output.push_str(&format!(
+            "gateway_gate_enqueue_to_send_us_bucket{{site=\"{}\",le=\"{}\"}} {}\n",
+            site_id, bound, enqueue_to_send_cumulative
+        ));
+    }
+    enqueue_to_send_cumulative += summary.gate_enqueue_to_send_buckets[METRICS_NUM_BUCKETS - 1];
+    output.push_str(&format!(
+        "gateway_gate_enqueue_to_send_us_bucket{{site=\"{}\",le=\"+Inf\"}} {}\n",
+        site_id, enqueue_to_send_cumulative
+    ));
+
+    let enqueue_to_send_count = summary.gate_enqueue_to_send_buckets.iter().sum::<u64>();
+    let enqueue_to_send_sum = summary.gate_enqueue_to_send_avg_us * enqueue_to_send_count;
+    output.push_str(&format!(
+        "gateway_gate_enqueue_to_send_us_sum{{site=\"{}\"}} {}\n",
+        site_id, enqueue_to_send_sum
+    ));
+    output.push_str(&format!(
+        "gateway_gate_enqueue_to_send_us_count{{site=\"{}\"}} {}\n",
+        site_id, enqueue_to_send_count
+    ));
+
+    output.push_str(
+        "# HELP gateway_gate_enqueue_to_send_p99_us 99th percentile gate enqueue to send time\n",
+    );
+    output.push_str("# TYPE gateway_gate_enqueue_to_send_p99_us gauge\n");
+    output.push_str(&format!(
+        "gateway_gate_enqueue_to_send_p99_us{{site=\"{}\"}} {}\n",
+        site_id, summary.gate_enqueue_to_send_p99_us
+    ));
+
     output
 }
 

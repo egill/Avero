@@ -1,8 +1,7 @@
 //! MQTT client for receiving Xovis sensor data
 
 use crate::domain::types::{
-    EventAttributes, EventType, Frame, GeometryId, ParsedEvent, TimestampValue, TrackId,
-    XovisMessage,
+    EventType, Frame, GeometryId, ParsedEvent, TimestampValue, TrackId, XovisMessage,
 };
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
@@ -61,26 +60,24 @@ pub async fn start_mqtt_client(
                         match payload {
                             Ok(json_str) => {
                                 let events = parse_xovis_message(json_str, received_at);
-                                // Only log if there are actual events (not just position updates)
                                 if !events.is_empty() {
                                     debug!(topic = %topic, event_count = %events.len(), "MQTT message with events");
                                 }
                                 for event in events {
                                     debug!(track_id = %event.track_id, event_type = ?event.event_type, "Parsed event");
-                                    // Use try_send to never block the MQTT eventloop
-                                    match event_tx.try_send(event) {
-                                        Ok(()) => {}
-                                        Err(TrySendError::Full(_)) => {
-                                            metrics.record_mqtt_event_dropped();
-                                            // Rate-limit warning to 1 per second
-                                            if last_drop_warn.elapsed() > Duration::from_secs(1) {
-                                                warn!("mqtt_event_dropped: channel full");
-                                                last_drop_warn = Instant::now();
+                                    if let Err(e) = event_tx.try_send(event) {
+                                        match e {
+                                            TrySendError::Full(_) => {
+                                                metrics.record_mqtt_event_dropped();
+                                                if last_drop_warn.elapsed() > Duration::from_secs(1) {
+                                                    warn!("mqtt_event_dropped: channel full");
+                                                    last_drop_warn = Instant::now();
+                                                }
                                             }
-                                        }
-                                        Err(TrySendError::Closed(_)) => {
-                                            warn!("Event channel closed");
-                                            return Ok(());
+                                            TrySendError::Closed(_) => {
+                                                warn!("Event channel closed");
+                                                return Ok(());
+                                            }
                                         }
                                     }
                                 }
@@ -153,31 +150,26 @@ fn parse_frame(frame: &Frame, received_at: Instant) -> Vec<ParsedEvent> {
     for xovis_event in &frame.events {
         let event_type: EventType = xovis_event.event_type.parse().unwrap();
 
-        let attrs = xovis_event.attributes.as_ref().unwrap_or(&EventAttributes {
-            track_id: None,
-            geometry_id: None,
-            direction: None,
+        let Some(attrs) = xovis_event.attributes.as_ref() else { continue };
+        let Some(track_id) = attrs.track_id else { continue };
+
+        // Linear search for position - frames typically have <10 tracked objects
+        let position = frame
+            .tracked_objects
+            .iter()
+            .find(|obj| obj.track_id == track_id)
+            .filter(|obj| obj.position.len() >= 3)
+            .map(|obj| [obj.position[0], obj.position[1], obj.position[2]]);
+
+        events.push(ParsedEvent {
+            event_type,
+            track_id: TrackId(track_id),
+            geometry_id: attrs.geometry_id.map(GeometryId),
+            direction: attrs.direction.clone(),
+            event_time,
+            received_at,
+            position,
         });
-
-        if let Some(track_id) = attrs.track_id {
-            // Linear search for position - frames typically have <10 tracked objects
-            let position = frame
-                .tracked_objects
-                .iter()
-                .find(|obj| obj.track_id == track_id)
-                .filter(|obj| obj.position.len() >= 3)
-                .map(|obj| [obj.position[0], obj.position[1], obj.position[2]]);
-
-            events.push(ParsedEvent {
-                event_type,
-                track_id: TrackId(track_id),
-                geometry_id: attrs.geometry_id.map(GeometryId),
-                direction: attrs.direction.clone(),
-                event_time,
-                received_at,
-                position,
-            });
-        }
     }
 
     events

@@ -5,11 +5,15 @@
 //!
 //! The EgressWriter task decouples file I/O from the tracker loop,
 //! batching journeys and flushing on count or timer.
+//!
+//! The EgressWriter owns a persistent file handle, opening the file once
+//! and reusing it for all writes.
 
 use crate::domain::journey::Journey;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::interval;
@@ -96,10 +100,16 @@ const BATCH_SIZE: usize = 10;
 /// Time-based flush interval in milliseconds
 const FLUSH_INTERVAL_MS: u64 = 1000;
 
+/// Shared file handle for persistent writes
+type SharedWriter = Arc<parking_lot::Mutex<Option<BufWriter<File>>>>;
+
 /// Async worker that receives journeys via channel and writes to file
 ///
 /// Decouples file I/O from the tracker loop. Batches journeys and flushes
 /// on batch size or timer, whichever comes first.
+///
+/// The writer owns a persistent file handle, opening the file once and
+/// reusing it for all writes.
 pub struct EgressWriter {
     /// Receiver for journeys to write
     journey_rx: mpsc::Receiver<Journey>,
@@ -107,18 +117,54 @@ pub struct EgressWriter {
     file_path: String,
     /// Buffered journeys pending write
     buffer: Vec<Journey>,
+    /// Shared file handle (owned, opened once, reused for all writes)
+    writer: SharedWriter,
 }
 
 impl EgressWriter {
     /// Create a new egress writer
     pub fn new(journey_rx: mpsc::Receiver<Journey>, file_path: String) -> Self {
         info!(file_path = %file_path, "egress_writer_initialized");
-        Self { journey_rx, file_path, buffer: Vec::with_capacity(BATCH_SIZE) }
+        Self {
+            journey_rx,
+            file_path,
+            buffer: Vec::with_capacity(BATCH_SIZE),
+            writer: Arc::new(parking_lot::Mutex::new(None)),
+        }
+    }
+
+    /// Open or get the persistent file handle
+    fn get_or_open_writer(&self) -> Result<(), std::io::Error> {
+        let mut guard = self.writer.lock();
+        if guard.is_some() {
+            return Ok(());
+        }
+
+        let path = Path::new(&self.file_path);
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        *guard = Some(BufWriter::new(file));
+        info!(file_path = %self.file_path, "egress_file_opened");
+        Ok(())
     }
 
     /// Run the writer, processing journeys until the channel closes
     pub async fn run(mut self) {
         info!("egress_writer_started");
+
+        // Open the file handle once at startup
+        if let Err(e) = self.get_or_open_writer() {
+            error!(error = %e, "egress_file_open_failed");
+            // Continue anyway, we'll retry on each flush
+        }
+
         let mut flush_interval = interval(Duration::from_millis(FLUSH_INTERVAL_MS));
 
         loop {
@@ -143,6 +189,14 @@ impl EgressWriter {
             }
         }
 
+        // Ensure final flush before shutdown
+        {
+            let mut guard = self.writer.lock();
+            if let Some(ref mut writer) = *guard {
+                let _ = writer.flush();
+            }
+        }
+
         info!("egress_writer_stopped");
     }
 
@@ -154,51 +208,52 @@ impl EgressWriter {
 
         let journeys = std::mem::take(&mut self.buffer);
         self.buffer = Vec::with_capacity(BATCH_SIZE);
-        let file_path = self.file_path.clone();
         let count = journeys.len();
+        let writer = self.writer.clone();
+        let file_path = self.file_path.clone();
 
         // Use spawn_blocking to perform file I/O off the async runtime
         tokio::task::spawn_blocking(move || {
-            write_journeys_to_file(&file_path, &journeys);
+            write_journeys_with_handle(&writer, &file_path, &journeys);
         });
 
         debug!(count = count, "egress_batch_flushed");
     }
 }
 
-/// Write journeys to file (runs in blocking thread pool)
-fn write_journeys_to_file(file_path: &str, journeys: &[Journey]) {
-    let path = Path::new(file_path);
+/// Write journeys using shared file handle (runs in blocking thread pool)
+fn write_journeys_with_handle(writer: &SharedWriter, file_path: &str, journeys: &[Journey]) {
+    let mut guard = writer.lock();
 
-    // Create parent directories if they don't exist
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                error!(error = %e, path = %file_path, "egress_mkdir_failed");
+    // Reopen file if handle is missing
+    if guard.is_none() {
+        let path = Path::new(file_path);
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    error!(error = %e, "egress_mkdir_failed");
+                    return;
+                }
+            }
+        }
+        match OpenOptions::new().create(true).append(true).open(path) {
+            Ok(file) => {
+                *guard = Some(BufWriter::new(file));
+                info!(file_path = %file_path, "egress_file_reopened");
+            }
+            Err(e) => {
+                error!(error = %e, "egress_open_failed");
                 return;
             }
         }
     }
 
-    // Open file with BufWriter for efficient batch writes
-    let file = match OpenOptions::new().create(true).append(true).open(path) {
-        Ok(f) => f,
-        Err(e) => {
-            error!(error = %e, path = %file_path, "egress_open_failed");
-            return;
-        }
-    };
-
-    let mut writer = BufWriter::new(file);
+    let Some(ref mut buf_writer) = *guard else { return };
 
     for journey in journeys {
         let json = journey.to_json();
-        if let Err(e) = writeln!(writer, "{}", json) {
-            error!(
-                jid = %journey.jid,
-                error = %e,
-                "journey_egress_failed"
-            );
+        if let Err(e) = writeln!(buf_writer, "{}", json) {
+            error!(jid = %journey.jid, error = %e, "journey_egress_failed");
         } else {
             info!(
                 jid = %journey.jid,
@@ -210,8 +265,8 @@ fn write_journeys_to_file(file_path: &str, journeys: &[Journey]) {
         }
     }
 
-    // Explicit flush to ensure all data is written
-    if let Err(e) = writer.flush() {
+    // Flush to ensure data is written
+    if let Err(e) = buf_writer.flush() {
         warn!(error = %e, "egress_flush_failed");
     }
 }

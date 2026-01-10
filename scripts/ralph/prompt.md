@@ -30,11 +30,16 @@ You are an autonomous coding agent working on performance improvements for gatew
    ```
    All three must pass before proceeding.
 
-6. **Commit**
+6. **Simplify code**
+   - Use `@agent-code-simplifier:code-simplifier` to simplify the implementation
+   - Focus on recently modified code
+   - Re-run quality check if changes were made
+
+7. **Commit**
    - Format: `feat: [US-XXX] - [Title]`
    - Example: `feat: [US-001] - Decouple gate commands from tracker loop`
 
-7. **Update tracking**
+8. **Update tracking**
    - In `prd.json`: set `passes: true` for completed story
    - In `progress.txt`: append progress entry (see format below)
 

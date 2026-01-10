@@ -106,8 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Create egress writer (decouples file I/O from tracker loop)
-    let (journey_tx, egress_writer) =
-        create_egress_writer(config.egress_file().to_string(), 100);
+    let (journey_tx, egress_writer) = create_egress_writer(config.egress_file().to_string(), 100);
     tokio::spawn(async move {
         egress_writer.run().await;
     });
@@ -184,6 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start metrics reporter (lock-free reads with full summary)
     // Also samples queue depths for diagnosability
     let metrics_clone = metrics.clone();
+    let gate_for_metrics = gate.clone();
     let metrics_interval = config.metrics_interval_secs();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(metrics_interval));
@@ -195,8 +195,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (event_tx_sampler.max_capacity() - event_tx_sampler.capacity()) as u64;
             let gate_depth =
                 (gate_cmd_tx_sampler.max_capacity() - gate_cmd_tx_sampler.capacity()) as u64;
+            let cloudplus_depth = gate_for_metrics.cloudplus_queue_depth() as u64;
             metrics_clone.set_event_queue_depth(event_depth);
             metrics_clone.set_gate_queue_depth(gate_depth);
+            metrics_clone.set_cloudplus_queue_depth(cloudplus_depth);
 
             // Use full report with placeholder track counts (actual counts are in tracker)
             let summary = metrics_clone.report(0, 0);
