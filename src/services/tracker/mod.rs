@@ -76,7 +76,7 @@ impl Tracker {
         egress_sender: Option<EgressSender>,
         door_rx: watch::Receiver<DoorStatus>,
     ) -> Self {
-        let acc_collector = AccCollector::new(&config);
+        let acc_collector = AccCollector::new(&config, metrics.clone());
         Self {
             persons: FxHashMap::default(),
             stitcher: Stitcher::with_metrics(metrics.clone()),

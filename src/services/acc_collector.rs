@@ -7,8 +7,10 @@
 use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyEventType};
 use crate::domain::types::TrackId;
 use crate::infra::config::Config;
+use crate::infra::metrics::Metrics;
 use crate::services::journey_manager::JourneyManager;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -112,16 +114,19 @@ pub struct AccCollector {
     recent_exits: HashMap<String, Vec<RecentExit>>,
     /// Last time each POS zone became empty (for debugging ACC timing)
     last_pos_exit: HashMap<String, Instant>,
+    /// Metrics collector for ACC empty POS timing
+    metrics: Arc<Metrics>,
 }
 
 impl AccCollector {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &Config, metrics: Arc<Metrics>) -> Self {
         Self {
             ip_to_pos: config.acc_ip_to_pos().clone(),
             min_dwell_for_acc: config.min_dwell_ms(),
             pos_groups: HashMap::new(),
             recent_exits: HashMap::new(),
             last_pos_exit: HashMap::new(),
+            metrics,
         }
     }
 
@@ -323,6 +328,7 @@ impl AccCollector {
                 .map(|t| t.elapsed().as_millis() as u64)
                 .unwrap_or(0);
             info!(pos = %pos, empty_since_ms = %empty_since_ms, "acc_arrived_pos_empty");
+            self.metrics.record_acc_empty_pos_time(empty_since_ms);
             self.cleanup_old_exits();
 
             if let Some(exits) = self.recent_exits.get_mut(pos) {
@@ -406,7 +412,8 @@ mod tests {
         ip_to_pos.insert("192.168.1.10".to_string(), "POS_1".to_string());
         ip_to_pos.insert("192.168.1.11".to_string(), "POS_2".to_string());
         let config = Config::default().with_acc_ip_to_pos(ip_to_pos);
-        AccCollector::new(&config)
+        let metrics = Arc::new(Metrics::new());
+        AccCollector::new(&config, metrics)
     }
 
     #[test]

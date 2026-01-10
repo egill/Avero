@@ -277,6 +277,41 @@ fn write_acc_metrics(output: &mut String, site: &str, summary: &MetricsSummary) 
         site,
         summary.acc_no_journey_total,
     );
+
+    // ACC empty POS timing - diagnose payment timing issues
+    write_histogram(
+        output,
+        "gateway_acc_empty_pos_time_ms",
+        "Time since POS became empty when ACC arrived (ms)",
+        site,
+        &summary.acc_empty_pos_time_buckets,
+        &METRICS_BUCKET_BOUNDS,
+        summary.acc_empty_pos_time_avg_ms,
+    );
+    write_metric(
+        output,
+        "gateway_acc_empty_pos_time_avg_ms",
+        "Average time since POS empty when ACC arrived",
+        MetricType::Gauge,
+        site,
+        summary.acc_empty_pos_time_avg_ms,
+    );
+    write_metric(
+        output,
+        "gateway_acc_empty_pos_time_max_ms",
+        "Maximum time since POS empty when ACC arrived",
+        MetricType::Gauge,
+        site,
+        summary.acc_empty_pos_time_max_ms,
+    );
+    write_metric(
+        output,
+        "gateway_acc_empty_pos_count",
+        "Total ACC events that arrived at empty POS",
+        MetricType::Counter,
+        site,
+        summary.acc_empty_pos_time_count,
+    );
 }
 
 fn write_stitch_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {

@@ -212,6 +212,13 @@ pub struct Metrics {
     gate_enqueue_to_send_sum_us: AtomicU64,
     /// Max gate enqueue-to-send time (reset on report)
     gate_enqueue_to_send_max_us: AtomicU64,
+    /// ACC arrived at empty POS - time since POS became empty (ms)
+    /// Helps diagnose ACC timing issues when payments arrive after customer left
+    acc_empty_pos_time_buckets: [AtomicU64; NUM_BUCKETS],
+    /// Sum of empty POS times (ms) for average calculation
+    acc_empty_pos_time_sum: AtomicU64,
+    /// Max empty POS time (ms)
+    acc_empty_pos_time_max: AtomicU64,
     /// POS zone occupancy (number of people in each zone)
     /// Index is determined by order in pos_zones config
     pos_occupancy: [AtomicU64; MAX_POS_ZONES],
@@ -271,6 +278,9 @@ impl Metrics {
             gate_enqueue_to_send_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_enqueue_to_send_sum_us: AtomicU64::new(0),
             gate_enqueue_to_send_max_us: AtomicU64::new(0),
+            acc_empty_pos_time_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            acc_empty_pos_time_sum: AtomicU64::new(0),
+            acc_empty_pos_time_max: AtomicU64::new(0),
             pos_occupancy: std::array::from_fn(|_| AtomicU64::new(0)),
             pos_zone_ids: parking_lot::Mutex::new(Vec::new()),
             zone_id_to_index: parking_lot::RwLock::new(FxHashMap::default()),
@@ -655,6 +665,16 @@ impl Metrics {
         update_atomic_max(&self.gate_enqueue_to_send_max_us, latency_us);
     }
 
+    /// Record ACC arrived at empty POS with time since POS became empty (ms)
+    /// Used for diagnosing ACC timing issues - when payments arrive after customer left
+    #[inline]
+    pub fn record_acc_empty_pos_time(&self, time_ms: u64) {
+        let bucket = bucket_index(time_ms);
+        self.acc_empty_pos_time_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        self.acc_empty_pos_time_sum.fetch_add(time_ms, Ordering::Relaxed);
+        update_atomic_max(&self.acc_empty_pos_time_max, time_ms);
+    }
+
     /// Get ACC events total
     #[inline]
     #[allow(dead_code)]
@@ -807,6 +827,14 @@ impl Metrics {
         let stitch_time_count: u64 = stitch_time_buckets.iter().sum();
         let stitch_time_avg_ms = avg_or_zero(stitch_time_sum, stitch_time_count);
 
+        // Load ACC empty POS time histogram (cumulative for Prometheus)
+        let acc_empty_pos_time_buckets = load_buckets(&self.acc_empty_pos_time_buckets);
+        let acc_empty_pos_time_sum = self.acc_empty_pos_time_sum.load(Ordering::Relaxed);
+        let acc_empty_pos_time_max = self.acc_empty_pos_time_max.load(Ordering::Relaxed);
+        let acc_empty_pos_time_count: u64 = acc_empty_pos_time_buckets.iter().sum();
+        let acc_empty_pos_time_avg_ms =
+            avg_or_zero(acc_empty_pos_time_sum, acc_empty_pos_time_count);
+
         MetricsSummary {
             events_total,
             events_per_sec,
@@ -862,6 +890,10 @@ impl Metrics {
             gate_enqueue_to_send_avg_us,
             gate_enqueue_to_send_max_us: gate_enqueue_to_send_max,
             gate_enqueue_to_send_p99_us,
+            acc_empty_pos_time_buckets,
+            acc_empty_pos_time_avg_ms,
+            acc_empty_pos_time_max_ms: acc_empty_pos_time_max,
+            acc_empty_pos_time_count,
         }
     }
 }
@@ -985,6 +1017,14 @@ pub struct MetricsSummary {
     pub gate_enqueue_to_send_max_us: u64,
     /// 99th percentile gate enqueue-to-send time (µs)
     pub gate_enqueue_to_send_p99_us: u64,
+    /// ACC empty POS time histogram (ms since POS became empty when ACC arrived)
+    pub acc_empty_pos_time_buckets: [u64; NUM_BUCKETS],
+    /// Average ACC empty POS time (ms)
+    pub acc_empty_pos_time_avg_ms: u64,
+    /// Max ACC empty POS time (ms)
+    pub acc_empty_pos_time_max_ms: u64,
+    /// Total ACC empty POS events
+    pub acc_empty_pos_time_count: u64,
 }
 
 impl MetricsSummary {
