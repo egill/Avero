@@ -298,6 +298,11 @@ impl CloudPlusClient {
         self.outbound_tx.max_capacity() - self.outbound_tx.capacity()
     }
 
+    /// Get the outbound queue max capacity (for utilization calculation)
+    pub fn outbound_max_capacity(&self) -> usize {
+        self.outbound_tx.max_capacity()
+    }
+
     pub async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!(addr = %self.config.addr, "cloudplus_connecting");
 

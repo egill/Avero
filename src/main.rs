@@ -199,13 +199,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             interval.tick().await;
 
             // Sample queue depths (max_capacity - capacity = current depth)
+            let event_max_capacity = event_tx_sampler.max_capacity() as u64;
             let event_depth =
                 (event_tx_sampler.max_capacity() - event_tx_sampler.capacity()) as u64;
             let cloudplus_depth = gate_for_metrics.cloudplus_queue_depth() as u64;
+            let gate_max_capacity = gate_for_metrics.cloudplus_max_capacity() as u64;
             metrics_clone.set_event_queue_depth(event_depth);
             // gate_queue_depth = CloudPlus outbound per PRD US-005
             metrics_clone.set_gate_queue_depth(cloudplus_depth);
             metrics_clone.set_cloudplus_queue_depth(cloudplus_depth);
+
+            // Compute queue utilization percentages (0-100)
+            let event_util_pct = if event_max_capacity > 0 {
+                event_depth * 100 / event_max_capacity
+            } else {
+                0
+            };
+            let gate_util_pct = if gate_max_capacity > 0 {
+                cloudplus_depth * 100 / gate_max_capacity
+            } else {
+                0
+            };
+            metrics_clone.set_event_queue_utilization_pct(event_util_pct);
+            metrics_clone.set_gate_queue_utilization_pct(gate_util_pct);
 
             // Use full report with placeholder track counts (actual counts are in tracker)
             let summary = metrics_clone.report(0, 0);

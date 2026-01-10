@@ -428,6 +428,21 @@ fn format_prometheus_metrics(
         site_id, summary.cloudplus_queue_depth
     ));
 
+    // Queue utilization percentages
+    output.push_str("# HELP gateway_event_queue_utilization_pct Event queue utilization percentage (0-100)\n");
+    output.push_str("# TYPE gateway_event_queue_utilization_pct gauge\n");
+    output.push_str(&format!(
+        "gateway_event_queue_utilization_pct{{site=\"{}\"}} {}\n",
+        site_id, summary.event_queue_utilization_pct
+    ));
+
+    output.push_str("# HELP gateway_gate_queue_utilization_pct Gate queue utilization percentage (0-100)\n");
+    output.push_str("# TYPE gateway_gate_queue_utilization_pct gauge\n");
+    output.push_str(&format!(
+        "gateway_gate_queue_utilization_pct{{site=\"{}\"}} {}\n",
+        site_id, summary.gate_queue_utilization_pct
+    ));
+
     // Gate send latency histogram (time for actual network send)
     output.push_str(
         "# HELP gateway_gate_send_latency_us Gate command network send latency in microseconds\n",

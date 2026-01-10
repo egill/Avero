@@ -112,6 +112,11 @@ impl GateController {
         self.tcp_client.as_ref().map(|c| c.outbound_queue_depth()).unwrap_or(0)
     }
 
+    /// Get the CloudPlus outbound queue max capacity (for utilization calculation)
+    pub fn cloudplus_max_capacity(&self) -> usize {
+        self.tcp_client.as_ref().map(|c| c.outbound_max_capacity()).unwrap_or(0)
+    }
+
     /// Parse URL and extract basic auth credentials if present
     fn parse_url_with_auth(url: &str) -> (String, Option<String>, Option<String>) {
         // Try to parse http://user:pass@host/path format

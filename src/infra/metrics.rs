@@ -178,6 +178,10 @@ pub struct Metrics {
     gate_queue_depth: AtomicU64,
     /// Current CloudPlus outbound queue depth (updated by sampler)
     cloudplus_queue_depth: AtomicU64,
+    /// Event queue utilization percentage (0-100) (updated by sampler)
+    event_queue_utilization_pct: AtomicU64,
+    /// Gate queue utilization percentage (0-100) (updated by sampler)
+    gate_queue_utilization_pct: AtomicU64,
     /// Gate send latency histogram (time for actual network send)
     gate_send_latency_buckets: [AtomicU64; NUM_BUCKETS],
     /// Sum of gate send latencies (reset on report)
@@ -238,6 +242,8 @@ impl Metrics {
             event_queue_depth: AtomicU64::new(0),
             gate_queue_depth: AtomicU64::new(0),
             cloudplus_queue_depth: AtomicU64::new(0),
+            event_queue_utilization_pct: AtomicU64::new(0),
+            gate_queue_utilization_pct: AtomicU64::new(0),
             gate_send_latency_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             gate_send_latency_sum_us: AtomicU64::new(0),
             gate_send_latency_max_us: AtomicU64::new(0),
@@ -550,6 +556,30 @@ impl Metrics {
         self.cloudplus_queue_depth.load(Ordering::Relaxed)
     }
 
+    /// Set current event queue utilization percentage (called by sampler)
+    #[inline]
+    pub fn set_event_queue_utilization_pct(&self, pct: u64) {
+        self.event_queue_utilization_pct.store(pct, Ordering::Relaxed);
+    }
+
+    /// Get current event queue utilization percentage
+    #[inline]
+    pub fn event_queue_utilization_pct(&self) -> u64 {
+        self.event_queue_utilization_pct.load(Ordering::Relaxed)
+    }
+
+    /// Set current gate queue utilization percentage (called by sampler)
+    #[inline]
+    pub fn set_gate_queue_utilization_pct(&self, pct: u64) {
+        self.gate_queue_utilization_pct.store(pct, Ordering::Relaxed);
+    }
+
+    /// Get current gate queue utilization percentage
+    #[inline]
+    pub fn gate_queue_utilization_pct(&self) -> u64 {
+        self.gate_queue_utilization_pct.load(Ordering::Relaxed)
+    }
+
     /// Record gate send latency (time for actual network send)
     #[inline]
     pub fn record_gate_send_latency(&self, latency_us: u64) {
@@ -685,10 +715,12 @@ impl Metrics {
         };
         let gate_queue_delay_p99_us = percentile_from_buckets(&gate_queue_delay_buckets, 0.99);
 
-        // Get queue depths (point-in-time, don't reset)
+        // Get queue depths and utilization (point-in-time, don't reset)
         let event_queue_depth = self.event_queue_depth.load(Ordering::Relaxed);
         let gate_queue_depth = self.gate_queue_depth.load(Ordering::Relaxed);
         let cloudplus_queue_depth = self.cloudplus_queue_depth.load(Ordering::Relaxed);
+        let event_queue_utilization_pct = self.event_queue_utilization_pct.load(Ordering::Relaxed);
+        let gate_queue_utilization_pct = self.gate_queue_utilization_pct.load(Ordering::Relaxed);
 
         // Swap gate send latency histogram (reset on report)
         let gate_send_latency_buckets = swap_buckets(&self.gate_send_latency_buckets);
@@ -771,6 +803,8 @@ impl Metrics {
             event_queue_depth,
             gate_queue_depth,
             cloudplus_queue_depth,
+            event_queue_utilization_pct,
+            gate_queue_utilization_pct,
             gate_send_latency_buckets,
             gate_send_latency_avg_us,
             gate_send_latency_max_us: gate_send_latency_max,
@@ -878,6 +912,10 @@ pub struct MetricsSummary {
     pub gate_queue_depth: u64,
     /// Current CloudPlus outbound queue depth (snapshot)
     pub cloudplus_queue_depth: u64,
+    /// Event queue utilization percentage (0-100)
+    pub event_queue_utilization_pct: u64,
+    /// Gate queue utilization percentage (0-100)
+    pub gate_queue_utilization_pct: u64,
     /// Gate send latency histogram (time for actual network send)
     pub gate_send_latency_buckets: [u64; NUM_BUCKETS],
     /// Average gate send latency (µs)
@@ -918,6 +956,8 @@ impl MetricsSummary {
             acc_drop_pct = format!("{:.2}", self.acc_drop_ratio * 100.0),
             egress_drop = %self.journey_egress_dropped,
             gate_drop = %self.gate_cmds_dropped,
+            event_q_pct = %self.event_queue_utilization_pct,
+            gate_q_pct = %self.gate_queue_utilization_pct,
             "metrics"
         );
     }
