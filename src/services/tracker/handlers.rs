@@ -51,16 +51,28 @@ impl Tracker {
             event.geometry_id.map(|gid| self.config.zone_name(gid));
         let spawn_hint = current_zone.as_deref().is_some_and(|z| z.starts_with("POS_"));
 
+        // Fresh store entry: track appears in STORE zone = new customer from store side.
+        // Don't stitch these to pending tracks - they're starting a fresh journey.
+        let is_fresh_store_entry = current_zone.as_deref() == Some("STORE");
+
         // Try to find a stitch candidate with spawn-hint context
         // When spawn_hint is true and pending was in POS zone, uses:
         // - 15cm height tolerance (vs 10cm base)
         // - 10s time window if same zone (vs 8s)
         // - 190cm distance if same zone (vs 180cm base)
-        if let Some(stitch) = self.stitcher.find_match_with_context(
-            event.position,
-            current_zone.as_deref(),
-            spawn_hint,
-        ) {
+        // Skip stitch attempt entirely for fresh store entries.
+        let stitch_match = if is_fresh_store_entry {
+            debug!(track_id = %track_id, "skip_stitch_fresh_store_entry");
+            None
+        } else {
+            self.stitcher.find_match_with_context(
+                event.position,
+                current_zone.as_deref(),
+                spawn_hint,
+            )
+        };
+
+        if let Some(stitch) = stitch_match {
             let StitchMatch { mut person, time_ms, distance_cm } = stitch;
             self.metrics.record_stitch_matched();
             self.metrics.record_stitch_distance(distance_cm as u64);
@@ -246,9 +258,21 @@ impl Tracker {
             }
             self.journey_manager.end_journey(track_id, outcome);
 
-            // Add to stitcher for potential re-connection (with zone context)
-            let last_zone_name = if last_zone.is_empty() { None } else { Some(last_zone) };
-            self.stitcher.add_pending(person, event.position, last_zone_name);
+            // Add to stitcher ONLY for genuinely lost tracks (sensor gap).
+            // Don't stitch when:
+            // - Completed: exited via gate, they're gone
+            // - ReturnedToStore: walked into store, can't verify identity of returning track
+            // The reentry_detector handles proper re-entry matching by height for store returns.
+            if outcome == JourneyOutcome::Lost {
+                let last_zone_name = if last_zone.is_empty() { None } else { Some(last_zone) };
+                self.stitcher.add_pending(person, event.position, last_zone_name);
+            } else {
+                debug!(
+                    track_id = %track_id,
+                    outcome = %outcome.as_str(),
+                    "skip_stitch_not_lost"
+                );
+            }
         }
     }
 
