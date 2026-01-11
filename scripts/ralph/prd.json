@@ -58,7 +58,7 @@
         "src/io/analysis_logger.rs"
       ],
       "priority": 0,
-      "passes": false,
+      "passes": true,
       "notes": "Must include gateway/tracks for delete/lost/stitch."
     },
     {
@@ -78,7 +78,7 @@
         "src/io/analysis_logger.rs"
       ],
       "priority": 0,
-      "passes": false,
+      "passes": true,
       "notes": "Key for validating ACC mapping and timing."
     },
     {

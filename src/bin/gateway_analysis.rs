@@ -16,8 +16,11 @@
 use clap::Parser;
 use parking_lot::Mutex;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::net::TcpListener;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::EnvFilter;
@@ -65,6 +68,14 @@ struct Args {
     /// Defaults to the site.id from config file.
     #[arg(short, long)]
     site_id: Option<String>,
+
+    /// Split ACC logs per kiosk IP
+    ///
+    /// When enabled, creates separate log files per kiosk:
+    /// logs/acc/<kiosk_ip>-YYYYMMDD.jsonl
+    /// Otherwise, all ACC events go to logs/acc/acc-YYYYMMDD.jsonl
+    #[arg(long, default_value = "false")]
+    acc_split_per_kiosk: bool,
 }
 
 /// Analysis-specific configuration derived from CLI args and config file
@@ -81,6 +92,8 @@ struct AnalysisConfig {
     rotation: RotationStrategy,
     /// Site identifier
     site_id: String,
+    /// Split ACC logs per kiosk IP
+    acc_split_per_kiosk: bool,
 }
 
 /// Log file rotation strategy (for future use)
@@ -117,7 +130,14 @@ impl AnalysisConfig {
         let topics = args.topics.split(',').map(|s| s.trim().to_string()).collect();
         let rotation = RotationStrategy::parse(&args.rotation);
 
-        Self { gateway, log_dir: args.log_dir, topics, rotation, site_id }
+        Self {
+            gateway,
+            log_dir: args.log_dir,
+            topics,
+            rotation,
+            site_id,
+            acc_split_per_kiosk: args.acc_split_per_kiosk,
+        }
     }
 }
 
@@ -149,6 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mqtt_host = %config.gateway.mqtt_host(),
         mqtt_port = %config.gateway.mqtt_port(),
         acc_port = %config.gateway.acc_listener_port(),
+        acc_split_per_kiosk = %config.acc_split_per_kiosk,
         rs485_device = %config.gateway.rs485_device(),
         "analysis_config_loaded"
     );
@@ -158,15 +179,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start MQTT client task
     let mqtt_handle = tokio::spawn(run_mqtt_logger(config.clone(), Arc::clone(&logger)));
-
     info!(topics = ?config.topics, "mqtt_logging_started");
+
+    // Start ACC listener task
+    let acc_handle = tokio::spawn(run_acc_logger(config.clone(), Arc::clone(&logger)));
+    info!(port = %config.gateway.acc_listener_port(), "acc_logging_started");
 
     // Wait for shutdown signal
     tokio::signal::ctrl_c().await?;
     info!("shutdown_signal_received");
 
-    // Abort MQTT task
+    // Abort tasks
     mqtt_handle.abort();
+    acc_handle.abort();
 
     // Flush remaining logs
     logger.lock().flush_all();
@@ -250,6 +275,86 @@ async fn mqtt_logger_loop(
             }
         }
     }
+}
+
+/// Run the ACC logger - listens on ACC port and logs all events
+async fn run_acc_logger(config: AnalysisConfig, logger: Arc<Mutex<AnalysisLogger>>) {
+    loop {
+        if let Err(e) = acc_logger_loop(&config, &logger).await {
+            error!(error = %e, "acc_logger_error");
+        }
+        warn!("acc_listener_restarting");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// ACC logger event loop
+async fn acc_logger_loop(
+    config: &AnalysisConfig,
+    logger: &Arc<Mutex<AnalysisLogger>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let addr = format!("0.0.0.0:{}", config.gateway.acc_listener_port());
+    let listener = TcpListener::bind(&addr).await?;
+
+    info!(port = %config.gateway.acc_listener_port(), "acc_listener_bound");
+
+    loop {
+        match listener.accept().await {
+            Ok((socket, addr)) => {
+                let peer_ip = addr.ip().to_string();
+                let logger_clone = logger.clone();
+                let ip_to_pos = config.gateway.acc_ip_to_pos().clone();
+                let split_per_kiosk = config.acc_split_per_kiosk;
+
+                tokio::spawn(async move {
+                    handle_acc_connection(socket, peer_ip, logger_clone, ip_to_pos, split_per_kiosk)
+                        .await;
+                });
+            }
+            Err(e) => {
+                error!(error = %e, "acc_accept_failed");
+            }
+        }
+    }
+}
+
+/// Handle a single ACC connection - read lines and log them
+async fn handle_acc_connection(
+    socket: tokio::net::TcpStream,
+    peer_ip: String,
+    logger: Arc<Mutex<AnalysisLogger>>,
+    ip_to_pos: HashMap<String, String>,
+    split_per_kiosk: bool,
+) {
+    debug!(ip = %peer_ip, "acc_connection_accepted");
+
+    let reader = BufReader::new(socket);
+    let mut lines = reader.lines();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        let raw_line = line.trim();
+        if raw_line.is_empty() {
+            continue;
+        }
+
+        // Parse "ACC <receipt_id>" format
+        let receipt_id = raw_line.strip_prefix("ACC ").map(|s| s.trim());
+
+        // Look up POS zone from ip_to_pos mapping
+        let pos_zone = ip_to_pos.get(&peer_ip).map(|s| s.as_str());
+
+        info!(
+            kiosk_ip = %peer_ip,
+            raw_line = %raw_line,
+            receipt_id = ?receipt_id,
+            pos_zone = ?pos_zone,
+            "acc_event_received"
+        );
+
+        logger.lock().log_acc(&peer_ip, raw_line, receipt_id, pos_zone, split_per_kiosk);
+    }
+
+    debug!(ip = %peer_ip, "acc_connection_closed");
 }
 
 #[cfg(test)]

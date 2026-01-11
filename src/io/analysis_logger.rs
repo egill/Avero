@@ -27,6 +27,25 @@ pub struct MqttLogRecord<'a> {
     pub fields: Option<&'a serde_json::Value>,
 }
 
+/// ACC log record written to JSONL files
+#[derive(Debug, Serialize)]
+pub struct AccLogRecord<'a> {
+    /// Receive timestamp (ISO 8601)
+    pub ts_recv: &'a str,
+    /// Site identifier
+    pub site: &'a str,
+    /// Source kiosk IP address
+    pub kiosk_ip: &'a str,
+    /// Raw line as received
+    pub raw_line: &'a str,
+    /// Parsed receipt ID (if present)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt_id: Option<&'a str>,
+    /// POS zone name from ip_to_pos mapping (if known)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pos_zone: Option<&'a str>,
+}
+
 /// Manages JSONL file writers per topic with daily rotation
 pub struct AnalysisLogger {
     /// Base directory for log output
@@ -111,9 +130,47 @@ impl AnalysisLogger {
 
         if let Err(e) = self.write_record("mqtt", &topic_safe, &record) {
             warn!(topic = %topic, error = %e, "mqtt_log_failed");
-            return;
+        } else {
+            debug!(topic = %topic, bytes = payload.len(), "mqtt_logged");
         }
-        debug!(topic = %topic, bytes = payload.len(), "mqtt_logged");
+    }
+
+    /// Log an ACC event
+    ///
+    /// Writes to logs/acc/acc-YYYYMMDD.jsonl (default) or
+    /// logs/acc/<kiosk_ip>-YYYYMMDD.jsonl if split_per_kiosk is true
+    pub fn log_acc(
+        &mut self,
+        kiosk_ip: &str,
+        raw_line: &str,
+        receipt_id: Option<&str>,
+        pos_zone: Option<&str>,
+        split_per_kiosk: bool,
+    ) {
+        let ts_recv = Utc::now().to_rfc3339();
+        let site_id = self.site_id.clone();
+
+        let record = AccLogRecord {
+            ts_recv: &ts_recv,
+            site: &site_id,
+            kiosk_ip,
+            raw_line,
+            receipt_id,
+            pos_zone,
+        };
+
+        // Determine filename base: "acc" or sanitized kiosk IP
+        let name_base = if split_per_kiosk {
+            sanitize_topic(kiosk_ip)
+        } else {
+            "acc".to_string()
+        };
+
+        if let Err(e) = self.write_record("acc", &name_base, &record) {
+            warn!(kiosk_ip = %kiosk_ip, error = %e, "acc_log_failed");
+        } else {
+            debug!(kiosk_ip = %kiosk_ip, receipt_id = ?receipt_id, "acc_logged");
+        }
     }
 
     /// Write a serializable record to a specific subdir/name

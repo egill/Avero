@@ -4,8 +4,8 @@ Status legend: [ ] not started, [~] in progress, [x] done
 
 [x] GA-001 Create gateway-analysis binary with config + CLI
 [x] GA-001a Run Mosquitto broker with auth for test capture
-[ ] GA-002 MQTT topic logging to per-topic JSONL files
-[ ] GA-003 ACC TCP logging to dedicated JSONL
+[x] GA-002 MQTT topic logging to per-topic JSONL files
+[x] GA-003 ACC TCP logging to dedicated JSONL
 [ ] GA-004 RS485 logging to dedicated JSONL
 [ ] GA-005 Unified JSONL schema + log writer with rotation
 [ ] GA-006 Add periodic summary stats for data-gap detection
@@ -33,4 +33,16 @@ Status legend: [ ] not started, [~] in progress, [x] done
 - Files changed: config/mosquitto.conf (new), config/mosquitto.passwd (new), docs/gateway-analysis.md (new)
 - What was done: Created Mosquitto broker configuration with username/password auth (avero:avero). Added documentation with commands to install, start/stop broker, verify connectivity, and check logs.
 - **Learnings:** Mosquitto password files need to be hashed with `mosquitto_passwd -U` before first use. Keep plaintext version in repo for easy setup, hash on target.
+---
+
+## 2026-01-11 - GA-002 - MQTT topic logging to per-topic JSONL files
+- Files changed: Cargo.toml, src/io/analysis_logger.rs (new), src/io/mod.rs, src/bin/gateway_analysis.rs
+- What was done: Created analysis_logger module with AnalysisLogger struct. Uses HashMap to track open BufWriters per (subdir, topic). Daily rotation via date check on each write. MQTT logger loop subscribes to topics, parses JSON best-effort, writes MqttLogRecord with ts_recv/site/topic/payload_raw/fields. Added chrono and hex deps.
+- **Learnings:** Use Entry API for HashMap to avoid double lookup. Clone strings needed in record before calling mutable methods to avoid borrow conflicts.
+---
+
+## 2026-01-11 - GA-003 - ACC TCP logging to dedicated JSONL
+- Files changed: src/io/analysis_logger.rs, src/bin/gateway_analysis.rs
+- What was done: Added AccLogRecord struct with ts_recv, site, kiosk_ip, raw_line, receipt_id, and pos_zone fields. Added log_acc method to AnalysisLogger with per-kiosk split option. Created ACC listener loop (run_acc_logger, acc_logger_loop, handle_acc_connection) reusing tokio TcpListener pattern. Added --acc-split-per-kiosk CLI flag.
+- **Learnings:** ACC listener follows same pattern as MQTT logger - wrapper function with retry loop, inner function that binds and loops. IP-to-POS lookup uses config's acc_ip_to_pos HashMap.
 ---
