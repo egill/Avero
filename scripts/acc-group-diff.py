@@ -128,7 +128,7 @@ def active_in_zone(zone_sessions, zone, ts):
 
 def other_pos_duration_s(sessions, zone, ts, window_s):
     window_start = ts - timedelta(seconds=window_s)
-    window_end = ts + timedelta(seconds=window_s)
+    window_end = ts  # Backward-only window to match runtime behavior
     total = 0.0
     for session_zone, start, end in sessions:
         if session_zone == zone or start is None:

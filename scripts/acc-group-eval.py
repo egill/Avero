@@ -128,9 +128,9 @@ def other_pos_activity(sessions, zone, ts, window_s):
 
 
 def other_pos_duration_s(sessions, zone, ts, window_s):
-    """Return total other-POS time within +/- window_s of ts."""
+    """Return total other-POS time within window_s seconds BEFORE ts."""
     window_start = ts - timedelta(seconds=window_s)
-    window_end = ts + timedelta(seconds=window_s)
+    window_end = ts  # Backward-only window to match runtime behavior
     total = 0.0
     for session_zone, start, end in sessions:
         if session_zone == zone or start is None:

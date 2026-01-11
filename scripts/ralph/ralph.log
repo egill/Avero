@@ -1,0 +1,136 @@
+I have successfully completed US-001 and US-002 - the two critical priority 0 stories. Let me summarize what was done:
+
+## Summary
+
+I completed two critical performance fixes from the PRD:
+
+### US-001: Decouple gate commands from tracker loop ✓
+**Commit:** 0965cc3
+
+This is the PRIMARY fix for "gate open too late". Created a new `GateCmdWorker` task that owns the `GateController` and receives commands via mpsc channel. The tracker now enqueues commands with `try_send()` and returns immediately - network I/O is handled asynchronously by the worker.
+
+Key changes:
+- New `src/services/gate_worker.rs` module
+- Tracker uses `gate_cmd_tx` channel instead of `Arc<GateController>`
+- All event handlers are now synchronous (no `.await` on hot path)
+- Worker logs queue delay and send latency for diagnostics
+
+### US-002: Make MQTT/ACC event sending non-blocking with drop metrics ✓
+**Commit:** 9d0604d
+
+This prevents MQTT disconnects caused by slow tracker blocking the eventloop. Both MQTT and ACC now use `try_send()` with drop counting.
+
+Key changes:
+- MQTT and ACC use `try_send()` instead of `send().await`
+- Added `mqtt_events_dropped` and `acc_events_dropped` counters to Metrics
+- Drop warnings are rate-limited to 1 per second per source
+- MQTT eventloop never stalls on tracker backpressure
+
+Both stories have:
+- All existing tests passing
+- prd.json updated with `passes: true`
+- progress.txt updated with completion notes
+There are 6 more stories to complete. Per the Ralph workflow, I complete ONE story per iteration and end my response.
+
+**US-003 Complete**
+
+Implemented RS485 door state delivery using tokio watch channel:
+
+- **RS485Monitor** now uses `watch::Sender<DoorStatus>` with `send_replace()` - never blocks, never fails
+- **Tracker** polls door state via `watch::Receiver` in the main select! loop using `changed()` + `borrow()`
+- **MAX_READ_ATTEMPTS** reduced from 50 to 10, capping RS485 stall time at ~500ms
+- Door state is now lossless - latest value always available, no drops possible
+
+Files changed:
+- `src/io/rs485.rs` - watch channel, reduced read attempts
+- `src/main.rs` - create watch channel, pass to Tracker
+- `src/services/tracker/mod.rs` - accept door_rx, poll in run loop
+- `src/services/tracker/tests.rs` - test helper creates door_rx
+There are still 5 stories remaining (US-005 through US-009). According to the workflow, I complete ONE story per iteration, so I'm done with this iteration.
+
+## Summary - US-004 Complete
+
+**Story:** CloudPlus gate queue: try_send with explicit failure handling
+
+**Changes made:**
+1. **src/io/cloudplus.rs** - Changed `send_open()` from async `send().await` to sync `try_send()`. Returns `Err("queue full")` on full queue or `Err("channel closed")` if channel is closed.
+
+2. **src/services/gate.rs** - Updated `send_open_tcp()` to handle queue full errors with WARN logging and `gate_cmds_dropped` metric. GateController now accepts optional `Arc<Metrics>`.
+
+3. **src/main.rs** - Reordered to create metrics before GateController, passing metrics to the controller.
+
+**Acceptance Criteria Met:**
+- ✅ send_open uses try_send instead of send().await
+- ✅ On queue full: return Err("queue full")
+- ✅ Caller logs WARN with track_id context
+- ✅ gate_cmds_dropped counter incremented (already existed in Metrics)
+- ✅ Documented: dropped command means customer waits
+- ✅ All 130 tests pass
+
+**Commit:** `ffd021f feat: [US-004] - CloudPlus gate queue: try_send with explicit failure handling`
+US-005 is complete. There are still more stories with `passes: false`:
+- US-006 (priority 2): Move journey egress to async worker
+- US-007 (priority 3): Cache zone names
+- US-008 (priority 3): Reduce per-event logging
+- US-009 (priority 3): Remove MQTT parse_frame HashMap allocation
+
+Following the Ralph workflow, the iteration is complete. US-005 has been implemented and committed. The next story to work on would be US-006 (priority 2).
+
+**Summary of US-005 completion:**
+
+- **Commit:** `329455a feat: [US-005] - Add queue depth and lag metrics for diagnosability`
+- **Files modified:**
+  - `src/infra/metrics.rs` - Added gate queue delay histogram, queue depth gauges, and extracted `update_atomic_max()` helper
+  - `src/services/gate_worker.rs` - Records queue delay to metrics
+  - `src/io/prometheus.rs` - Exposes new metrics
+  - `src/main.rs` - Samples queue depths periodically
+
+- **New Prometheus metrics:**
+  - `gateway_gate_queue_delay_us_bucket` - histogram of time from enqueue to worker pickup
+  - `gateway_gate_queue_delay_p99_us`, `gateway_gate_queue_delay_max_us` - gauges
+  - `gateway_event_queue_depth`, `gateway_gate_queue_depth` - current queue depths
+
+All acceptance criteria met:
+✓ Metric: event_queue_depth (current channel size)
+✓ Metric: gate_queue_depth (CloudPlus outbound channel size)  
+✓ Metric: gate_enqueue_to_send_latency_us histogram (named `gate_queue_delay_us`)
+✓ Metrics exposed via Prometheus endpoint
+✓ Can diagnose 'late gate open' by observing queue lag
+There are still 3 stories remaining (US-007, US-008, US-009). Per the Ralph instructions, I complete ONE story per iteration. US-006 is complete.
+
+**Summary of US-006 completion:**
+
+- **Created** `EgressWriter` async task in `src/io/egress.rs`
+- **Pattern**: Journeys flow via `mpsc::channel` from tracker to dedicated writer task
+- **Batching**: Flushes every 10 journeys or every 1 second (whichever comes first)
+- **Non-blocking**: Uses `spawn_blocking` for file I/O to avoid blocking the async runtime
+- **Efficient**: Uses `BufWriter` for batch writes
+- **Decoupled**: Tracker's `tick_and_egress()` now uses `try_send()` - never blocks
+
+Files changed:
+- `src/io/egress.rs` - new EgressWriter, create_egress_writer, write_journeys_to_file
+- `src/io/mod.rs` - re-exports
+- `src/main.rs` - spawns EgressWriter
+- `src/services/tracker/mod.rs` - uses journey_tx channel
+- `src/services/tracker/tests.rs` - test helper updated
+
+All quality checks passed (build, 130 tests, clippy).
+There are still 2 stories with `passes: false` (US-008 and US-009). Per the workflow, I complete ONE story per iteration, then end my response. 
+
+**US-007 completed:**
+- Changed `zone_names` HashMap to store `Arc<str>` instead of `String`
+- Updated `zone_name()` method to return `Arc<str>` for cheap cloning
+- Updated callers in handlers.rs to convert to String at serialization boundaries
+- All 130 tests pass, clippy clean
+- Committed: `33ade6e feat: [US-007] - Cache zone names to avoid per-event allocation`
+All 9 stories have `passes: true`. According to the Ralph Agent Instructions:
+
+> When ALL stories have `passes: true`, respond with ONLY:
+> ```
+> COMPLETE
+> ```
+
+COMPLETE
+No output means no stories have `passes: false`. All stories are complete.
+
+COMPLETE

@@ -113,6 +113,12 @@ pub struct AccConfig {
     pub grouping_other_pos_min_s: u64,
     #[serde(default = "Defaults::acc_grouping_flicker_merge_s")]
     pub grouping_flicker_merge_s: u64,
+    #[serde(default = "Defaults::acc_recent_exit_window_ms")]
+    pub recent_exit_window_ms: u64,
+    #[serde(default = "Defaults::acc_grouping_overlap_grace_s")]
+    pub grouping_overlap_grace_s: u64,
+    #[serde(default = "Defaults::acc_grouping_overlap_soft_dwell_ms")]
+    pub grouping_overlap_soft_dwell_ms: u64,
 }
 
 impl Default for AccConfig {
@@ -126,6 +132,9 @@ impl Default for AccConfig {
             grouping_other_pos_window_s: Defaults::acc_grouping_other_pos_window_s(),
             grouping_other_pos_min_s: Defaults::acc_grouping_other_pos_min_s(),
             grouping_flicker_merge_s: Defaults::acc_grouping_flicker_merge_s(),
+            recent_exit_window_ms: Defaults::acc_recent_exit_window_ms(),
+            grouping_overlap_grace_s: Defaults::acc_grouping_overlap_grace_s(),
+            grouping_overlap_soft_dwell_ms: Defaults::acc_grouping_overlap_soft_dwell_ms(),
         }
     }
 }
@@ -234,6 +243,15 @@ impl Defaults {
     }
     fn acc_grouping_flicker_merge_s() -> u64 {
         10
+    }
+    fn acc_recent_exit_window_ms() -> u64 {
+        3000
+    }
+    fn acc_grouping_overlap_grace_s() -> u64 {
+        2
+    }
+    fn acc_grouping_overlap_soft_dwell_ms() -> u64 {
+        3000
     }
     fn egress_file() -> String {
         "journeys.jsonl".to_string()
@@ -347,6 +365,9 @@ pub struct Config {
     acc_grouping_other_pos_window_s: u64,
     acc_grouping_other_pos_min_s: u64,
     acc_grouping_flicker_merge_s: u64,
+    acc_recent_exit_window_ms: u64,
+    acc_grouping_overlap_grace_s: u64,
+    acc_grouping_overlap_soft_dwell_ms: u64,
 
     // Egress
     egress_file: String,
@@ -435,6 +456,9 @@ impl Default for Config {
             acc_grouping_other_pos_window_s: Defaults::acc_grouping_other_pos_window_s(),
             acc_grouping_other_pos_min_s: Defaults::acc_grouping_other_pos_min_s(),
             acc_grouping_flicker_merge_s: Defaults::acc_grouping_flicker_merge_s(),
+            acc_recent_exit_window_ms: Defaults::acc_recent_exit_window_ms(),
+            acc_grouping_overlap_grace_s: Defaults::acc_grouping_overlap_grace_s(),
+            acc_grouping_overlap_soft_dwell_ms: Defaults::acc_grouping_overlap_soft_dwell_ms(),
             egress_file: "journeys.jsonl".to_string(),
             broker_bind_address: "0.0.0.0".to_string(),
             broker_port: DEFAULT_BROKER_PORT,
@@ -558,6 +582,9 @@ impl Config {
             acc_grouping_other_pos_window_s: toml_config.acc.grouping_other_pos_window_s,
             acc_grouping_other_pos_min_s: toml_config.acc.grouping_other_pos_min_s,
             acc_grouping_flicker_merge_s: toml_config.acc.grouping_flicker_merge_s,
+            acc_recent_exit_window_ms: toml_config.acc.recent_exit_window_ms,
+            acc_grouping_overlap_grace_s: toml_config.acc.grouping_overlap_grace_s,
+            acc_grouping_overlap_soft_dwell_ms: toml_config.acc.grouping_overlap_soft_dwell_ms,
             egress_file: toml_config.egress.file,
             broker_bind_address: toml_config.broker.bind_address,
             broker_port: toml_config.broker.port,
@@ -673,6 +700,9 @@ impl Config {
         acc_grouping_other_pos_window_s -> u64,
         acc_grouping_other_pos_min_s -> u64,
         acc_grouping_flicker_merge_s -> u64,
+        acc_recent_exit_window_ms -> u64,
+        acc_grouping_overlap_grace_s -> u64,
+        acc_grouping_overlap_soft_dwell_ms -> u64,
         broker_port -> u16,
         mqtt_egress_enabled -> bool,
         mqtt_egress_metrics_interval_secs -> u64,

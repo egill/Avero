@@ -14,8 +14,6 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info};
 
-/// Maximum time since leaving POS to still match ACC (3 seconds)
-const MAX_TIME_SINCE_EXIT: u64 = 3000;
 /// Maximum time between entries to be considered same group (10 seconds)
 const GROUP_WINDOW_MS: u64 = 10000;
 /// Retain POS sessions for a short window to evaluate focus
@@ -39,10 +37,7 @@ struct PosGroup {
 impl PosGroup {
     fn new(track_id: TrackId) -> Self {
         let now = Instant::now();
-        Self {
-            members: vec![GroupMember { track_id }],
-            last_entry: now,
-        }
+        Self { members: vec![GroupMember { track_id }], last_entry: now }
     }
 
     fn add_member(&mut self, track_id: TrackId) {
@@ -88,6 +83,13 @@ struct RecentExit {
     dwell_ms: u64,
 }
 
+/// Exit time info captured when primary is selected from recent_exits.
+/// Used for overlap-based expansion of group members.
+#[derive(Debug, Clone)]
+struct ExitSessionInfo {
+    exited_at: Instant,
+}
+
 /// Collects ACC events and correlates them with journeys
 pub struct AccCollector {
     /// IP to POS name mapping
@@ -98,6 +100,9 @@ pub struct AccCollector {
     grouping_other_pos_window_s: u64,
     grouping_other_pos_min_s: u64,
     grouping_flicker_merge_s: u64,
+    recent_exit_window_ms: u64,
+    grouping_overlap_grace_s: u64,
+    grouping_overlap_soft_dwell_ms: u64,
     /// Current POS groups by zone name (co-presence tracking)
     pos_groups: HashMap<String, PosGroup>,
     /// Recent POS sessions per track for focus grouping
@@ -120,6 +125,9 @@ impl AccCollector {
             grouping_other_pos_window_s: config.acc_grouping_other_pos_window_s(),
             grouping_other_pos_min_s: config.acc_grouping_other_pos_min_s(),
             grouping_flicker_merge_s: config.acc_grouping_flicker_merge_s(),
+            recent_exit_window_ms: config.acc_recent_exit_window_ms(),
+            grouping_overlap_grace_s: config.acc_grouping_overlap_grace_s(),
+            grouping_overlap_soft_dwell_ms: config.acc_grouping_overlap_soft_dwell_ms(),
             pos_groups: HashMap::new(),
             pos_sessions: HashMap::new(),
             recent_exits: HashMap::new(),
@@ -227,6 +235,7 @@ impl AccCollector {
         self.cleanup_old_exits();
         let mut primary: Option<TrackId> = None;
         let mut primary_from_present = false;
+        let mut exit_session_info: Option<ExitSessionInfo> = None;
 
         // First try: current group at POS with sufficient dwell
         if let Some(group) = self.pos_groups.get(pos) {
@@ -259,7 +268,8 @@ impl AccCollector {
                 if effective_dwell < self.min_dwell_for_acc {
                     continue;
                 }
-                let dominated = matches!(best, Some((_, best_dwell)) if effective_dwell <= best_dwell);
+                let dominated =
+                    matches!(best, Some((_, best_dwell)) if effective_dwell <= best_dwell);
                 if !dominated {
                     best = Some((member.track_id, effective_dwell));
                 }
@@ -294,6 +304,7 @@ impl AccCollector {
             // Find best candidate from recent exits (immutable borrow first)
             let now = Instant::now();
             let min_dwell = self.min_dwell_for_acc;
+            let recent_exit_window = self.recent_exit_window_ms;
             let mut idx = None;
 
             if let Some(exits) = self.recent_exits.get(pos) {
@@ -301,7 +312,7 @@ impl AccCollector {
                     if exit.dwell_ms < min_dwell {
                         continue;
                     }
-                    if now.duration_since(exit.exited_at).as_millis() as u64 > MAX_TIME_SINCE_EXIT {
+                    if now.duration_since(exit.exited_at).as_millis() as u64 > recent_exit_window {
                         continue;
                     }
                     if self.grouping_other_pos_min_s > 0 {
@@ -315,7 +326,7 @@ impl AccCollector {
                 }
             }
 
-            // Now mutably remove the selected candidate
+            // Now mutably remove the selected candidate and capture session info
             if let Some(idx) = idx {
                 if let Some(exits) = self.recent_exits.get_mut(pos) {
                     let exit = exits.swap_remove(idx);
@@ -328,6 +339,13 @@ impl AccCollector {
                         time_since_exit_ms = %time_since,
                         "acc_matched_recent_exit_primary"
                     );
+
+                    let exited_at = self
+                        .last_pos_session(exit.track_id, pos)
+                        .and_then(|s| s.exited_at)
+                        .unwrap_or(exit.exited_at);
+                    exit_session_info = Some(ExitSessionInfo { exited_at });
+
                     primary = Some(exit.track_id);
                 }
             }
@@ -353,6 +371,7 @@ impl AccCollector {
                 group,
                 accumulated_dwells,
                 primary_from_present,
+                exit_session_info.as_ref(),
             );
             matched.append(&mut expanded);
         }
@@ -388,10 +407,21 @@ impl AccCollector {
         group: &PosGroup,
         accumulated_dwells: Option<&HashMap<TrackId, u64>>,
         primary_from_present: bool,
+        exit_session: Option<&ExitSessionInfo>,
     ) -> Vec<TrackId> {
-        if !primary_from_present && self.grouping_strategy == AccGroupingStrategy::Legacy {
-            return Vec::new();
+        // For recent-exit primary, use overlap-based expansion
+        if !primary_from_present {
+            if self.grouping_strategy == AccGroupingStrategy::Legacy {
+                return Vec::new();
+            }
+            // Require exit session info for overlap-based expansion
+            let Some(exit_info) = exit_session else {
+                return Vec::new();
+            };
+            return self.members_overlapping_with_exit(pos, group, exit_info, accumulated_dwells);
         }
+
+        // For present primary, use strategy-based expansion
         let mut expanded = match self.grouping_strategy {
             AccGroupingStrategy::Legacy => group.all_members(),
             AccGroupingStrategy::PresentDwell => {
@@ -400,7 +430,7 @@ impl AccCollector {
             AccGroupingStrategy::FlickerFocusSoft => self.flicker_focus_members(pos, group),
         };
 
-        if primary_from_present && !expanded.contains(&primary) {
+        if !expanded.contains(&primary) {
             expanded.clear();
         }
 
@@ -434,19 +464,36 @@ impl AccCollector {
         accumulated_dwells: Option<&HashMap<TrackId, u64>>,
     ) -> Vec<TrackId> {
         let now = Instant::now();
-        group
-            .members
-            .iter()
-            .filter_map(|member| {
-                let effective =
-                    self.effective_dwell_ms(member.track_id, pos, now, accumulated_dwells)?;
-                if effective >= self.min_dwell_for_acc {
-                    Some(member.track_id)
-                } else {
-                    None
-                }
-            })
-            .collect()
+        let mut candidates: Vec<(TrackId, Instant)> = Vec::new();
+
+        for member in &group.members {
+            let Some(entry_at) = self.current_pos_entry(member.track_id, pos) else {
+                continue;
+            };
+            let effective = self.effective_dwell_ms(member.track_id, pos, now, accumulated_dwells);
+            let Some(effective) = effective else {
+                continue;
+            };
+            if effective >= self.min_dwell_for_acc {
+                candidates.push((member.track_id, entry_at));
+            }
+        }
+
+        // Single member doesn't need entry-spread check
+        if candidates.len() < 2 {
+            return candidates.into_iter().map(|(tid, _)| tid).collect();
+        }
+
+        // Enforce entry-spread: all qualified members must have entered within the spread window
+        let entry_times: Vec<_> = candidates.iter().map(|(_, entry)| *entry).collect();
+        let min_entry = *entry_times.iter().min().unwrap();
+        let max_entry = *entry_times.iter().max().unwrap();
+        let spread_s = max_entry.duration_since(min_entry).as_secs();
+        if spread_s > self.grouping_entry_spread_s {
+            return vec![];
+        }
+
+        candidates.into_iter().map(|(tid, _)| tid).collect()
     }
 
     fn flicker_focus_members(&self, pos: &str, group: &PosGroup) -> Vec<TrackId> {
@@ -565,6 +612,71 @@ impl AccCollector {
             .map(|session| session.entered_at)
     }
 
+    /// Get the most recent closed session for a track at a given zone
+    fn last_pos_session(&self, track_id: TrackId, pos_zone: &str) -> Option<&PosSession> {
+        let sessions = self.pos_sessions.get(&track_id)?;
+        sessions
+            .iter()
+            .rev()
+            .find(|session| session.zone == pos_zone && session.exited_at.is_some())
+    }
+
+    /// Get members who overlapped with the exiting primary's session.
+    /// Applies soft dwell threshold, other_pos filter, and entry-spread check.
+    fn members_overlapping_with_exit(
+        &self,
+        pos: &str,
+        group: &PosGroup,
+        exit_info: &ExitSessionInfo,
+        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
+    ) -> Vec<TrackId> {
+        let grace = std::time::Duration::from_secs(self.grouping_overlap_grace_s);
+        let primary_exit_with_grace = exit_info.exited_at + grace;
+        let now = Instant::now();
+
+        let candidates: Vec<(TrackId, Instant)> = group
+            .members
+            .iter()
+            .filter_map(|m| {
+                let member_entry = self.current_pos_entry(m.track_id, pos)?;
+
+                // Check interval overlap: member must have entered before primary exited (with grace)
+                if member_entry > primary_exit_with_grace {
+                    return None;
+                }
+
+                // Check soft dwell (uses accumulated dwell for flickering tracks)
+                let dwell = self.effective_dwell_ms(m.track_id, pos, now, accumulated_dwells)?;
+                if dwell < self.grouping_overlap_soft_dwell_ms {
+                    return None;
+                }
+
+                // Check other_pos activity
+                if self.grouping_other_pos_min_s > 0
+                    && self.other_pos_total_s(m.track_id, pos, now) >= self.grouping_other_pos_min_s
+                {
+                    return None;
+                }
+
+                Some((m.track_id, member_entry))
+            })
+            .collect();
+
+        if candidates.len() < 2 {
+            return candidates.into_iter().map(|(tid, _)| tid).collect();
+        }
+
+        // Enforce entry-spread: all candidates must have entered within the spread window
+        let min_entry = candidates.iter().map(|(_, e)| *e).min().unwrap();
+        let max_entry = candidates.iter().map(|(_, e)| *e).max().unwrap();
+        let spread_s = max_entry.duration_since(min_entry).as_secs();
+        if spread_s > self.grouping_entry_spread_s {
+            return vec![];
+        }
+
+        candidates.into_iter().map(|(tid, _)| tid).collect()
+    }
+
     fn other_pos_total_s(&self, track_id: TrackId, pos_zone: &str, now: Instant) -> u64 {
         let Some(sessions) = self.pos_sessions.get(&track_id) else {
             return 0;
@@ -589,10 +701,9 @@ impl AccCollector {
     /// Clean up old exit records
     fn cleanup_old_exits(&mut self) {
         let now = Instant::now();
+        let retention_ms = self.recent_exit_window_ms * 2;
         for exits in self.recent_exits.values_mut() {
-            exits.retain(|e| {
-                now.duration_since(e.exited_at).as_millis() as u64 <= MAX_TIME_SINCE_EXIT * 2
-            });
+            exits.retain(|e| now.duration_since(e.exited_at).as_millis() as u64 <= retention_ms);
         }
     }
 
@@ -628,6 +739,25 @@ mod tests {
             .with_acc_grouping_other_pos_window_s(30)
             .with_acc_grouping_other_pos_min_s(2)
             .with_acc_grouping_flicker_merge_s(10);
+        let metrics = Arc::new(Metrics::new());
+        AccCollector::new(&config, metrics)
+    }
+
+    /// Create a test collector with production-like dwell thresholds
+    /// min_dwell = 7000ms (7s), soft_dwell = 3000ms (3s - default)
+    fn create_test_collector_for_soft_dwell_tests() -> AccCollector {
+        let mut ip_to_pos = std::collections::HashMap::new();
+        ip_to_pos.insert("192.168.1.10".to_string(), "POS_1".to_string());
+        ip_to_pos.insert("192.168.1.11".to_string(), "POS_2".to_string());
+        let config = Config::default()
+            .with_acc_ip_to_pos(ip_to_pos)
+            .with_min_dwell_ms(7000) // Production-like: 7s min_dwell
+            .with_acc_grouping_strategy(AccGroupingStrategy::FlickerFocusSoft)
+            .with_acc_grouping_entry_spread_s(10)
+            .with_acc_grouping_other_pos_window_s(30)
+            .with_acc_grouping_other_pos_min_s(2)
+            .with_acc_grouping_flicker_merge_s(10);
+        // soft_dwell defaults to 3000ms (3s)
         let metrics = Arc::new(Metrics::new());
         AccCollector::new(&config, metrics)
     }
@@ -1219,5 +1349,324 @@ mod tests {
 
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
         assert_eq!(result, vec![TrackId(100)]);
+    }
+
+    // ============================================================
+    // New tests for tightened ACC grouping
+    // ============================================================
+
+    #[test]
+    fn test_members_overlapping_with_exit_filters_non_overlapping() {
+        // Direct unit test for members_overlapping_with_exit.
+        // Tests that members who entered after the primary's exit + grace are excluded.
+        let mut collector =
+            create_test_collector_with_strategy(AccGroupingStrategy::FlickerFocusSoft);
+
+        let now = Instant::now();
+
+        // Set up Track 200 as present in pos_groups with sufficient dwell
+        collector.record_pos_entry(TrackId(200), "POS_1");
+        let track200_entry = now - std::time::Duration::from_secs(10);
+        set_pos_entry_time(&mut collector, TrackId(200), "POS_1", track200_entry);
+
+        // Primary exited at now - 15s, grace is 2s, so overlap deadline is now - 13s
+        // Track 200 entered at now - 10s which is AFTER now - 13s -> no overlap
+        let exit_info = ExitSessionInfo { exited_at: now - std::time::Duration::from_secs(15) };
+
+        let group = collector.pos_groups.get("POS_1").unwrap();
+        let result = collector.members_overlapping_with_exit("POS_1", group, &exit_info, None);
+
+        // Track 200 should NOT be included - no overlap with primary's session
+        assert!(
+            result.is_empty(),
+            "Member who entered after primary exit + grace should be excluded. Got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_members_overlapping_with_exit_includes_overlapping() {
+        // Direct unit test for members_overlapping_with_exit.
+        // Tests that members who overlapped with the primary's session ARE included.
+        let mut collector =
+            create_test_collector_with_strategy(AccGroupingStrategy::FlickerFocusSoft);
+
+        let now = Instant::now();
+
+        // Set up Track 200 as present in pos_groups with sufficient dwell
+        collector.record_pos_entry(TrackId(200), "POS_1");
+        let track200_entry = now - std::time::Duration::from_secs(10);
+        set_pos_entry_time(&mut collector, TrackId(200), "POS_1", track200_entry);
+
+        // Primary exited at now - 5s, Track 200 entered at now - 10s (before exit + grace)
+        let exit_info = ExitSessionInfo { exited_at: now - std::time::Duration::from_secs(5) };
+
+        let group = collector.pos_groups.get("POS_1").unwrap();
+        let result = collector.members_overlapping_with_exit("POS_1", group, &exit_info, None);
+
+        // Track 200 should be included - overlapped with primary's session
+        assert_eq!(
+            result,
+            vec![TrackId(200)],
+            "Member who overlapped with primary should be included"
+        );
+    }
+
+    #[test]
+    fn test_members_overlapping_with_exit_filters_other_pos_activity() {
+        // Direct unit test for members_overlapping_with_exit.
+        // Tests that members with other_pos activity >= threshold are excluded.
+        let mut collector =
+            create_test_collector_with_strategy(AccGroupingStrategy::FlickerFocusSoft);
+
+        let now = Instant::now();
+
+        // Set up Track 200 as present in pos_groups with sufficient dwell
+        collector.record_pos_entry(TrackId(200), "POS_1");
+        let track200_entry = now - std::time::Duration::from_secs(10);
+        set_pos_entry_time(&mut collector, TrackId(200), "POS_1", track200_entry);
+
+        // Add other_pos activity for Track 200 (3s at POS_2, >= 2s threshold)
+        if let Some(sessions) = collector.pos_sessions.get_mut(&TrackId(200)) {
+            sessions.push(PosSession {
+                zone: "POS_2".to_string(),
+                entered_at: now - std::time::Duration::from_secs(8),
+                exited_at: Some(now - std::time::Duration::from_secs(5)),
+            });
+        }
+
+        let exit_info = ExitSessionInfo { exited_at: now - std::time::Duration::from_secs(5) };
+
+        let group = collector.pos_groups.get("POS_1").unwrap();
+        let result = collector.members_overlapping_with_exit("POS_1", group, &exit_info, None);
+
+        assert!(
+            result.is_empty(),
+            "Member with other_pos activity >= threshold should be excluded"
+        );
+    }
+
+    #[test]
+    fn test_members_overlapping_with_exit_filters_insufficient_dwell() {
+        let mut collector =
+            create_test_collector_with_strategy(AccGroupingStrategy::FlickerFocusSoft);
+        let now = Instant::now();
+
+        // Track 200: 500ms dwell (below soft_dwell threshold)
+        collector.record_pos_entry(TrackId(200), "POS_1");
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(200),
+            "POS_1",
+            now - std::time::Duration::from_millis(500),
+        );
+
+        let exit_info = ExitSessionInfo { exited_at: now - std::time::Duration::from_secs(1) };
+
+        let group = collector.pos_groups.get("POS_1").unwrap();
+        let result = collector.members_overlapping_with_exit("POS_1", group, &exit_info, None);
+
+        assert!(result.is_empty(), "Member with insufficient dwell should be excluded");
+    }
+
+    #[test]
+    fn test_members_overlapping_with_exit_uses_accumulated_dwell() {
+        let mut collector =
+            create_test_collector_with_strategy(AccGroupingStrategy::FlickerFocusSoft);
+        let now = Instant::now();
+
+        // Track 200: 1s session dwell (below soft_dwell), but 10s accumulated dwell
+        collector.record_pos_entry(TrackId(200), "POS_1");
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(200),
+            "POS_1",
+            now - std::time::Duration::from_secs(1),
+        );
+
+        let exit_info = ExitSessionInfo { exited_at: now - std::time::Duration::from_millis(500) };
+
+        let mut accumulated = HashMap::new();
+        accumulated.insert(TrackId(200), 10_000);
+
+        let group = collector.pos_groups.get("POS_1").unwrap();
+        let result =
+            collector.members_overlapping_with_exit("POS_1", group, &exit_info, Some(&accumulated));
+
+        assert_eq!(result, vec![TrackId(200)], "Accumulated dwell should qualify member");
+    }
+
+    #[test]
+    fn test_present_dwell_enforces_entry_spread() {
+        // PresentDwell strategy should now reject groups where members
+        // entered too far apart (violates entry-spread rule).
+        let mut collector = create_test_collector_with_strategy(AccGroupingStrategy::PresentDwell);
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+
+        // Both enter POS_1
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+
+        let now = Instant::now();
+
+        // Track 100 entered 20 seconds ago, Track 200 entered 8 seconds ago
+        // Spread is 12 seconds, which exceeds grouping_entry_spread_s (10)
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(100),
+            "POS_1",
+            now - std::time::Duration::from_secs(20),
+        );
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(200),
+            "POS_1",
+            now - std::time::Duration::from_secs(8),
+        );
+
+        // Process ACC - both have sufficient dwell but entry spread is too wide
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+
+        // With entry-spread enforcement, only the primary should be matched
+        // (or empty if the primary check fails the expansion)
+        assert_eq!(
+            result,
+            vec![TrackId(100)],
+            "PresentDwell should reject groups with wide entry spread"
+        );
+    }
+
+    #[test]
+    fn test_recent_exit_expansion_with_soft_dwell() {
+        // Integration test: validates that recent-exit expansion works when
+        // present members have soft_dwell (3s) but not full min_dwell (7s)
+        //
+        // Config: min_dwell = 7s, soft_dwell = 3s
+        // Scenario:
+        // - Track A and B both enter POS_1, overlapping in time
+        // - Track A has min_dwell (8s), Track B has soft_dwell (4s) only
+        // - Track A exits, then ACC arrives
+        // - Track B doesn't qualify as present primary (4s < 7s min_dwell)
+        // - Track A is selected as recent-exit primary
+        // - Track B should be included via overlap expansion (4s >= 3s soft_dwell)
+        let mut collector = create_test_collector_for_soft_dwell_tests();
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(TrackId(100)); // Track A - will exit before ACC
+        jm.new_journey(TrackId(200)); // Track B - still present when ACC arrives
+
+        let now = Instant::now();
+
+        // Both enter POS_1 at similar times (within entry spread)
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+
+        // Track A: entered 9s ago (8s dwell after exit), Track B: entered 4s ago
+        // Both within entry_spread_s (10s), Track B at soft_dwell (4s > 3s but < 7s)
+        let track_a_entry = now - std::time::Duration::from_secs(9);
+        let track_b_entry = now - std::time::Duration::from_secs(4);
+        set_pos_entry_time(&mut collector, TrackId(100), "POS_1", track_a_entry);
+        set_pos_entry_time(&mut collector, TrackId(200), "POS_1", track_b_entry);
+
+        // Track A exits with sufficient dwell (8s > min_dwell 7s)
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
+
+        // Make sure Track A's exit session is recorded properly for overlap check
+        if let Some(sessions) = collector.pos_sessions.get_mut(&TrackId(100)) {
+            if let Some(session) = sessions.iter_mut().find(|s| s.zone == "POS_1") {
+                session.entered_at = track_a_entry;
+                session.exited_at = Some(now);
+            }
+        }
+
+        // Process ACC - Track A is primary (recent exit), Track B should expand
+        // Track B has 4s dwell >= soft_dwell (3s) and overlapped with Track A
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+
+        assert!(
+            result.contains(&TrackId(100)),
+            "Track A (recent exit primary) should be in result"
+        );
+        assert!(
+            result.contains(&TrackId(200)),
+            "Track B (present with soft_dwell, overlapping) should be in result via expansion"
+        );
+        assert_eq!(result.len(), 2, "Both tracks should be matched");
+    }
+
+    #[test]
+    fn test_recent_exit_expansion_blocked_by_insufficient_soft_dwell() {
+        // Config: min_dwell = 7s, soft_dwell = 3s
+        // Track A exits with 8s dwell, Track B present with 2s dwell (< soft_dwell)
+        let mut collector = create_test_collector_for_soft_dwell_tests();
+        let mut jm = JourneyManager::new();
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+
+        let now = Instant::now();
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+
+        let track_a_entry = now - std::time::Duration::from_secs(9);
+        let track_b_entry = now - std::time::Duration::from_secs(2);
+        set_pos_entry_time(&mut collector, TrackId(100), "POS_1", track_a_entry);
+        set_pos_entry_time(&mut collector, TrackId(200), "POS_1", track_b_entry);
+
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
+
+        if let Some(sessions) = collector.pos_sessions.get_mut(&TrackId(100)) {
+            if let Some(session) = sessions.iter_mut().find(|s| s.zone == "POS_1") {
+                session.entered_at = track_a_entry;
+                session.exited_at = Some(now);
+            }
+        }
+
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+
+        assert_eq!(result, vec![TrackId(100)], "Track B below soft_dwell should not be expanded");
+    }
+
+    #[test]
+    fn test_recent_exit_expansion_with_multiple_soft_dwell_members() {
+        // Config: min_dwell = 7s, soft_dwell = 3s, entry_spread = 10s
+        // Track A exits with 8s, Tracks B (5s) and C (4s) present with soft_dwell
+        // B and C entered 1s apart (within entry_spread) -> all three should match
+        let mut collector = create_test_collector_for_soft_dwell_tests();
+        let mut jm = JourneyManager::new();
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+        jm.new_journey(TrackId(300));
+
+        let now = Instant::now();
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+        collector.record_pos_entry(TrackId(300), "POS_1");
+
+        let track_a_entry = now - std::time::Duration::from_secs(9);
+        let track_b_entry = now - std::time::Duration::from_secs(5);
+        let track_c_entry = now - std::time::Duration::from_secs(4);
+
+        set_pos_entry_time(&mut collector, TrackId(100), "POS_1", track_a_entry);
+        set_pos_entry_time(&mut collector, TrackId(200), "POS_1", track_b_entry);
+        set_pos_entry_time(&mut collector, TrackId(300), "POS_1", track_c_entry);
+
+        collector.record_pos_exit(TrackId(100), "POS_1", 8000);
+
+        if let Some(sessions) = collector.pos_sessions.get_mut(&TrackId(100)) {
+            if let Some(session) = sessions.iter_mut().find(|s| s.zone == "POS_1") {
+                session.entered_at = track_a_entry;
+                session.exited_at = Some(now);
+            }
+        }
+
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+
+        assert!(result.contains(&TrackId(100)), "Track A (primary) should match");
+        assert!(result.contains(&TrackId(200)), "Track B should be expanded");
+        assert!(result.contains(&TrackId(300)), "Track C should be expanded");
+        assert_eq!(result.len(), 3);
     }
 }
