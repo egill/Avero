@@ -14,20 +14,16 @@
 //!   <log-dir>/summary/summary-YYYYMMDD.jsonl
 
 use clap::Parser;
-use tracing::info;
+use parking_lot::Mutex;
+use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+use std::sync::Arc;
+use std::time::Duration;
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::EnvFilter;
 
 use gateway_poc::infra::Config;
-
-/// Default log directory for analysis output
-const DEFAULT_LOG_DIR: &str = "logs";
-
-/// Default rotation strategy
-const DEFAULT_ROTATION: &str = "daily";
-
-/// Default MQTT topics to subscribe to
-const DEFAULT_TOPICS: &str = "gateway/#";
+use gateway_poc::io::analysis_logger::AnalysisLogger;
 
 /// Gateway Analysis - Diagnostic logging for gateway-poc
 #[derive(Parser, Debug)]
@@ -47,20 +43,20 @@ struct Args {
     /// - acc/   - ACC payment terminal events
     /// - rs485/ - Door state changes
     /// - summary/ - Periodic statistics
-    #[arg(short = 'd', long, default_value = DEFAULT_LOG_DIR)]
+    #[arg(short = 'd', long, default_value = "logs")]
     log_dir: String,
 
     /// MQTT topics to subscribe to (comma-separated)
     ///
     /// Use # for all topics under a prefix, e.g., "gateway/#"
-    #[arg(short, long, default_value = DEFAULT_TOPICS)]
+    #[arg(short, long, default_value = "gateway/#")]
     topics: String,
 
     /// Log rotation strategy: "daily" or "size:<MB>"
     ///
     /// - daily: Rotate at midnight UTC (default)
     /// - size:100: Rotate when file exceeds 100 MB
-    #[arg(short, long, default_value = DEFAULT_ROTATION)]
+    #[arg(short, long, default_value = "daily")]
     rotation: String,
 
     /// Site identifier for log records
@@ -73,22 +69,24 @@ struct Args {
 
 /// Analysis-specific configuration derived from CLI args and config file
 #[derive(Debug, Clone)]
-pub struct AnalysisConfig {
+struct AnalysisConfig {
     /// Base gateway config (MQTT, ACC, RS485 settings)
-    pub gateway: Config,
+    gateway: Config,
     /// Directory for log output
-    pub log_dir: String,
+    log_dir: String,
     /// MQTT topics to subscribe to
-    pub topics: Vec<String>,
-    /// Rotation strategy
-    pub rotation: RotationStrategy,
+    topics: Vec<String>,
+    /// Rotation strategy (for future use)
+    #[allow(dead_code)]
+    rotation: RotationStrategy,
     /// Site identifier
-    pub site_id: String,
+    site_id: String,
 }
 
-/// Log file rotation strategy
+/// Log file rotation strategy (for future use)
 #[derive(Debug, Clone, Copy)]
-pub enum RotationStrategy {
+#[allow(dead_code)]
+enum RotationStrategy {
     /// Rotate at midnight UTC
     Daily,
     /// Rotate when file exceeds size in bytes
@@ -98,16 +96,16 @@ pub enum RotationStrategy {
 impl RotationStrategy {
     fn parse(s: &str) -> Self {
         if s == "daily" {
-            return RotationStrategy::Daily;
+            return Self::Daily;
         }
-        if let Some(size_str) = s.strip_prefix("size:") {
-            if let Ok(mb) = size_str.parse::<u64>() {
-                return RotationStrategy::Size(mb * 1024 * 1024);
-            }
+
+        // Try parsing "size:<MB>" format
+        if let Some(mb) = s.strip_prefix("size:").and_then(|s| s.parse::<u64>().ok()) {
+            return Self::Size(mb * 1024 * 1024);
         }
-        // Default to daily on parse error
-        tracing::warn!(rotation = %s, "Invalid rotation strategy, defaulting to daily");
-        RotationStrategy::Daily
+
+        warn!(rotation = %s, "invalid_rotation_strategy_defaulting_to_daily");
+        Self::Daily
     }
 }
 
@@ -134,10 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_target(false)
         .init();
 
-    info!(
-        version = env!("CARGO_PKG_VERSION"),
-        "gateway_analysis_starting"
-    );
+    info!(version = env!("CARGO_PKG_VERSION"), "gateway_analysis_starting");
 
     // Parse CLI arguments
     let args = Args::parse();
@@ -158,14 +153,103 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "analysis_config_loaded"
     );
 
-    // Placeholder for future stories - the logging infrastructure will be added in GA-002+
-    info!("Gateway analysis ready. Logging infrastructure will be added in GA-002.");
+    // Create shared analysis logger
+    let logger = Arc::new(Mutex::new(AnalysisLogger::new(&config.log_dir, &config.site_id)));
 
-    // Keep running until Ctrl+C
+    // Start MQTT client task
+    let mqtt_handle = tokio::spawn(run_mqtt_logger(config.clone(), Arc::clone(&logger)));
+
+    info!(topics = ?config.topics, "mqtt_logging_started");
+
+    // Wait for shutdown signal
     tokio::signal::ctrl_c().await?;
+    info!("shutdown_signal_received");
+
+    // Abort MQTT task
+    mqtt_handle.abort();
+
+    // Flush remaining logs
+    logger.lock().flush_all();
+
     info!("gateway_analysis_shutdown");
 
     Ok(())
+}
+
+/// Run the MQTT logger - subscribes to topics and logs all messages
+async fn run_mqtt_logger(config: AnalysisConfig, logger: Arc<Mutex<AnalysisLogger>>) {
+    loop {
+        if let Err(e) = mqtt_logger_loop(&config, &logger).await {
+            error!(error = %e, "mqtt_logger_error");
+        }
+        warn!("mqtt_reconnecting");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// MQTT logger event loop
+async fn mqtt_logger_loop(
+    config: &AnalysisConfig,
+    logger: &Arc<Mutex<AnalysisLogger>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut mqttoptions = MqttOptions::new(
+        "gateway-analysis",
+        config.gateway.mqtt_host(),
+        config.gateway.mqtt_port(),
+    );
+    mqttoptions.set_keep_alive(Duration::from_secs(30));
+
+    // Set credentials if configured
+    if let (Some(username), Some(password)) =
+        (config.gateway.mqtt_username(), config.gateway.mqtt_password())
+    {
+        mqttoptions.set_credentials(username, password);
+    }
+
+    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 100);
+
+    // Subscribe to all configured topics
+    for topic in &config.topics {
+        client.subscribe(topic.as_str(), QoS::AtMostOnce).await?;
+        info!(topic = %topic, "mqtt_subscribed");
+    }
+
+    loop {
+        match eventloop.poll().await {
+            Ok(Event::Incoming(Packet::Publish(publish))) => {
+                let topic = &publish.topic;
+                let payload = std::str::from_utf8(&publish.payload);
+
+                match payload {
+                    Ok(payload_str) => {
+                        // Try to parse as JSON for the fields
+                        let parsed: Option<serde_json::Value> =
+                            serde_json::from_str(payload_str).ok();
+
+                        logger.lock().log_mqtt(topic, payload_str, parsed.as_ref());
+                        debug!(topic = %topic, bytes = payload_str.len(), "mqtt_message_logged");
+                    }
+                    Err(e) => {
+                        // Log raw bytes as hex if not valid UTF-8
+                        let hex_payload = hex::encode(&publish.payload);
+                        warn!(topic = %topic, error = %e, "invalid_utf8_payload");
+                        logger.lock().log_mqtt(topic, &format!("HEX:{}", hex_payload), None);
+                    }
+                }
+            }
+            Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                info!(
+                    host = %config.gateway.mqtt_host(),
+                    port = %config.gateway.mqtt_port(),
+                    "mqtt_connected"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Box::new(e));
+            }
+        }
+    }
 }
 
 #[cfg(test)]

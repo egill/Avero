@@ -9,8 +9,10 @@
 //! - `egress` - Journey output to file (JSONL format)
 //! - `acc_listener` - TCP listener for ACC payment terminal events
 //! - `prometheus` - Prometheus metrics HTTP endpoint
+//! - `analysis_logger` - JSONL logger for gateway-analysis diagnostic capture
 
 pub mod acc_listener;
+pub mod analysis_logger;
 pub mod cloudplus;
 pub mod egress;
 pub mod egress_channel;
