@@ -73,6 +73,10 @@ defmodule AveroCommandWeb.Router do
   scope "/api", AveroCommandWeb do
     pipe_through :api
 
+    # Gate control (for Grafana button)
+    post "/gate/open", GateController, :open
+    options "/gate/open", GateController, :options
+
     # Review endpoint for automated anomaly detection
     get "/review", ReviewController, :index
 

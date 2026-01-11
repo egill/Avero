@@ -13,24 +13,8 @@ defmodule AveroCommandWeb.DashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
-      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "gates")
-      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "gateway:events")
-      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "gateway:journeys")
-      Process.send_after(self(), :refresh, @refresh_interval)
-    end
-
-    gates = load_gates()
-    journeys = load_recent_journeys(socket.assigns[:selected_sites] || [])
-    pos_zones = init_pos_zones()
-
-    {:ok, assign(socket,
-      page_title: "Dashboard",
-      gates: gates,
-      journeys: journeys,
-      pos_zones: pos_zones,
-      last_updated: DateTime.utc_now()
-    )}
+    # Redirect to Grafana dashboard
+    {:ok, redirect(socket, external: "https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s")}
   end
 
   @impl true
@@ -59,6 +43,8 @@ defmodule AveroCommandWeb.DashboardLive do
 
   @impl true
   def handle_event("open_gate", %{"site" => site}, socket) do
+    require Logger
+
     # Map site to gateway IP (via Tailscale)
     gateway_ip = case site do
       "netto" -> "100.80.187.3"
@@ -70,15 +56,18 @@ defmodule AveroCommandWeb.DashboardLive do
       # Call the gateway's HTTP endpoint to open the gate
       Task.start(fn ->
         url = ~c"http://#{gateway_ip}:9090/gate/open"
+        # Ensure httpc is available (should be started at app boot but be safe)
         :inets.start()
-        case :httpc.request(:post, {url, [], ~c"application/json", ""}, [timeout: 5000], []) do
-          {:ok, {{_, 200, _}, _, _}} ->
-            Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_opened, site})
+        :ssl.start()
+
+        case :httpc.request(:post, {url, [], ~c"application/json", ~c""}, [{:timeout, 5000}], []) do
+          {:ok, {{_, status, _}, _, body}} ->
+            Logger.info("Gate open response for #{site}: status=#{status} body=#{inspect(body)}")
+            if status == 200 do
+              Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_opened, site})
+            end
           {:error, reason} ->
-            require Logger
             Logger.warning("Gate open failed for #{site}: #{inspect(reason)}")
-          _ ->
-            :ok
         end
       end)
     end
@@ -125,187 +114,12 @@ defmodule AveroCommandWeb.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="space-y-4">
-      <!-- Header Row -->
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <div class="flex items-center gap-1.5">
-            <span class="relative flex h-2.5 w-2.5">
-              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
-            </span>
-            <span class="text-xs text-gray-500 dark:text-gray-400">Live</span>
-          </div>
-        </div>
-        <span class="text-xs text-gray-400"><%= format_time(@last_updated) %></span>
-      </div>
-
-      <!-- Grafana Stats Row -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <div id="grafana-active-tracks" phx-update="ignore" class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=2&theme=light&refresh=5s"
-            class="w-full h-20 border-0"
-            loading="lazy"
-            title="Active Tracks"
-          ></iframe>
-        </div>
-        <div id="grafana-exits" phx-update="ignore" class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=4&theme=light&refresh=5s"
-            class="w-full h-20 border-0"
-            loading="lazy"
-            title="Exits (1h)"
-          ></iframe>
-        </div>
-        <div id="grafana-gate-opens" phx-update="ignore" class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=5&theme=light&refresh=5s"
-            class="w-full h-20 border-0"
-            loading="lazy"
-            title="Gate Opens (1h)"
-          ></iframe>
-        </div>
-        <div id="grafana-payments" phx-update="ignore" class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <iframe
-            src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=6&theme=light&refresh=5s"
-            class="w-full h-20 border-0"
-            loading="lazy"
-            title="Payments (1h)"
-          ></iframe>
-        </div>
-      </div>
-
-      <!-- Main Content: Gate + POS Zones -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div class="lg:col-span-2">
-          <%= if Enum.empty?(@gates) do %>
-            <.dash_card title="Gate Status">
-              <div class="p-8 text-center text-gray-500 dark:text-gray-400">
-                <p>No active gates</p>
-              </div>
-            </.dash_card>
-          <% else %>
-            <%= for gate <- @gates do %>
-              <.gate_card gate={gate} />
-            <% end %>
-          <% end %>
-        </div>
-
-        <div>
-          <.dash_card title="POS Zones">
-            <div class="p-4 grid grid-cols-5 gap-2">
-              <%= for zone <- @pos_zones do %>
-                <.pos_zone zone={zone} />
-              <% end %>
-            </div>
-          </.dash_card>
-        </div>
-      </div>
-
-      <!-- Charts Row -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <.dash_card title="Journey Outcomes (24h)">
-          <div id="grafana-journey-outcomes" phx-update="ignore">
-            <iframe
-              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=51&theme=light&from=now-24h&to=now&refresh=5s"
-              class="w-full h-40 border-0"
-              loading="lazy"
-            ></iframe>
-          </div>
-        </.dash_card>
-
-        <.dash_card title="POS Zone Occupancy">
-          <div id="grafana-pos-occupancy" phx-update="ignore">
-            <iframe
-              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=30&theme=light&from=now-30m&to=now&refresh=5s"
-              class="w-full h-40 border-0"
-              loading="lazy"
-            ></iframe>
-          </div>
-        </.dash_card>
-      </div>
-
-      <!-- Journeys + Gate State -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <.dash_card title="Recent Journeys">
-          <div class="divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto">
-            <%= if Enum.empty?(@journeys) do %>
-              <div class="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                No recent journeys
-              </div>
-            <% else %>
-              <%= for journey <- @journeys do %>
-                <div class="px-4 py-2 flex items-center justify-between">
-                  <div class="flex items-center gap-3">
-                    <div class={[
-                      "w-2 h-2 rounded-full",
-                      journey.outcome == "paid_exit" && "bg-green-500",
-                      journey.outcome == "unpaid_exit" && "bg-red-500",
-                      journey.outcome not in ["paid_exit", "unpaid_exit"] && "bg-gray-400"
-                    ]}></div>
-                    <div>
-                      <span class="text-sm font-medium text-gray-900 dark:text-white">
-                        <%= journey.outcome || "unknown" %>
-                      </span>
-                      <span class="text-xs text-gray-500 dark:text-gray-400 ml-2">
-                        <%= if journey.total_pos_dwell_ms, do: "#{div(journey.total_pos_dwell_ms, 1000)}s", else: "" %>
-                      </span>
-                    </div>
-                  </div>
-                  <span class="text-xs text-gray-400">
-                    <%= format_journey_time(journey.ended_at || journey.time) %>
-                  </span>
-                </div>
-              <% end %>
-            <% end %>
-          </div>
-        </.dash_card>
-
-        <.dash_card title="Gate State Timeline">
-          <div id="grafana-gate-state" phx-update="ignore">
-            <iframe
-              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=40&theme=light&from=now-30m&to=now&refresh=5s"
-              class="w-full h-40 border-0"
-              loading="lazy"
-            ></iframe>
-          </div>
-        </.dash_card>
-      </div>
-
-      <!-- Additional Metrics -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <.dash_card title="Today vs Yesterday">
-          <div id="grafana-today-vs-yesterday" phx-update="ignore">
-            <iframe
-              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=50&theme=light&from=now-24h&to=now&refresh=30s"
-              class="w-full h-36 border-0"
-              loading="lazy"
-            ></iframe>
-          </div>
-        </.dash_card>
-
-        <.dash_card title="Gate Latency">
-          <div id="grafana-gate-latency" phx-update="ignore">
-            <iframe
-              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=43&theme=light&from=now-1h&to=now&refresh=5s"
-              class="w-full h-36 border-0"
-              loading="lazy"
-            ></iframe>
-          </div>
-        </.dash_card>
-
-        <.dash_card title="Tailgating Rate">
-          <div id="grafana-tailgating" phx-update="ignore">
-            <iframe
-              src="https://grafana.e18n.net/d-solo/netto-grandi/netto-grandi?orgId=1&panelId=22&theme=light&from=now-24h&to=now&refresh=5s"
-              class="w-full h-36 border-0"
-              loading="lazy"
-            ></iframe>
-          </div>
-        </.dash_card>
-      </div>
+    <div id="grafana-fullscreen" phx-update="ignore" class="fixed inset-0 -m-4 lg:-m-8">
+      <iframe
+        src="https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s"
+        class="w-full h-full border-0"
+        title="Command Live Dashboard"
+      ></iframe>
     </div>
     """
   end
