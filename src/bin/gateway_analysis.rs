@@ -17,10 +17,12 @@ use clap::Parser;
 use parking_lot::Mutex;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
+use tokio_serial::SerialPortBuilderExt;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::EnvFilter;
@@ -185,6 +187,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let acc_handle = tokio::spawn(run_acc_logger(config.clone(), Arc::clone(&logger)));
     info!(port = %config.gateway.acc_listener_port(), "acc_logging_started");
 
+    // Start RS485 logger task
+    let rs485_handle = tokio::spawn(run_rs485_logger(config.clone(), Arc::clone(&logger)));
+    info!(device = %config.gateway.rs485_device(), "rs485_logging_started");
+
     // Wait for shutdown signal
     tokio::signal::ctrl_c().await?;
     info!("shutdown_signal_received");
@@ -192,6 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Abort tasks
     mqtt_handle.abort();
     acc_handle.abort();
+    rs485_handle.abort();
 
     // Flush remaining logs
     logger.lock().flush_all();
@@ -355,6 +362,194 @@ async fn handle_acc_connection(
     }
 
     debug!(ip = %peer_ip, "acc_connection_closed");
+}
+
+// RS485 protocol constants (from rs485.rs)
+const RS485_START_BYTE_COMMAND: u8 = 0x7E;
+const RS485_START_BYTE_RESPONSE: u8 = 0x7F;
+const RS485_CMD_QUERY: u8 = 0x10;
+const RS485_COMMAND_FRAME_LEN: usize = 8;
+const RS485_RESPONSE_FRAME_LEN: usize = 18;
+const RS485_MAX_READ_ATTEMPTS: usize = 10;
+
+// Door status codes
+const DOOR_CLOSED_PROPERLY: u8 = 0x00;
+const DOOR_LEFT_OPEN_PROPERLY: u8 = 0x01;
+const DOOR_RIGHT_OPEN_PROPERLY: u8 = 0x02;
+const DOOR_IN_MOTION: u8 = 0x03;
+const DOOR_FIRE_SIGNAL_OPENING: u8 = 0x04;
+
+/// Run the RS485 logger - polls door state and logs frames
+async fn run_rs485_logger(config: AnalysisConfig, logger: Arc<Mutex<AnalysisLogger>>) {
+    loop {
+        if let Err(e) = rs485_logger_loop(&config, &logger).await {
+            error!(error = %e, "rs485_logger_error");
+        }
+        warn!("rs485_reconnecting");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// RS485 logger event loop
+async fn rs485_logger_loop(
+    config: &AnalysisConfig,
+    logger: &Arc<Mutex<AnalysisLogger>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let device = config.gateway.rs485_device();
+    let baud = config.gateway.rs485_baud();
+    let poll_interval = Duration::from_millis(config.gateway.rs485_poll_interval_ms());
+
+    let mut port = tokio_serial::new(device, baud)
+        .timeout(Duration::from_millis(100))
+        .open_native_async()
+        .map_err(|e| format!("Failed to open {}: {}", device, e))?;
+
+    info!(device = %device, baud = %baud, "rs485_port_opened");
+
+    let mut read_buffer: Vec<u8> = Vec::with_capacity(64);
+    let mut poll_timer = tokio::time::interval(poll_interval);
+
+    loop {
+        poll_timer.tick().await;
+
+        // Build and send query command
+        let cmd = build_rs485_query_command(1); // machine_number = 1
+        if let Err(e) = port.write_all(&cmd).await {
+            warn!(error = %e, "rs485_write_error");
+            continue;
+        }
+
+        // Read response frame
+        match read_rs485_frame(&mut port, &mut read_buffer).await {
+            Some(frame) => {
+                let raw_frame = hex::encode(&frame);
+                let (door_status, checksum_ok) = parse_rs485_frame(&frame);
+
+                logger.lock().log_rs485(&raw_frame, door_status, checksum_ok);
+            }
+            None => {
+                // No valid frame received - log as failed read
+                if !read_buffer.is_empty() {
+                    let raw_frame = hex::encode(&read_buffer);
+                    logger.lock().log_rs485(&raw_frame, None, false);
+                    read_buffer.clear();
+                }
+            }
+        }
+    }
+}
+
+/// Build RS485 query command frame (8 bytes)
+fn build_rs485_query_command(machine_number: u8) -> [u8; RS485_COMMAND_FRAME_LEN] {
+    let mut frame = [0u8; RS485_COMMAND_FRAME_LEN];
+    frame[0] = RS485_START_BYTE_COMMAND;
+    frame[1] = 0x00; // Undefined
+    frame[2] = machine_number;
+    frame[3] = RS485_CMD_QUERY;
+    frame[4] = 0x00; // Data0
+    frame[5] = 0x00; // Data1
+    frame[6] = 0x00; // Data2
+
+    // Checksum: sum all bytes, bitwise NOT
+    let sum: u8 = frame[..7].iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
+    frame[7] = !sum;
+
+    frame
+}
+
+/// Read a complete RS485 response frame from the serial port
+async fn read_rs485_frame(
+    port: &mut tokio_serial::SerialStream,
+    read_buffer: &mut Vec<u8>,
+) -> Option<Vec<u8>> {
+    // Synchronize buffer to start byte
+    synchronize_rs485_buffer(read_buffer);
+
+    // Check if we already have a complete frame
+    if read_buffer.len() >= RS485_RESPONSE_FRAME_LEN {
+        return extract_rs485_frame(read_buffer);
+    }
+
+    // Read until we have enough data
+    let mut temp_buf = [0u8; 64];
+    let mut attempts = 0;
+
+    while read_buffer.len() < RS485_RESPONSE_FRAME_LEN {
+        attempts += 1;
+        if attempts > RS485_MAX_READ_ATTEMPTS {
+            return None;
+        }
+
+        match tokio::time::timeout(Duration::from_millis(50), port.read(&mut temp_buf)).await {
+            Ok(Ok(n)) if n > 0 => {
+                read_buffer.extend_from_slice(&temp_buf[..n]);
+                synchronize_rs485_buffer(read_buffer);
+            }
+            Ok(Ok(_)) => {}                                     // Zero bytes read
+            Ok(Err(e)) if e.kind() == ErrorKind::TimedOut => {} // Serial timeout
+            Ok(Err(_)) => return None,
+            Err(_) => {} // Tokio timeout
+        }
+    }
+
+    extract_rs485_frame(read_buffer)
+}
+
+/// Synchronize read buffer to start with START_BYTE_RESPONSE (0x7F)
+fn synchronize_rs485_buffer(buffer: &mut Vec<u8>) {
+    if buffer.first() == Some(&RS485_START_BYTE_RESPONSE) {
+        return;
+    }
+
+    match buffer.iter().position(|&b| b == RS485_START_BYTE_RESPONSE) {
+        Some(start_idx) => {
+            buffer.drain(..start_idx);
+        }
+        None if !buffer.is_empty() => {
+            buffer.clear();
+        }
+        None => {}
+    }
+}
+
+/// Extract a frame from the buffer
+fn extract_rs485_frame(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
+    if buffer.len() < RS485_RESPONSE_FRAME_LEN {
+        return None;
+    }
+
+    Some(buffer.drain(..RS485_RESPONSE_FRAME_LEN).collect())
+}
+
+/// Parse RS485 response frame and extract door status
+fn parse_rs485_frame(frame: &[u8]) -> (Option<&'static str>, bool) {
+    if frame.len() != RS485_RESPONSE_FRAME_LEN {
+        return (None, false);
+    }
+
+    if frame[0] != RS485_START_BYTE_RESPONSE {
+        return (None, false);
+    }
+
+    // Validate checksum: sum all bytes (including checksum), add 1, should be 0
+    let sum: u8 = frame.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
+    let checksum_ok = sum.wrapping_add(1) == 0;
+
+    if !checksum_ok {
+        return (None, false);
+    }
+
+    // Parse door status from byte 4
+    let door_status = match frame[4] {
+        DOOR_CLOSED_PROPERLY => Some("closed"),
+        DOOR_LEFT_OPEN_PROPERLY => Some("open"),
+        DOOR_RIGHT_OPEN_PROPERLY => Some("closed"), // Right open = resting position
+        DOOR_IN_MOTION => Some("moving"),
+        DOOR_FIRE_SIGNAL_OPENING => Some("open"),
+        _ => Some("unknown"),
+    };
+
+    (door_status, true)
 }
 
 #[cfg(test)]

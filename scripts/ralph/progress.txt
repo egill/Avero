@@ -6,7 +6,7 @@ Status legend: [ ] not started, [~] in progress, [x] done
 [x] GA-001a Run Mosquitto broker with auth for test capture
 [x] GA-002 MQTT topic logging to per-topic JSONL files
 [x] GA-003 ACC TCP logging to dedicated JSONL
-[ ] GA-004 RS485 logging to dedicated JSONL
+[x] GA-004 RS485 logging to dedicated JSONL
 [ ] GA-005 Unified JSONL schema + log writer with rotation
 [ ] GA-006 Add periodic summary stats for data-gap detection
 [ ] GA-007 Add runbook + sample analysis queries
@@ -45,4 +45,10 @@ Status legend: [ ] not started, [~] in progress, [x] done
 - Files changed: src/io/analysis_logger.rs, src/bin/gateway_analysis.rs
 - What was done: Added AccLogRecord struct with ts_recv, site, kiosk_ip, raw_line, receipt_id, and pos_zone fields. Added log_acc method to AnalysisLogger with per-kiosk split option. Created ACC listener loop (run_acc_logger, acc_logger_loop, handle_acc_connection) reusing tokio TcpListener pattern. Added --acc-split-per-kiosk CLI flag.
 - **Learnings:** ACC listener follows same pattern as MQTT logger - wrapper function with retry loop, inner function that binds and loops. IP-to-POS lookup uses config's acc_ip_to_pos HashMap.
+---
+
+## 2026-01-11 - GA-004 - RS485 logging to dedicated JSONL
+- Files changed: src/io/analysis_logger.rs, src/bin/gateway_analysis.rs
+- What was done: Added Rs485LogRecord struct with ts_recv, site, raw_frame (hex), door_status, and checksum_ok fields. Added log_rs485 method to AnalysisLogger. Created RS485 logger loop (run_rs485_logger, rs485_logger_loop) with protocol constants duplicated locally for independence. Uses tokio_serial for async serial port access and same poll-based query/response pattern as rs485.rs.
+- **Learnings:** RS485 protocol code is self-contained in rs485.rs but uses DoorStatus enum from domain. For analysis binary, duplicated protocol constants to avoid coupling - keeps gateway_analysis.rs independent and makes the protocol explicit in the code.
 ---

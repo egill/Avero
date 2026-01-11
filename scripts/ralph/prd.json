@@ -97,7 +97,7 @@
         "src/io/analysis_logger.rs"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Required for gate timing correlation."
     },
     {

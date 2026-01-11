@@ -46,6 +46,22 @@ pub struct AccLogRecord<'a> {
     pub pos_zone: Option<&'a str>,
 }
 
+/// RS485 log record written to JSONL files
+#[derive(Debug, Serialize)]
+pub struct Rs485LogRecord<'a> {
+    /// Receive timestamp (ISO 8601)
+    pub ts_recv: &'a str,
+    /// Site identifier
+    pub site: &'a str,
+    /// Raw frame as hex string
+    pub raw_frame: &'a str,
+    /// Parsed door status (if valid frame)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub door_status: Option<&'a str>,
+    /// Checksum valid
+    pub checksum_ok: bool,
+}
+
 /// Manages JSONL file writers per topic with daily rotation
 pub struct AnalysisLogger {
     /// Base directory for log output
@@ -170,6 +186,28 @@ impl AnalysisLogger {
             warn!(kiosk_ip = %kiosk_ip, error = %e, "acc_log_failed");
         } else {
             debug!(kiosk_ip = %kiosk_ip, receipt_id = ?receipt_id, "acc_logged");
+        }
+    }
+
+    /// Log an RS485 frame
+    ///
+    /// Writes to logs/rs485/rs485-YYYYMMDD.jsonl
+    pub fn log_rs485(&mut self, raw_frame: &str, door_status: Option<&str>, checksum_ok: bool) {
+        let ts_recv = Utc::now().to_rfc3339();
+        let site_id = self.site_id.clone();
+
+        let record = Rs485LogRecord {
+            ts_recv: &ts_recv,
+            site: &site_id,
+            raw_frame,
+            door_status,
+            checksum_ok,
+        };
+
+        if let Err(e) = self.write_record("rs485", "rs485", &record) {
+            warn!(error = %e, "rs485_log_failed");
+        } else {
+            debug!(door_status = ?door_status, checksum_ok = checksum_ok, "rs485_logged");
         }
     }
 
