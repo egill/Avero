@@ -19,6 +19,10 @@ path = "src/bin/tui.rs"
 name = "gate_test"
 path = "src/bin/gate_test.rs"
 
+[[bin]]
+name = "gateway-analysis"
+path = "src/bin/gateway_analysis.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
