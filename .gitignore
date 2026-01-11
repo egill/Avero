@@ -1,3 +1,4 @@
 /target
 /bench/rust/target
 /command/_build
+/command/deps/*/_build
