@@ -52,7 +52,11 @@ interval_secs = 10
 [acc]
 listener_enabled = true
 listener_port = 25803
-grouping_strategy = "legacy"
+grouping_strategy = "flicker_focus_soft"
+grouping_entry_spread_s = 10
+grouping_other_pos_window_s = 30
+grouping_other_pos_min_s = 2
+grouping_flicker_merge_s = 10
 
 [acc.ip_to_pos]
 "10.120.48.211" = "POS_1"

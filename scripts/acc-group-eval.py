@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Evaluate ACC grouping variants offline against journey data."""
+# TODO: Functions merge_sessions(), build_raw_sessions(), session_at(), other_pos_activity()
+# are duplicated in acc-group-diff.py and acc-exit-window-report.py. Consider extracting
+# to a shared acc_utils.py module.
 
 import argparse
 import json
@@ -45,6 +48,17 @@ def build_raw_sessions(events):
     return sessions
 
 
+def sessions_overlap(start1, end1, start2, end2):
+    """Check if two time ranges overlap."""
+    if start2 is None:
+        return False
+    if end2 is None:
+        return end1 is None or start2 <= end1
+    if end1 is None:
+        return end2 >= start1
+    return start2 <= end1 and end2 >= start1
+
+
 def merge_sessions(raw_sessions, gap_s):
     """Merge consecutive sessions in same zone if gap is small and no other POS activity between."""
     if not raw_sessions:
@@ -54,43 +68,32 @@ def merge_sessions(raw_sessions, gap_s):
     for session in raw_sessions:
         by_zone[session[0]].append(session)
 
-    def sessions_overlap(start1, end1, start2, end2):
-        """Check if two time ranges overlap."""
-        if start2 is None:
-            return False
-        if end2 is None:
-            return end1 is None or start2 <= end1
-        if end1 is None:
-            return end2 >= start1
-        return start2 <= end1 and end2 >= start1
-
     def other_pos_between(zone, start, end):
         """Check if there's activity in another POS zone during the given time range."""
-        for other_zone, sessions in by_zone.items():
+        for other_zone, zone_sessions in by_zone.items():
             if other_zone == zone:
                 continue
-            for _, other_start, other_end in sessions:
+            for _, other_start, other_end in zone_sessions:
                 if sessions_overlap(start, end, other_start, other_end):
                     return True
         return False
 
+    def should_split(cur_end, nxt_start, zone):
+        """Determine if sessions should be split (not merged)."""
+        if cur_end is None:
+            return True
+        gap = (nxt_start - cur_end).total_seconds()
+        if gap_s is not None and gap > gap_s:
+            return True
+        return other_pos_between(zone, cur_end, nxt_start)
+
     merged = []
-    for zone, sessions in by_zone.items():
-        sessions.sort(key=lambda s: s[1])
-        current = sessions[0][:]
+    for zone, zone_sessions in by_zone.items():
+        zone_sessions.sort(key=lambda s: s[1])
+        current = zone_sessions[0][:]
 
-        for nxt in sessions[1:]:
-            cur_end = current[2]
-            nxt_start = nxt[1]
-
-            # Can't merge if current session has no end time
-            if cur_end is None:
-                continue
-
-            gap = (nxt_start - cur_end).total_seconds()
-            should_split = (gap_s is not None and gap > gap_s) or other_pos_between(zone, cur_end, nxt_start)
-
-            if should_split:
+        for nxt in zone_sessions[1:]:
+            if should_split(current[2], nxt[1], zone):
                 merged.append(current)
                 current = nxt[:]
             else:
@@ -124,6 +127,27 @@ def other_pos_activity(sessions, zone, ts, window_s):
     return False
 
 
+def other_pos_duration_s(sessions, zone, ts, window_s):
+    """Return total other-POS time within +/- window_s of ts."""
+    window_start = ts - timedelta(seconds=window_s)
+    window_end = ts + timedelta(seconds=window_s)
+    total = 0.0
+    for session_zone, start, end in sessions:
+        if session_zone == zone or start is None:
+            continue
+        session_end = end or window_end
+        overlap_start = max(start, window_start)
+        overlap_end = min(session_end, window_end)
+        if overlap_end > overlap_start:
+            total += (overlap_end - overlap_start).total_seconds()
+    return total
+
+
+def other_pos_active(total_s, min_s):
+    """Check if other-POS activity exceeds threshold."""
+    return total_s > 0.0 if min_s <= 0 else total_s >= min_s
+
+
 def build_zone_sessions(sessions_by_person):
     """Invert sessions_by_person to zone_sessions for efficient lookup."""
     zone_sessions = defaultdict(list)
@@ -150,6 +174,7 @@ def evaluate_variant(
     min_dwell_ms,
     entry_spread_s=None,
     other_pos_window_s=None,
+    other_pos_min_s=0,
 ):
     """Evaluate a grouping variant and return detected groups."""
     group_keys = set()
@@ -167,10 +192,12 @@ def evaluate_variant(
             dwell_ms = int((acc_ts - start).total_seconds() * 1000)
             if dwell_ms < min_dwell_ms:
                 continue
-            if other_pos_window_s is not None and other_pos_activity(
-                sessions_by_person.get(pid, []), zone, acc_ts, other_pos_window_s
-            ):
-                continue
+            if other_pos_window_s is not None:
+                other_pos_total_s = other_pos_duration_s(
+                    sessions_by_person.get(pid, []), zone, acc_ts, other_pos_window_s
+                )
+                if other_pos_active(other_pos_total_s, other_pos_min_s):
+                    continue
             candidates.append((pid, start))
 
         if len(candidates) < 2:
@@ -196,7 +223,9 @@ def evaluate_variant(
     }
 
 
-def summarize_baseline(acc_events, sessions_by_person, entry_spread_s, other_pos_window_s):
+def summarize_baseline(
+    acc_events, sessions_by_person, entry_spread_s, other_pos_window_s, other_pos_min_s
+):
     """Summarize baseline groups from ACC events and compute diagnostic stats."""
     group_keys = set()
     group_members = {}
@@ -230,10 +259,15 @@ def summarize_baseline(acc_events, sessions_by_person, entry_spread_s, other_pos
         if spread > entry_spread_s:
             entry_spread_gt += 1
 
-        if any(
-            other_pos_activity(sessions_by_person.get(pid, []), zone, acc_ts, other_pos_window_s)
-            for pid, _ in present
-        ):
+        other_pos_flag = False
+        for pid, _ in present:
+            other_pos_total_s = other_pos_duration_s(
+                sessions_by_person.get(pid, []), zone, acc_ts, other_pos_window_s
+            )
+            if other_pos_active(other_pos_total_s, other_pos_min_s):
+                other_pos_flag = True
+                break
+        if other_pos_flag:
             other_pos_hits += 1
 
     return {
@@ -268,9 +302,11 @@ def member_info(members, sessions_by_person, zone, acc_ts, other_pos_window_s):
                 "dwell_ms": int((acc_ts - start).total_seconds() * 1000),
             }
         if acc_ts and zone:
-            info["other_pos_activity"] = other_pos_activity(
+            other_pos_total_s = other_pos_duration_s(
                 sessions_by_person.get(pid, []), zone, acc_ts, other_pos_window_s
             )
+            info["other_pos_total_s"] = other_pos_total_s
+            info["other_pos_activity"] = other_pos_active(other_pos_total_s, 0)
         infos.append(info)
     return infos
 
@@ -365,6 +401,7 @@ def main():
     parser.add_argument("--min-dwell-ms", type=int, default=7000)
     parser.add_argument("--entry-spread-s", type=int, default=10)
     parser.add_argument("--other-pos-window-s", type=int, default=30)
+    parser.add_argument("--other-pos-min-s", type=int, default=0)
     parser.add_argument("--merge-gap-s", type=int, default=10)
     parser.add_argument("--sample-size", type=int, default=15)
     parser.add_argument("--samples", help="Write disagreement samples to JSONL")
@@ -383,7 +420,11 @@ def main():
     zone_sessions_merged = build_zone_sessions(merged_sessions_by_person)
 
     baseline = summarize_baseline(
-        acc_events, raw_sessions_by_person, args.entry_spread_s, args.other_pos_window_s
+        acc_events,
+        raw_sessions_by_person,
+        args.entry_spread_s,
+        args.other_pos_window_s,
+        args.other_pos_min_s,
     )
 
     tests = [
@@ -410,6 +451,7 @@ def main():
             args.min_dwell_ms,
             entry_spread_s=args.entry_spread_s,
             other_pos_window_s=args.other_pos_window_s,
+            other_pos_min_s=args.other_pos_min_s,
         ),
         evaluate_variant(
             "test_e_flicker_merge",
@@ -419,6 +461,7 @@ def main():
             args.min_dwell_ms,
             entry_spread_s=args.entry_spread_s,
             other_pos_window_s=args.other_pos_window_s,
+            other_pos_min_s=args.other_pos_min_s,
         ),
     ]
 

@@ -8,6 +8,7 @@ HOURS="48"
 MIN_DWELL_MS="7000"
 ENTRY_SPREAD_S="10"
 OTHER_POS_WINDOW_S="30"
+OTHER_POS_MIN_S="0"
 MERGE_GAP_S="10"
 SAMPLE_SIZE="15"
 
@@ -33,6 +34,7 @@ Options:
   --min-dwell-ms <ms>           Min dwell threshold (default: $MIN_DWELL_MS)
   --entry-spread-s <sec>        Entry spread threshold (default: $ENTRY_SPREAD_S)
   --other-pos-window-s <sec>    Other POS activity window (default: $OTHER_POS_WINDOW_S)
+  --other-pos-min-s <sec>       Min other POS seconds to count (default: $OTHER_POS_MIN_S)
   --merge-gap-s <sec>           POS flicker merge gap (default: $MERGE_GAP_S)
   --sample-size <n>             Samples per variant (default: $SAMPLE_SIZE)
   --out <file>                  Output JSONL path
@@ -52,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --min-dwell-ms)     MIN_DWELL_MS="$2"; shift 2 ;;
     --entry-spread-s)   ENTRY_SPREAD_S="$2"; shift 2 ;;
     --other-pos-window-s) OTHER_POS_WINDOW_S="$2"; shift 2 ;;
+    --other-pos-min-s)  OTHER_POS_MIN_S="$2"; shift 2 ;;
     --merge-gap-s)      MERGE_GAP_S="$2"; shift 2 ;;
     --sample-size)      SAMPLE_SIZE="$2"; shift 2 ;;
     --out)              OUT_JSONL="$2"; shift 2 ;;
@@ -84,6 +87,7 @@ python3 scripts/acc-group-eval.py \
   --min-dwell-ms "${MIN_DWELL_MS}" \
   --entry-spread-s "${ENTRY_SPREAD_S}" \
   --other-pos-window-s "${OTHER_POS_WINDOW_S}" \
+  --other-pos-min-s "${OTHER_POS_MIN_S}" \
   --merge-gap-s "${MERGE_GAP_S}" \
   --sample-size "${SAMPLE_SIZE}" \
   --samples "${OUT_SAMPLES}"

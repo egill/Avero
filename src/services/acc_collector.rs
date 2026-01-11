@@ -9,7 +9,7 @@ use crate::domain::types::TrackId;
 use crate::infra::config::{AccGroupingStrategy, Config};
 use crate::infra::metrics::Metrics;
 use crate::services::journey_manager::JourneyManager;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -18,12 +18,15 @@ use tracing::{debug, info};
 const MAX_TIME_SINCE_EXIT: u64 = 3000;
 /// Maximum time between entries to be considered same group (10 seconds)
 const GROUP_WINDOW_MS: u64 = 10000;
+/// Retain POS sessions for a short window to evaluate focus
+const POS_SESSION_RETENTION_S: u64 = 120;
+/// Limit stored sessions per track to avoid unbounded growth
+const MAX_POS_SESSIONS_PER_TRACK: usize = 20;
 
 /// A member of a POS group
 #[derive(Debug, Clone)]
 struct GroupMember {
     track_id: TrackId,
-    entered_at: Instant,
 }
 
 /// A group of people at a POS zone (co-presence)
@@ -31,23 +34,24 @@ struct GroupMember {
 struct PosGroup {
     members: Vec<GroupMember>,
     last_entry: Instant,
-    min_dwell_for_acc: u64,
 }
 
 impl PosGroup {
-    fn new(track_id: TrackId, min_dwell_for_acc: u64) -> Self {
+    fn new(track_id: TrackId) -> Self {
         let now = Instant::now();
         Self {
-            members: vec![GroupMember { track_id, entered_at: now }],
+            members: vec![GroupMember { track_id }],
             last_entry: now,
-            min_dwell_for_acc,
         }
     }
 
     fn add_member(&mut self, track_id: TrackId) {
-        let now = Instant::now();
-        self.members.push(GroupMember { track_id, entered_at: now });
-        self.last_entry = now;
+        if self.members.iter().any(|m| m.track_id == track_id) {
+            self.last_entry = Instant::now();
+            return;
+        }
+        self.members.push(GroupMember { track_id });
+        self.last_entry = Instant::now();
     }
 
     fn remove_member(&mut self, track_id: TrackId) {
@@ -63,42 +67,23 @@ impl PosGroup {
         self.last_entry.elapsed().as_millis() as u64 <= GROUP_WINDOW_MS
     }
 
-    /// Get all track_ids of members with sufficient dwell
-    /// Uses MAX of accumulated dwell and session dwell to handle:
-    /// - Zone flicker: accumulated_dwell tracks total time even after brief exit
-    /// - Still in zone: session_dwell counts while accumulated hasn't updated yet
-    fn members_with_sufficient_dwell(
-        &self,
-        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
-    ) -> Vec<TrackId> {
-        self.members
-            .iter()
-            .filter(|m| {
-                let session_dwell = m.entered_at.elapsed().as_millis() as u64;
-                let accumulated = accumulated_dwells
-                    .and_then(|dwells| dwells.get(&m.track_id).copied())
-                    .unwrap_or(0);
-                // Use max of accumulated and session dwell
-                // - accumulated handles zone flicker (re-entry after brief exit)
-                // - session handles currently in zone (accumulated only updates on exit)
-                let effective_dwell = session_dwell.max(accumulated);
-                effective_dwell >= self.min_dwell_for_acc
-            })
-            .map(|m| m.track_id)
-            .collect()
-    }
-
     /// Get all track_ids in the group
     fn all_members(&self) -> Vec<TrackId> {
         self.members.iter().map(|m| m.track_id).collect()
     }
 }
 
+#[derive(Debug, Clone)]
+struct PosSession {
+    zone: String,
+    entered_at: Instant,
+    exited_at: Option<Instant>,
+}
+
 /// Tracks recent zone exits for matching
 #[derive(Debug, Clone)]
 struct RecentExit {
     track_id: TrackId,
-    group_members: Vec<TrackId>, // Other members who were in the same group
     exited_at: Instant,
     dwell_ms: u64,
 }
@@ -109,8 +94,14 @@ pub struct AccCollector {
     ip_to_pos: HashMap<String, String>,
     min_dwell_for_acc: u64,
     grouping_strategy: AccGroupingStrategy,
+    grouping_entry_spread_s: u64,
+    grouping_other_pos_window_s: u64,
+    grouping_other_pos_min_s: u64,
+    grouping_flicker_merge_s: u64,
     /// Current POS groups by zone name (co-presence tracking)
     pos_groups: HashMap<String, PosGroup>,
+    /// Recent POS sessions per track for focus grouping
+    pos_sessions: HashMap<TrackId, Vec<PosSession>>,
     /// Recent exits by zone name (for delayed matching)
     recent_exits: HashMap<String, Vec<RecentExit>>,
     /// Last time each POS zone became empty (for debugging ACC timing)
@@ -125,7 +116,12 @@ impl AccCollector {
             ip_to_pos: config.acc_ip_to_pos().clone(),
             min_dwell_for_acc: config.min_dwell_ms(),
             grouping_strategy: config.acc_grouping_strategy(),
+            grouping_entry_spread_s: config.acc_grouping_entry_spread_s(),
+            grouping_other_pos_window_s: config.acc_grouping_other_pos_window_s(),
+            grouping_other_pos_min_s: config.acc_grouping_other_pos_min_s(),
+            grouping_flicker_merge_s: config.acc_grouping_flicker_merge_s(),
             pos_groups: HashMap::new(),
+            pos_sessions: HashMap::new(),
             recent_exits: HashMap::new(),
             last_pos_exit: HashMap::new(),
             metrics,
@@ -138,6 +134,7 @@ impl AccCollector {
     /// IMPORTANT: We never replace an existing group that has members.
     /// This prevents losing track of people who are still at the POS zone.
     pub fn record_pos_entry(&mut self, track_id: TrackId, pos_zone: &str) {
+        self.record_pos_session_entry(track_id, pos_zone);
         let all_groups: Vec<_> =
             self.pos_groups.iter().map(|(k, g)| (k, g.all_members())).collect();
         debug!(
@@ -160,18 +157,17 @@ impl AccCollector {
             }
             None => {
                 debug!(track_id = %track_id, pos = %pos_zone, "acc_pos_entry_new_group");
-                self.pos_groups
-                    .insert(pos_zone.to_string(), PosGroup::new(track_id, self.min_dwell_for_acc));
+                self.pos_groups.insert(pos_zone.to_string(), PosGroup::new(track_id));
             }
         }
     }
 
     /// Record that a track exited a POS zone
     pub fn record_pos_exit(&mut self, track_id: TrackId, pos_zone: &str, dwell_ms: u64) {
-        let group_members =
-            self.pos_groups.get(pos_zone).map(|g| g.all_members()).unwrap_or_default();
+        self.record_pos_session_exit(track_id, pos_zone);
+        let group_size = self.pos_groups.get(pos_zone).map(|g| g.all_members().len()).unwrap_or(0);
 
-        debug!(track_id = %track_id, pos = %pos_zone, dwell_ms = %dwell_ms, group_size = %group_members.len(), "acc_pos_exit");
+        debug!(track_id = %track_id, pos = %pos_zone, dwell_ms = %dwell_ms, group_size = %group_size, "acc_pos_exit");
 
         match self.pos_groups.get_mut(pos_zone) {
             Some(group) => {
@@ -193,7 +189,6 @@ impl AccCollector {
 
         self.recent_exits.entry(pos_zone.to_string()).or_default().push(RecentExit {
             track_id,
-            group_members: group_members.into_iter().filter(|&id| id != track_id).collect(),
             exited_at: Instant::now(),
             dwell_ms,
         });
@@ -229,25 +224,19 @@ impl AccCollector {
 
         info!(kiosk = %kiosk_str, pos = %pos, "acc_event_received");
 
-        if self.grouping_strategy == AccGroupingStrategy::PresentDwell {
-            return self.process_acc_present_dwell(
-                pos,
-                kiosk_str,
-                ts,
-                journey_manager,
-                accumulated_dwells,
-            );
-        }
+        self.cleanup_old_exits();
+        let mut primary: Option<TrackId> = None;
+        let mut primary_from_present = false;
 
-        // First try: current group at POS with at least one member having sufficient dwell
+        // First try: current group at POS with sufficient dwell
         if let Some(group) = self.pos_groups.get(pos) {
+            let now = Instant::now();
             let all_members = group.all_members();
-            // Show both session dwell and accumulated dwell for debugging
-            let member_dwells: Vec<(TrackId, u64, Option<u64>)> = group
+            let member_dwells: Vec<(TrackId, Option<u64>, Option<u64>)> = group
                 .members
                 .iter()
                 .map(|m| {
-                    let session_dwell = m.entered_at.elapsed().as_millis() as u64;
+                    let session_dwell = self.session_dwell_ms(m.track_id, pos, now);
                     let acc_dwell = accumulated_dwells.and_then(|d| d.get(&m.track_id).copied());
                     (m.track_id, session_dwell, acc_dwell)
                 })
@@ -260,8 +249,26 @@ impl AccCollector {
                 "acc_checking_pos_group"
             );
 
-            let qualified = group.members_with_sufficient_dwell(accumulated_dwells);
-            if qualified.is_empty() {
+            let mut best: Option<(TrackId, u64)> = None;
+            for member in &group.members {
+                let Some(effective_dwell) =
+                    self.effective_dwell_ms(member.track_id, pos, now, accumulated_dwells)
+                else {
+                    continue;
+                };
+                if effective_dwell < self.min_dwell_for_acc {
+                    continue;
+                }
+                let dominated = matches!(best, Some((_, best_dwell)) if effective_dwell <= best_dwell);
+                if !dominated {
+                    best = Some((member.track_id, effective_dwell));
+                }
+            }
+
+            if let Some((track_id, _)) = best {
+                primary = Some(track_id);
+                primary_from_present = true;
+            } else {
                 debug!(
                     pos = %pos,
                     members = ?all_members,
@@ -269,201 +276,314 @@ impl AccCollector {
                     min_dwell = %self.min_dwell_for_acc,
                     "acc_group_exists_but_no_qualified_members"
                 );
-            } else {
-                // At least one member qualifies - authorize entire group
-                let mut all_members = group.all_members();
-
-                // Also include recent exits that were part of this group
-                // (Bug fix: track left POS but ACC arrived while group member still present)
-                self.cleanup_old_exits();
-                if let Some(exits) = self.recent_exits.get_mut(pos) {
-                    let now = Instant::now();
-                    let mut recent_group_members = Vec::new();
-
-                    for exit in exits.iter() {
-                        // Was this exit part of the current group? Check if any current member
-                        // was in their group_members list (they were together at POS)
-                        let was_in_group =
-                            all_members.iter().any(|&tid| exit.group_members.contains(&tid));
-                        let within_time = now.duration_since(exit.exited_at).as_millis() as u64
-                            <= MAX_TIME_SINCE_EXIT;
-
-                        if was_in_group && within_time && !all_members.contains(&exit.track_id) {
-                            recent_group_members.push(exit.track_id);
-                        }
-                    }
-
-                    // Remove matched recent exits
-                    exits.retain(|e| !recent_group_members.contains(&e.track_id));
-
-                    // Add them to authorized list
-                    if !recent_group_members.is_empty() {
-                        info!(
-                            pos = %pos,
-                            recent_group_members = ?recent_group_members,
-                            "acc_including_recent_group_exits"
-                        );
-                        all_members.extend(recent_group_members);
-                    }
-                }
-
-                info!(
-                    pos = %pos,
-                    qualified = ?qualified,
-                    group = ?all_members,
-                    "acc_matched_group_present"
-                );
-
-                // Update journeys for all group members (including recent exits)
-                for &track_id in &all_members {
-                    if let Some(journey) = journey_manager.get_mut_any(track_id) {
-                        journey.acc_matched = true;
-                    }
-                    journey_manager.add_event(
-                        track_id,
-                        JourneyEvent::new(JourneyEventType::Acc, ts)
-                            .with_zone(pos)
-                            .with_extra(&format!("kiosk={kiosk_str},group={}", all_members.len())),
-                    );
-                }
-
-                return all_members;
             }
         }
 
-        // Second try: recently exited with sufficient dwell AND pos now empty
-        if !self.pos_groups.contains_key(pos) {
-            // Log how long POS has been empty - helps diagnose ACC timing issues
-            let empty_since_ms =
-                self.last_pos_exit.get(pos).map(|t| t.elapsed().as_millis() as u64).unwrap_or(0);
-            info!(pos = %pos, empty_since_ms = %empty_since_ms, "acc_arrived_pos_empty");
-            self.metrics.record_acc_empty_pos_time(empty_since_ms);
-            self.cleanup_old_exits();
+        // Second try: recently exited with sufficient dwell
+        if primary.is_none() {
+            if !self.pos_groups.contains_key(pos) {
+                let empty_since_ms = self
+                    .last_pos_exit
+                    .get(pos)
+                    .map(|t| t.elapsed().as_millis() as u64)
+                    .unwrap_or(0);
+                info!(pos = %pos, empty_since_ms = %empty_since_ms, "acc_arrived_pos_empty");
+                self.metrics.record_acc_empty_pos_time(empty_since_ms);
+            }
 
-            if let Some(exits) = self.recent_exits.get_mut(pos) {
-                let now = Instant::now();
-                let min_dwell = self.min_dwell_for_acc;
+            // Find best candidate from recent exits (immutable borrow first)
+            let now = Instant::now();
+            let min_dwell = self.min_dwell_for_acc;
+            let mut idx = None;
 
-                // Find the most recent (newest) exit with sufficient dwell
-                let idx = exits.iter().rposition(|e| {
-                    e.dwell_ms >= min_dwell
-                        && now.duration_since(e.exited_at).as_millis() as u64 <= MAX_TIME_SINCE_EXIT
-                });
+            if let Some(exits) = self.recent_exits.get(pos) {
+                for (candidate_idx, exit) in exits.iter().enumerate().rev() {
+                    if exit.dwell_ms < min_dwell {
+                        continue;
+                    }
+                    if now.duration_since(exit.exited_at).as_millis() as u64 > MAX_TIME_SINCE_EXIT {
+                        continue;
+                    }
+                    if self.grouping_other_pos_min_s > 0 {
+                        let other_pos_total_s = self.other_pos_total_s(exit.track_id, pos, now);
+                        if other_pos_total_s >= self.grouping_other_pos_min_s {
+                            continue;
+                        }
+                    }
+                    idx = Some(candidate_idx);
+                    break;
+                }
+            }
 
-                if let Some(idx) = idx {
+            // Now mutably remove the selected candidate
+            if let Some(idx) = idx {
+                if let Some(exits) = self.recent_exits.get_mut(pos) {
                     let exit = exits.swap_remove(idx);
                     let time_since = now.duration_since(exit.exited_at).as_millis() as u64;
-
-                    // Include group members who were together
-                    let mut all_members = vec![exit.track_id];
-                    all_members.extend(exit.group_members.iter().copied());
 
                     info!(
                         track_id = %exit.track_id,
                         pos = %pos,
                         dwell_ms = %exit.dwell_ms,
                         time_since_exit_ms = %time_since,
-                        group = ?all_members,
-                        "acc_matched_recent_exit_group"
+                        "acc_matched_recent_exit_primary"
                     );
-
-                    for &tid in &all_members {
-                        if let Some(journey) = journey_manager.get_mut_any(tid) {
-                            journey.acc_matched = true;
-                        }
-                        journey_manager.add_event(
-                            tid,
-                            JourneyEvent::new(JourneyEventType::Acc, ts).with_zone(pos).with_extra(
-                                &format!("kiosk={kiosk_str},group={}", all_members.len()),
-                            ),
-                        );
-                    }
-
-                    return all_members;
+                    primary = Some(exit.track_id);
                 }
             }
         }
 
-        let all_pos_zones: Vec<_> = self.pos_groups.keys().collect();
-        let recent_exit_zones: Vec<_> = self.recent_exits.keys().collect();
-        debug!(
-            pos = %pos,
-            available_pos_groups = ?all_pos_zones,
-            recent_exit_zones = ?recent_exit_zones,
-            "acc_no_match"
-        );
-        vec![]
-    }
-
-    fn process_acc_present_dwell(
-        &mut self,
-        pos: &str,
-        kiosk_str: &str,
-        ts: u64,
-        journey_manager: &mut JourneyManager,
-        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
-    ) -> Vec<TrackId> {
-        self.cleanup_old_exits();
-
-        if let Some(group) = self.pos_groups.get(pos) {
-            let all_members = group.all_members();
-            let member_dwells: Vec<(TrackId, u64, Option<u64>)> = group
-                .members
-                .iter()
-                .map(|m| {
-                    let session_dwell = m.entered_at.elapsed().as_millis() as u64;
-                    let acc_dwell = accumulated_dwells.and_then(|d| d.get(&m.track_id).copied());
-                    (m.track_id, session_dwell, acc_dwell)
-                })
-                .collect();
+        let Some(primary) = primary else {
+            let all_pos_zones: Vec<_> = self.pos_groups.keys().collect();
+            let recent_exit_zones: Vec<_> = self.recent_exits.keys().collect();
             debug!(
                 pos = %pos,
-                members = ?all_members,
-                dwells_ms = ?member_dwells,
-                min_dwell = %self.min_dwell_for_acc,
-                "acc_checking_pos_group_present_dwell"
+                available_pos_groups = ?all_pos_zones,
+                recent_exit_zones = ?recent_exit_zones,
+                "acc_no_match"
             );
+            return vec![];
+        };
 
-            let qualified = group.members_with_sufficient_dwell(accumulated_dwells);
-            if qualified.is_empty() {
-                debug!(
-                    pos = %pos,
-                    members = ?all_members,
-                    dwells_ms = ?member_dwells,
-                    min_dwell = %self.min_dwell_for_acc,
-                    "acc_group_present_dwell_no_qualified"
-                );
-                return vec![];
-            }
-
-            info!(
-                pos = %pos,
-                qualified = ?qualified,
-                "acc_matched_present_dwell"
+        let mut matched = vec![primary];
+        if let Some(group) = self.pos_groups.get(pos) {
+            let mut expanded = self.expand_group_members(
+                pos,
+                primary,
+                group,
+                accumulated_dwells,
+                primary_from_present,
             );
-
-            for &track_id in &qualified {
-                if let Some(journey) = journey_manager.get_mut_any(track_id) {
-                    journey.acc_matched = true;
-                }
-                journey_manager.add_event(
-                    track_id,
-                    JourneyEvent::new(JourneyEventType::Acc, ts)
-                        .with_zone(pos)
-                        .with_extra(&format!("kiosk={kiosk_str},group={}", qualified.len())),
-                );
-            }
-
-            return qualified;
+            matched.append(&mut expanded);
         }
 
-        let all_pos_zones: Vec<_> = self.pos_groups.keys().collect();
-        debug!(
-            pos = %pos,
-            available_pos_groups = ?all_pos_zones,
-            "acc_no_match_present_dwell"
-        );
-        vec![]
+        let mut seen = HashSet::new();
+        matched.retain(|tid| seen.insert(*tid));
+
+        if primary_from_present {
+            info!(pos = %pos, primary = %primary, group = ?matched, "acc_matched_primary_present");
+        } else {
+            info!(pos = %pos, primary = %primary, group = ?matched, "acc_matched_primary_recent_exit");
+        }
+
+        for &track_id in &matched {
+            if let Some(journey) = journey_manager.get_mut_any(track_id) {
+                journey.acc_matched = true;
+            }
+            journey_manager.add_event(
+                track_id,
+                JourneyEvent::new(JourneyEventType::Acc, ts)
+                    .with_zone(pos)
+                    .with_extra(&format!("kiosk={kiosk_str},group={}", matched.len())),
+            );
+        }
+
+        matched
+    }
+
+    fn expand_group_members(
+        &self,
+        pos: &str,
+        primary: TrackId,
+        group: &PosGroup,
+        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
+        primary_from_present: bool,
+    ) -> Vec<TrackId> {
+        if !primary_from_present && self.grouping_strategy == AccGroupingStrategy::Legacy {
+            return Vec::new();
+        }
+        let mut expanded = match self.grouping_strategy {
+            AccGroupingStrategy::Legacy => group.all_members(),
+            AccGroupingStrategy::PresentDwell => {
+                self.present_dwell_members(pos, group, accumulated_dwells)
+            }
+            AccGroupingStrategy::FlickerFocusSoft => self.flicker_focus_members(pos, group),
+        };
+
+        if primary_from_present && !expanded.contains(&primary) {
+            expanded.clear();
+        }
+
+        expanded
+    }
+
+    fn session_dwell_ms(&self, track_id: TrackId, pos: &str, now: Instant) -> Option<u64> {
+        self.current_pos_entry(track_id, pos)
+            .map(|entry| now.duration_since(entry).as_millis() as u64)
+    }
+
+    fn effective_dwell_ms(
+        &self,
+        track_id: TrackId,
+        pos: &str,
+        now: Instant,
+        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
+    ) -> Option<u64> {
+        let acc_dwell = accumulated_dwells.and_then(|d| d.get(&track_id).copied()).unwrap_or(0);
+        match self.session_dwell_ms(track_id, pos, now) {
+            Some(session_dwell) => Some(session_dwell.max(acc_dwell)),
+            None if acc_dwell > 0 => Some(acc_dwell),
+            None => None,
+        }
+    }
+
+    fn present_dwell_members(
+        &self,
+        pos: &str,
+        group: &PosGroup,
+        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
+    ) -> Vec<TrackId> {
+        let now = Instant::now();
+        group
+            .members
+            .iter()
+            .filter_map(|member| {
+                let effective =
+                    self.effective_dwell_ms(member.track_id, pos, now, accumulated_dwells)?;
+                if effective >= self.min_dwell_for_acc {
+                    Some(member.track_id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn flicker_focus_members(&self, pos: &str, group: &PosGroup) -> Vec<TrackId> {
+        let now = Instant::now();
+        let mut candidates: Vec<(TrackId, Instant)> = Vec::new();
+        for member in &group.members {
+            let Some(entry_at) = self.current_pos_entry(member.track_id, pos) else {
+                continue;
+            };
+            let dwell_ms = now.duration_since(entry_at).as_millis() as u64;
+            if dwell_ms < self.min_dwell_for_acc {
+                continue;
+            }
+            let other_pos_total_s = self.other_pos_total_s(member.track_id, pos, now);
+            if self.grouping_other_pos_min_s > 0
+                && other_pos_total_s >= self.grouping_other_pos_min_s
+            {
+                continue;
+            }
+            candidates.push((member.track_id, entry_at));
+        }
+
+        if candidates.len() < 2 {
+            return vec![];
+        }
+
+        let entry_times: Vec<_> = candidates.iter().map(|(_, entry)| *entry).collect();
+        let min_entry = *entry_times.iter().min().unwrap();
+        let max_entry = *entry_times.iter().max().unwrap();
+        let spread_s = max_entry.duration_since(min_entry).as_secs();
+        if spread_s > self.grouping_entry_spread_s {
+            return vec![];
+        }
+
+        candidates.iter().map(|(tid, _)| *tid).collect()
+    }
+
+    fn record_pos_session_entry(&mut self, track_id: TrackId, pos_zone: &str) -> Instant {
+        let now = Instant::now();
+        let sessions = self.pos_sessions.entry(track_id).or_default();
+
+        // Check if we can reuse or merge with existing session
+        // Extract result before calling prune to avoid borrow conflict
+        let merge_result = if let Some(last) = sessions.last_mut() {
+            if last.zone != pos_zone {
+                None
+            } else if last.exited_at.is_none() {
+                // Already in this zone with open session - reuse it
+                Some(last.entered_at)
+            } else if let Some(exited_at) = last.exited_at {
+                let gap_s = now.duration_since(exited_at).as_secs();
+                if gap_s <= self.grouping_flicker_merge_s {
+                    // Recent exit from same zone - merge by reopening session
+                    last.exited_at = None;
+                    Some(last.entered_at)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Borrow of `last` released here
+        let entry_time = match merge_result {
+            Some(entered_at) => entered_at,
+            None => {
+                sessions.push(PosSession {
+                    zone: pos_zone.to_string(),
+                    entered_at: now,
+                    exited_at: None,
+                });
+                now
+            }
+        };
+
+        Self::prune_old_sessions(sessions, now);
+        entry_time
+    }
+
+    fn record_pos_session_exit(&mut self, track_id: TrackId, pos_zone: &str) {
+        let now = Instant::now();
+        if let Some(sessions) = self.pos_sessions.get_mut(&track_id) {
+            for session in sessions.iter_mut().rev() {
+                if session.zone == pos_zone && session.exited_at.is_none() {
+                    session.exited_at = Some(now);
+                    break;
+                }
+            }
+            Self::prune_old_sessions(sessions, now);
+        }
+    }
+
+    fn prune_old_sessions(sessions: &mut Vec<PosSession>, now: Instant) {
+        // Remove sessions that exited more than RETENTION_S ago
+        sessions.retain(|session| match session.exited_at {
+            Some(exit) => now.duration_since(exit).as_secs() <= POS_SESSION_RETENTION_S,
+            None => true,
+        });
+
+        // Cap session count by removing oldest (sessions are chronologically ordered)
+        if sessions.len() > MAX_POS_SESSIONS_PER_TRACK {
+            let excess = sessions.len() - MAX_POS_SESSIONS_PER_TRACK;
+            sessions.drain(0..excess);
+        }
+    }
+
+    fn current_pos_entry(&self, track_id: TrackId, pos_zone: &str) -> Option<Instant> {
+        let sessions = self.pos_sessions.get(&track_id)?;
+        sessions
+            .iter()
+            .rev()
+            .find(|session| session.zone == pos_zone && session.exited_at.is_none())
+            .map(|session| session.entered_at)
+    }
+
+    fn other_pos_total_s(&self, track_id: TrackId, pos_zone: &str, now: Instant) -> u64 {
+        let Some(sessions) = self.pos_sessions.get(&track_id) else {
+            return 0;
+        };
+        let window_start = now - std::time::Duration::from_secs(self.grouping_other_pos_window_s);
+
+        sessions
+            .iter()
+            .filter(|s| s.zone != pos_zone)
+            .map(|session| {
+                let start = session.entered_at.max(window_start);
+                let end = session.exited_at.unwrap_or(now).min(now);
+                if end > start {
+                    end.duration_since(start).as_secs()
+                } else {
+                    0
+                }
+            })
+            .sum()
     }
 
     /// Clean up old exit records
@@ -496,6 +616,37 @@ mod tests {
         AccCollector::new(&config, metrics)
     }
 
+    fn create_test_collector_with_strategy(strategy: AccGroupingStrategy) -> AccCollector {
+        let mut ip_to_pos = std::collections::HashMap::new();
+        ip_to_pos.insert("192.168.1.10".to_string(), "POS_1".to_string());
+        ip_to_pos.insert("192.168.1.11".to_string(), "POS_2".to_string());
+        let config = Config::default()
+            .with_acc_ip_to_pos(ip_to_pos)
+            .with_min_dwell_ms(1000)
+            .with_acc_grouping_strategy(strategy)
+            .with_acc_grouping_entry_spread_s(10)
+            .with_acc_grouping_other_pos_window_s(30)
+            .with_acc_grouping_other_pos_min_s(2)
+            .with_acc_grouping_flicker_merge_s(10);
+        let metrics = Arc::new(Metrics::new());
+        AccCollector::new(&config, metrics)
+    }
+
+    fn set_pos_entry_time(
+        collector: &mut AccCollector,
+        track_id: TrackId,
+        pos: &str,
+        entered_at: Instant,
+    ) {
+        let sessions = collector.pos_sessions.get_mut(&track_id).expect("missing pos session");
+        let session = sessions
+            .iter_mut()
+            .rev()
+            .find(|session| session.zone == pos && session.exited_at.is_none())
+            .expect("missing open pos session");
+        session.entered_at = entered_at;
+    }
+
     #[test]
     fn test_acc_match_present() {
         let mut collector = create_test_collector();
@@ -508,12 +659,12 @@ mod tests {
         collector.record_pos_entry(TrackId(100), "POS_1");
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        // Override dwell check for test - access the group's member
-        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
-            if let Some(member) = group.members.first_mut() {
-                member.entered_at = Instant::now() - std::time::Duration::from_secs(8);
-            }
-        }
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(100),
+            "POS_1",
+            Instant::now() - std::time::Duration::from_secs(8),
+        );
 
         // Process ACC
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
@@ -584,12 +735,12 @@ mod tests {
         collector.record_pos_entry(TrackId(100), "POS_1");
         collector.record_pos_entry(TrackId(200), "POS_1"); // joins group
 
-        // Override dwell for first member to qualify
-        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
-            if let Some(member) = group.members.first_mut() {
-                member.entered_at = Instant::now() - std::time::Duration::from_secs(8);
-            }
-        }
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(100),
+            "POS_1",
+            Instant::now() - std::time::Duration::from_secs(8),
+        );
 
         // Process ACC - should match BOTH group members
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
@@ -615,12 +766,10 @@ mod tests {
         collector.record_pos_exit(TrackId(100), "POS_1", 8000); // sufficient dwell
         collector.record_pos_exit(TrackId(200), "POS_1", 5000); // insufficient dwell alone
 
-        // Process ACC - should match both since they were in a group
+        // Process ACC - should match most recent exit with sufficient dwell
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
-        // The newest exit (200) is matched, along with group members
-        assert!(result.contains(&TrackId(200)));
-        assert!(result.contains(&TrackId(100)));
+        assert_eq!(result, vec![TrackId(100)]);
     }
 
     #[test]
@@ -749,7 +898,7 @@ mod tests {
 
     #[test]
     fn test_pos_occupied_blocks_recent_exit_match() {
-        // When POS is occupied, recent exits should NOT be matched
+        // When POS is occupied but no present matches, recent exits can be matched
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
@@ -762,13 +911,10 @@ mod tests {
         // Track 200 enters (POS now occupied)
         collector.record_pos_entry(TrackId(200), "POS_1");
 
-        // Process ACC - should NOT match recent exit because POS is occupied
-        // (and 200 doesn't have sufficient dwell yet)
+        // Process ACC - should match recent exit because present dwell is insufficient
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
-        // Current implementation: tries current group first, fails due to insufficient dwell
-        // Does NOT fall back to recent exits when POS is occupied
-        assert!(result.is_empty(), "Should not match recent exit when POS is currently occupied");
+        assert_eq!(result, vec![TrackId(100)]);
     }
 
     #[test]
@@ -816,12 +962,13 @@ mod tests {
         collector.record_pos_entry(TrackId(200), "POS_1");
         collector.record_pos_entry(TrackId(300), "POS_1");
 
-        // Only first member has sufficient dwell
-        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
-            // Track 100: 8 seconds dwell (sufficient)
-            group.members[0].entered_at = Instant::now() - std::time::Duration::from_secs(8);
-            // Tracks 200, 300: just entered (insufficient individually)
-        }
+        // Track 100: 8 seconds dwell (sufficient). Tracks 200, 300: just entered.
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(100),
+            "POS_1",
+            Instant::now() - std::time::Duration::from_secs(8),
+        );
 
         // Process ACC - should match ALL group members
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
@@ -876,12 +1023,9 @@ mod tests {
     }
 
     #[test]
-    fn test_acc_matches_recent_exit_when_group_still_present() {
-        // Bug fix test: Track 18235 scenario
-        // Two tracks enter POS together (forming group)
-        // Track A exits (goes to recent_exits)
-        // ACC arrives while Track B is still at POS
-        // BOTH A and B should be authorized
+    fn test_recent_exit_not_included_when_group_present() {
+        // Track A exits; Track B remains present when ACC arrives.
+        // Only present track should be authorized.
         let mut collector = create_test_collector();
         let mut jm = JourneyManager::new();
 
@@ -899,14 +1043,20 @@ mod tests {
             "Both tracks should be in group"
         );
 
-        // Give both tracks sufficient dwell
-        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
-            for member in group.members.iter_mut() {
-                member.entered_at = Instant::now() - std::time::Duration::from_secs(8);
-            }
-        }
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(100),
+            "POS_1",
+            Instant::now() - std::time::Duration::from_secs(8),
+        );
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(200),
+            "POS_1",
+            Instant::now() - std::time::Duration::from_secs(8),
+        );
 
-        // Track 100 exits (goes to recent_exits with group_members=[200])
+        // Track 100 exits (goes to recent_exits)
         collector.record_pos_exit(TrackId(100), "POS_1", 120000); // 2 min dwell
 
         // Verify: Track 100 is in recent_exits, Track 200 still in group
@@ -921,21 +1071,14 @@ mod tests {
         );
 
         // Process ACC (simulates payment terminal)
-        // Before fix: only Track 200 was authorized
-        // After fix: BOTH Track 100 and 200 should be authorized
         let result = collector.process_acc("192.168.1.10", &mut jm, None);
 
-        assert!(
-            result.contains(&TrackId(100)),
-            "Track 100 (recent exit) should be authorized - BUG FIX"
-        );
-        assert!(result.contains(&TrackId(200)), "Track 200 (still present) should be authorized");
-        assert_eq!(result.len(), 2, "Both group members should be authorized");
+        assert_eq!(result, vec![TrackId(200)]);
 
         // Verify journeys updated
         assert!(
-            jm.get(TrackId(100)).unwrap().acc_matched,
-            "Track 100 journey should have acc_matched"
+            !jm.get(TrackId(100)).unwrap().acc_matched,
+            "Track 100 journey should NOT have acc_matched"
         );
         assert!(
             jm.get(TrackId(200)).unwrap().acc_matched,
@@ -955,11 +1098,18 @@ mod tests {
         collector.record_pos_entry(TrackId(100), "POS_1");
         collector.record_pos_entry(TrackId(200), "POS_1");
 
-        if let Some(group) = collector.pos_groups.get_mut("POS_1") {
-            for member in group.members.iter_mut() {
-                member.entered_at = Instant::now() - std::time::Duration::from_secs(8);
-            }
-        }
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(100),
+            "POS_1",
+            Instant::now() - std::time::Duration::from_secs(8),
+        );
+        set_pos_entry_time(
+            &mut collector,
+            TrackId(200),
+            "POS_1",
+            Instant::now() - std::time::Duration::from_secs(8),
+        );
 
         collector.record_pos_exit(TrackId(100), "POS_1", 8000);
 
@@ -979,5 +1129,95 @@ mod tests {
             "Track 100 should NOT have acc_matched (exit too old)"
         );
         assert!(jm.get(TrackId(200)).unwrap().acc_matched, "Track 200 should have acc_matched");
+    }
+
+    #[test]
+    fn test_flicker_focus_soft_blocks_on_entry_spread() {
+        let mut collector =
+            create_test_collector_with_strategy(AccGroupingStrategy::FlickerFocusSoft);
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+
+        // Modify entry times in pos_sessions for consistency
+        let now = Instant::now();
+        let time_100 = now - std::time::Duration::from_secs(20);
+        let time_200 = now - std::time::Duration::from_secs(8);
+        set_pos_entry_time(&mut collector, TrackId(100), "POS_1", time_100);
+        set_pos_entry_time(&mut collector, TrackId(200), "POS_1", time_200);
+
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+        assert_eq!(result, vec![TrackId(100)]);
+    }
+
+    #[test]
+    fn test_flicker_focus_soft_merges_entry_time() {
+        let mut collector =
+            create_test_collector_with_strategy(AccGroupingStrategy::FlickerFocusSoft);
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+
+        collector.record_pos_exit(TrackId(100), "POS_1", 2000);
+
+        let now = Instant::now();
+        if let Some(sessions) = collector.pos_sessions.get_mut(&TrackId(100)) {
+            if let Some(last) = sessions.last_mut() {
+                last.entered_at = now - std::time::Duration::from_secs(8);
+                last.exited_at = Some(now - std::time::Duration::from_secs(5));
+            }
+        }
+        if let Some(sessions) = collector.pos_sessions.get_mut(&TrackId(200)) {
+            if let Some(last) = sessions.last_mut() {
+                last.entered_at = now - std::time::Duration::from_secs(8);
+            }
+        }
+
+        collector.record_pos_entry(TrackId(100), "POS_1");
+
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+        assert_eq!(result.len(), 2, "Merged entry should qualify both tracks");
+        assert!(result.contains(&TrackId(100)));
+        assert!(result.contains(&TrackId(200)));
+    }
+
+    #[test]
+    fn test_flicker_focus_soft_excludes_other_pos_activity() {
+        let mut collector =
+            create_test_collector_with_strategy(AccGroupingStrategy::FlickerFocusSoft);
+        let mut jm = JourneyManager::new();
+
+        jm.new_journey(TrackId(100));
+        jm.new_journey(TrackId(200));
+
+        collector.record_pos_entry(TrackId(100), "POS_1");
+        collector.record_pos_entry(TrackId(200), "POS_1");
+
+        // Modify entry times in pos_sessions for consistency
+        let now = Instant::now();
+        let time_100 = now - std::time::Duration::from_secs(9);
+        let time_200 = now - std::time::Duration::from_secs(8);
+
+        if let Some(sessions) = collector.pos_sessions.get_mut(&TrackId(100)) {
+            // Track 100 also visited POS_2 (3 seconds of other_pos activity)
+            sessions.push(PosSession {
+                zone: "POS_2".to_string(),
+                entered_at: now - std::time::Duration::from_secs(6),
+                exited_at: Some(now - std::time::Duration::from_secs(3)),
+            });
+        }
+        set_pos_entry_time(&mut collector, TrackId(100), "POS_1", time_100);
+        set_pos_entry_time(&mut collector, TrackId(200), "POS_1", time_200);
+
+        let result = collector.process_acc("192.168.1.10", &mut jm, None);
+        assert_eq!(result, vec![TrackId(100)]);
     }
 }
