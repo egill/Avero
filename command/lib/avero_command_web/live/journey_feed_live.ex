@@ -34,6 +34,8 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       |> assign(:available_pos_zones, available_pos_zones)
       |> assign(:pos_menu_open, false)
       |> assign(:advanced_filters_open, false)
+      # Duration filter - hide journeys < 7s by default
+      |> assign(:hide_short_journeys, true)
       # Pagination
       |> assign(:cursor, nil)
       |> assign(:direction, :next)
@@ -63,7 +65,8 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       matches_exit_type?(journey, assigns.filter) and
       matches_person_id?(journey, assigns.person_id_search) and
       matches_datetime_range?(journey, assigns.from_datetime, assigns.to_datetime) and
-      matches_pos_filter?(journey, assigns.pos_filter, assigns.selected_pos_zones)
+      matches_pos_filter?(journey, assigns.pos_filter, assigns.selected_pos_zones) and
+      matches_min_duration?(journey, assigns.hide_short_journeys)
   end
 
   defp matches_site?(journey, sites), do: journey.site in sites
@@ -113,18 +116,18 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   end
   defp matches_pos_filter?(_journey, _, _), do: true
 
+  defp matches_min_duration?(_journey, false), do: true
+  defp matches_min_duration?(journey, true) do
+    journey.duration_ms != nil and journey.duration_ms >= @min_dwell_ms
+  end
+
   @impl true
   def handle_event("filter", %{"filter" => filter}, socket) do
     filter_atom = String.to_existing_atom(filter)
 
-    socket =
-      socket
-      |> assign(:filter, filter_atom)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:filter, filter_atom)
+    |> reset_pagination_and_reload()
   end
 
   @impl true
@@ -190,14 +193,9 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   # Person ID search
   @impl true
   def handle_event("search_person", %{"person_id" => person_id}, socket) do
-    socket =
-      socket
-      |> assign(:person_id_search, person_id)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:person_id_search, person_id)
+    |> reset_pagination_and_reload()
   end
 
   # Date navigation
@@ -205,181 +203,79 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   def handle_event("prev-date", _params, socket) do
     new_date = Date.add(socket.assigns.selected_date, -1)
 
-    socket =
-      socket
-      |> assign(:selected_date, new_date)
-      |> assign(:from_date, new_date)
-      |> assign(:to_date, new_date)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:selected_date, new_date)
+    |> assign(:from_date, new_date)
+    |> assign(:to_date, new_date)
+    |> reset_pagination_and_reload()
   end
 
   @impl true
   def handle_event("next-date", _params, socket) do
     new_date = Date.add(socket.assigns.selected_date, 1)
 
-    socket =
-      socket
-      |> assign(:selected_date, new_date)
-      |> assign(:from_date, new_date)
-      |> assign(:to_date, new_date)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:selected_date, new_date)
+    |> assign(:from_date, new_date)
+    |> assign(:to_date, new_date)
+    |> reset_pagination_and_reload()
   end
 
   @impl true
   def handle_event("today", _params, socket) do
-    today = Date.utc_today()
-
-    socket =
-      socket
-      |> assign(:selected_date, today)
-      |> assign(:from_date, nil)
-      |> assign(:to_date, nil)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:selected_date, Date.utc_today())
+    |> assign(:from_date, nil)
+    |> assign(:to_date, nil)
+    |> reset_pagination_and_reload()
   end
 
-  # Date range picker
+  # Date range picker - consolidated handlers
   @impl true
-  def handle_event("set-from-date", %{"value" => ""}, socket) do
-    socket =
-      socket
-      |> assign(:from_date, nil)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("set-from-date", %{"value" => date_str}, socket) do
-    case Date.from_iso8601(date_str) do
+  def handle_event("set-from-date", %{"value" => value}, socket) do
+    case parse_date(value) do
       {:ok, date} ->
-        socket =
-          socket
-          |> assign(:from_date, date)
-          |> assign(:cursor, nil)
-          |> assign(:direction, :next)
-          |> load_journeys()
-
-        {:noreply, socket}
-
-      _ ->
+        socket |> assign(:from_date, date) |> reset_pagination_and_reload()
+      :error ->
         {:noreply, socket}
     end
   end
 
   @impl true
-  def handle_event("set-to-date", %{"value" => ""}, socket) do
-    socket =
-      socket
-      |> assign(:to_date, nil)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("set-to-date", %{"value" => date_str}, socket) do
-    case Date.from_iso8601(date_str) do
+  def handle_event("set-to-date", %{"value" => value}, socket) do
+    case parse_date(value) do
       {:ok, date} ->
-        socket =
-          socket
-          |> assign(:to_date, date)
-          |> assign(:cursor, nil)
-          |> assign(:direction, :next)
-          |> load_journeys()
-
-        {:noreply, socket}
-
-      _ ->
+        socket |> assign(:to_date, date) |> reset_pagination_and_reload()
+      :error ->
         {:noreply, socket}
     end
   end
 
   @impl true
   def handle_event("clear-date-range", _params, socket) do
-    socket =
-      socket
-      |> assign(:from_date, nil)
-      |> assign(:to_date, nil)
-      |> assign(:selected_date, Date.utc_today())
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:from_date, nil)
+    |> assign(:to_date, nil)
+    |> assign(:selected_date, Date.utc_today())
+    |> reset_pagination_and_reload()
   end
 
-  # DateTime range picker
+  # DateTime range picker - consolidated handlers
   @impl true
-  def handle_event("set-from-datetime", %{"value" => ""}, socket) do
-    socket =
-      socket
-      |> assign(:from_datetime, nil)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("set-from-datetime", %{"value" => datetime_str}, socket) do
-    case parse_datetime_local(datetime_str) do
+  def handle_event("set-from-datetime", %{"value" => value}, socket) do
+    case parse_datetime_local(value) do
       {:ok, datetime} ->
-        socket =
-          socket
-          |> assign(:from_datetime, datetime)
-          |> assign(:cursor, nil)
-          |> assign(:direction, :next)
-          |> load_journeys()
-
-        {:noreply, socket}
-
+        socket |> assign(:from_datetime, datetime) |> reset_pagination_and_reload()
       _ ->
         {:noreply, socket}
     end
   end
 
   @impl true
-  def handle_event("set-to-datetime", %{"value" => ""}, socket) do
-    socket =
-      socket
-      |> assign(:to_datetime, nil)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("set-to-datetime", %{"value" => datetime_str}, socket) do
-    case parse_datetime_local(datetime_str) do
+  def handle_event("set-to-datetime", %{"value" => value}, socket) do
+    case parse_datetime_local(value) do
       {:ok, datetime} ->
-        socket =
-          socket
-          |> assign(:to_datetime, datetime)
-          |> assign(:cursor, nil)
-          |> assign(:direction, :next)
-          |> load_journeys()
-
-        {:noreply, socket}
-
+        socket |> assign(:to_datetime, datetime) |> reset_pagination_and_reload()
       _ ->
         {:noreply, socket}
     end
@@ -387,38 +283,21 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   @impl true
   def handle_event("clear-datetime-range", _params, socket) do
-    socket =
-      socket
-      |> assign(:from_datetime, nil)
-      |> assign(:to_datetime, nil)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:from_datetime, nil)
+    |> assign(:to_datetime, nil)
+    |> reset_pagination_and_reload()
   end
 
   # POS quick filter
   @impl true
   def handle_event("pos-filter", %{"filter" => filter}, socket) do
-    pos_filter =
-      case filter do
-        "all" -> :all
-        "with_pos" -> :with_pos
-        "without_pos" -> :without_pos
-        "unpaid_with_pos" -> :unpaid_with_pos
-        _ -> :all
-      end
+    pos_filter = String.to_existing_atom(filter)
 
-    socket =
-      socket
-      |> assign(:pos_filter, pos_filter)
-      |> assign(:selected_pos_zones, [])
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:pos_filter, pos_filter)
+    |> assign(:selected_pos_zones, [])
+    |> reset_pagination_and_reload()
   end
 
   # POS zone multi-select
@@ -430,40 +309,32 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   @impl true
   def handle_event("toggle-pos-zone", %{"zone" => zone}, socket) do
     selected = socket.assigns.selected_pos_zones
+    selected = if zone in selected, do: List.delete(selected, zone), else: [zone | selected]
 
-    selected =
-      if zone in selected do
-        List.delete(selected, zone)
-      else
-        [zone | selected]
-      end
-
-    socket =
-      socket
-      |> assign(:selected_pos_zones, selected)
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:selected_pos_zones, selected)
+    |> reset_pagination_and_reload()
   end
 
   @impl true
   def handle_event("clear-pos-zones", _params, socket) do
-    socket =
-      socket
-      |> assign(:selected_pos_zones, [])
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
-
-    {:noreply, socket}
+    socket
+    |> assign(:selected_pos_zones, [])
+    |> reset_pagination_and_reload()
   end
 
   # Advanced filters toggle
   @impl true
   def handle_event("toggle-advanced-filters", _params, socket) do
     {:noreply, assign(socket, :advanced_filters_open, !socket.assigns.advanced_filters_open)}
+  end
+
+  # Duration filter toggle
+  @impl true
+  def handle_event("toggle-hide-short", _params, socket) do
+    socket
+    |> assign(:hide_short_journeys, !socket.assigns.hide_short_journeys)
+    |> reset_pagination_and_reload()
   end
 
   # Pagination
@@ -505,13 +376,16 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   @impl true
   def handle_event("first-page", _params, socket) do
-    socket =
-      socket
-      |> assign(:cursor, nil)
-      |> assign(:direction, :next)
-      |> load_journeys()
+    reset_pagination_and_reload(socket)
+  end
 
-    {:noreply, socket}
+  # Helper to reset pagination and reload journeys
+  defp reset_pagination_and_reload(socket) do
+    socket
+    |> assign(:cursor, nil)
+    |> assign(:direction, :next)
+    |> load_journeys()
+    |> then(&{:noreply, &1})
   end
 
   # Unified load function using list_filtered
@@ -528,6 +402,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       to_datetime: assigns.to_datetime,
       pos_filter: assigns.pos_filter,
       pos_zones: assigns.selected_pos_zones,
+      min_duration_ms: if(assigns.hide_short_journeys, do: @min_dwell_ms, else: nil),
       cursor: assigns.cursor,
       direction: assigns.direction,
       limit: assigns.page_size
@@ -672,6 +547,16 @@ defmodule AveroCommandWeb.JourneyFeedLive do
             </button>
           </div>
 
+          <%!-- Duration Filter --%>
+          <div class="flex items-center border-l pl-3">
+            <button
+              phx-click="toggle-hide-short"
+              class={pos_filter_button_class(@hide_short_journeys)}
+            >
+              Hide &lt;7s
+            </button>
+          </div>
+
           <%!-- Advanced Filters Toggle --%>
           <button
             phx-click="toggle-advanced-filters"
@@ -756,7 +641,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
           <div class="text-center py-12 bg-white rounded-lg shadow">
             <p class="text-gray-500">No customer journeys</p>
             <p class="text-sm text-gray-400 mt-2">
-              <%= if @person_id_search != "" or @from_date != nil or @to_date != nil or @pos_filter != :all or @selected_pos_zones != [] do %>
+              <%= if @person_id_search != "" or @from_date != nil or @to_date != nil or @pos_filter != :all or @selected_pos_zones != [] or @hide_short_journeys do %>
                 Try adjusting your filters
               <% else %>
                 Journeys will appear here when customers exit
@@ -839,12 +724,21 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     end
   end
 
-  # DateTime helpers for datetime-local inputs
+  # Date/DateTime helpers for form inputs
+  defp parse_date(""), do: {:ok, nil}
+  defp parse_date(str) when is_binary(str) do
+    case Date.from_iso8601(str) do
+      {:ok, date} -> {:ok, date}
+      _ -> :error
+    end
+  end
+
   defp format_datetime_local(%DateTime{} = dt) do
     Calendar.strftime(dt, "%Y-%m-%dT%H:%M")
   end
   defp format_datetime_local(_), do: nil
 
+  defp parse_datetime_local(""), do: {:ok, nil}
   defp parse_datetime_local(str) when is_binary(str) do
     # datetime-local format: "2025-12-29T10:30"
     case NaiveDateTime.from_iso8601(str <> ":00") do

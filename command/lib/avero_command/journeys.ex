@@ -25,15 +25,12 @@ defmodule AveroCommand.Journeys do
     sites = Keyword.get(opts, :sites)
     limit = Keyword.get(opts, :limit, 50)
 
-    query =
-      from(j in Journey,
-        order_by: [desc: j.time],
-        limit: ^limit
-      )
-
-    query = if sites && sites != [], do: where(query, [j], j.site in ^sites), else: query
-
-    Repo.all(query)
+    from(j in Journey,
+      order_by: [desc: j.time],
+      limit: ^limit
+    )
+    |> apply_site_filter(sites)
+    |> Repo.all()
   rescue
     e ->
       Logger.warning("Failed to list journeys: #{inspect(e)}")
@@ -47,16 +44,13 @@ defmodule AveroCommand.Journeys do
     sites = Keyword.get(opts, :sites)
     limit = Keyword.get(opts, :limit, 50)
 
-    query =
-      from(j in Journey,
-        where: j.exit_type == ^exit_type,
-        order_by: [desc: j.time],
-        limit: ^limit
-      )
-
-    query = if sites && sites != [], do: where(query, [j], j.site in ^sites), else: query
-
-    Repo.all(query)
+    from(j in Journey,
+      where: j.exit_type == ^exit_type,
+      order_by: [desc: j.time],
+      limit: ^limit
+    )
+    |> apply_site_filter(sites)
+    |> Repo.all()
   rescue
     _ -> []
   end
@@ -72,6 +66,7 @@ defmodule AveroCommand.Journeys do
     - to_date: Date or ISO8601 string for end of range
     - pos_filter: :all | :with_pos | :without_pos
     - pos_zones: list of specific payment zones to include
+    - min_duration_ms: minimum journey duration in milliseconds
     - cursor: DateTime for cursor-based pagination
     - direction: :next | :prev (default: :next)
     - limit: number of results (default: 25)
@@ -86,6 +81,7 @@ defmodule AveroCommand.Journeys do
     to_datetime = Keyword.get(opts, :to_datetime)
     pos_filter = Keyword.get(opts, :pos_filter, :all)
     pos_zones = Keyword.get(opts, :pos_zones, [])
+    min_duration_ms = Keyword.get(opts, :min_duration_ms)
     cursor = Keyword.get(opts, :cursor)
     direction = Keyword.get(opts, :direction, :next)
     limit = Keyword.get(opts, :limit, 25)
@@ -97,6 +93,7 @@ defmodule AveroCommand.Journeys do
     |> apply_date_range_filter(from_date, to_date)
     |> apply_datetime_range_filter(from_datetime, to_datetime)
     |> apply_pos_filter(pos_filter, pos_zones)
+    |> apply_min_duration_filter(min_duration_ms)
     |> apply_cursor_pagination(cursor, direction, limit)
     |> Repo.all()
     |> maybe_reverse(direction)
@@ -113,16 +110,14 @@ defmodule AveroCommand.Journeys do
   def list_payment_zones(opts \\ []) do
     sites = Keyword.get(opts, :sites)
 
-    query =
-      from(j in Journey,
-        where: not is_nil(j.payment_zone),
-        distinct: true,
-        select: j.payment_zone
-      )
-
-    query = if sites && sites != [], do: where(query, [j], j.site in ^sites), else: query
-
-    Repo.all(query) |> Enum.sort()
+    from(j in Journey,
+      where: not is_nil(j.payment_zone),
+      distinct: true,
+      select: j.payment_zone
+    )
+    |> apply_site_filter(sites)
+    |> Repo.all()
+    |> Enum.sort()
   rescue
     _ -> []
   end
@@ -289,6 +284,11 @@ defmodule AveroCommand.Journeys do
     where(query, [j], j.authorized == false and j.total_pos_dwell_ms >= @min_dwell_ms)
   end
   defp apply_pos_filter(query, _, _), do: query
+
+  defp apply_min_duration_filter(query, nil), do: query
+  defp apply_min_duration_filter(query, min_ms) do
+    where(query, [j], j.duration_ms >= ^min_ms)
+  end
 
   defp apply_cursor_pagination(query, nil, _direction, limit) do
     query
@@ -531,6 +531,9 @@ defmodule AveroCommand.Journeys do
   # Map gateway-poc outcome to command format
   defp map_gateway_outcome("exit", true), do: {"paid_exit", "exit_confirmed"}
   defp map_gateway_outcome("exit", false), do: {"unpaid_exit", "exit_confirmed"}
+  defp map_gateway_outcome("returned", _), do: {"returned", "returned_to_store"}
+  defp map_gateway_outcome("lost", true), do: {"lost_authorized", "tracking_lost_authorized"}
+  defp map_gateway_outcome("lost", false), do: {"lost_unauthorized", "tracking_lost"}
   defp map_gateway_outcome("abandoned", _), do: {"lost_unauthorized", "tracking_lost"}
   defp map_gateway_outcome("in_progress", _), do: {"in_progress", "tracking_lost"}
   defp map_gateway_outcome(_, true), do: {"paid_exit", "exit_confirmed"}

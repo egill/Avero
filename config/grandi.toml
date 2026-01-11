@@ -47,3 +47,4 @@ interval_secs = 10
 [acc]
 listener_enabled = true
 listener_port = 25803
+grouping_strategy = "legacy"

@@ -34,6 +34,13 @@ pub enum GateMode {
     Tcp,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccGroupingStrategy {
+    Legacy,
+    PresentDwell,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MqttConfig {
     pub host: String,
@@ -95,6 +102,8 @@ pub struct AccConfig {
     pub listener_enabled: bool,
     #[serde(default = "Defaults::acc_listener_port")]
     pub listener_port: u16,
+    #[serde(default = "Defaults::acc_grouping_strategy")]
+    pub grouping_strategy: AccGroupingStrategy,
 }
 
 impl Default for AccConfig {
@@ -103,6 +112,7 @@ impl Default for AccConfig {
             ip_to_pos: HashMap::new(),
             listener_enabled: true,
             listener_port: DEFAULT_ACC_LISTENER_PORT,
+            grouping_strategy: AccGroupingStrategy::Legacy,
         }
     }
 }
@@ -196,6 +206,9 @@ impl Defaults {
     }
     fn acc_listener_port() -> u16 {
         DEFAULT_ACC_LISTENER_PORT
+    }
+    fn acc_grouping_strategy() -> AccGroupingStrategy {
+        AccGroupingStrategy::Legacy
     }
     fn egress_file() -> String {
         "journeys.jsonl".to_string()
@@ -304,6 +317,7 @@ pub struct Config {
     acc_ip_to_pos: HashMap<String, String>,
     acc_listener_enabled: bool,
     acc_listener_port: u16,
+    acc_grouping_strategy: AccGroupingStrategy,
 
     // Egress
     egress_file: String,
@@ -387,6 +401,7 @@ impl Default for Config {
             acc_ip_to_pos: HashMap::new(),
             acc_listener_enabled: true,
             acc_listener_port: DEFAULT_ACC_LISTENER_PORT,
+            acc_grouping_strategy: AccGroupingStrategy::Legacy,
             egress_file: "journeys.jsonl".to_string(),
             broker_bind_address: "0.0.0.0".to_string(),
             broker_port: DEFAULT_BROKER_PORT,
@@ -505,6 +520,7 @@ impl Config {
             acc_ip_to_pos: toml_config.acc.ip_to_pos,
             acc_listener_enabled: toml_config.acc.listener_enabled,
             acc_listener_port: toml_config.acc.listener_port,
+            acc_grouping_strategy: toml_config.acc.grouping_strategy,
             egress_file: toml_config.egress.file,
             broker_bind_address: toml_config.broker.bind_address,
             broker_port: toml_config.broker.port,
@@ -615,6 +631,7 @@ impl Config {
         prometheus_port -> u16,
         acc_listener_enabled -> bool,
         acc_listener_port -> u16,
+        acc_grouping_strategy -> AccGroupingStrategy,
         broker_port -> u16,
         mqtt_egress_enabled -> bool,
         mqtt_egress_metrics_interval_secs -> u64,

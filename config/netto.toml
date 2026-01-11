@@ -52,6 +52,7 @@ interval_secs = 10
 [acc]
 listener_enabled = true
 listener_port = 25803
+grouping_strategy = "legacy"
 
 [acc.ip_to_pos]
 "10.120.48.211" = "POS_1"

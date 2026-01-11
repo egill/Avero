@@ -6,7 +6,7 @@
 
 use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyEventType};
 use crate::domain::types::TrackId;
-use crate::infra::config::Config;
+use crate::infra::config::{AccGroupingStrategy, Config};
 use crate::infra::metrics::Metrics;
 use crate::services::journey_manager::JourneyManager;
 use std::collections::HashMap;
@@ -108,6 +108,7 @@ pub struct AccCollector {
     /// IP to POS name mapping
     ip_to_pos: HashMap<String, String>,
     min_dwell_for_acc: u64,
+    grouping_strategy: AccGroupingStrategy,
     /// Current POS groups by zone name (co-presence tracking)
     pos_groups: HashMap<String, PosGroup>,
     /// Recent exits by zone name (for delayed matching)
@@ -123,6 +124,7 @@ impl AccCollector {
         Self {
             ip_to_pos: config.acc_ip_to_pos().clone(),
             min_dwell_for_acc: config.min_dwell_ms(),
+            grouping_strategy: config.acc_grouping_strategy(),
             pos_groups: HashMap::new(),
             recent_exits: HashMap::new(),
             last_pos_exit: HashMap::new(),
@@ -226,6 +228,16 @@ impl AccCollector {
         let kiosk_str = kiosk_id.unwrap_or(pos);
 
         info!(kiosk = %kiosk_str, pos = %pos, "acc_event_received");
+
+        if self.grouping_strategy == AccGroupingStrategy::PresentDwell {
+            return self.process_acc_present_dwell(
+                pos,
+                kiosk_str,
+                ts,
+                journey_manager,
+                accumulated_dwells,
+            );
+        }
 
         // First try: current group at POS with at least one member having sufficient dwell
         if let Some(group) = self.pos_groups.get(pos) {
@@ -379,6 +391,77 @@ impl AccCollector {
             available_pos_groups = ?all_pos_zones,
             recent_exit_zones = ?recent_exit_zones,
             "acc_no_match"
+        );
+        vec![]
+    }
+
+    fn process_acc_present_dwell(
+        &mut self,
+        pos: &str,
+        kiosk_str: &str,
+        ts: u64,
+        journey_manager: &mut JourneyManager,
+        accumulated_dwells: Option<&HashMap<TrackId, u64>>,
+    ) -> Vec<TrackId> {
+        self.cleanup_old_exits();
+
+        if let Some(group) = self.pos_groups.get(pos) {
+            let all_members = group.all_members();
+            let member_dwells: Vec<(TrackId, u64, Option<u64>)> = group
+                .members
+                .iter()
+                .map(|m| {
+                    let session_dwell = m.entered_at.elapsed().as_millis() as u64;
+                    let acc_dwell = accumulated_dwells.and_then(|d| d.get(&m.track_id).copied());
+                    (m.track_id, session_dwell, acc_dwell)
+                })
+                .collect();
+            debug!(
+                pos = %pos,
+                members = ?all_members,
+                dwells_ms = ?member_dwells,
+                min_dwell = %self.min_dwell_for_acc,
+                "acc_checking_pos_group_present_dwell"
+            );
+
+            let qualified = group.members_with_sufficient_dwell(accumulated_dwells);
+            if qualified.is_empty() {
+                debug!(
+                    pos = %pos,
+                    members = ?all_members,
+                    dwells_ms = ?member_dwells,
+                    min_dwell = %self.min_dwell_for_acc,
+                    "acc_group_present_dwell_no_qualified"
+                );
+                return vec![];
+            }
+
+            info!(
+                pos = %pos,
+                qualified = ?qualified,
+                "acc_matched_present_dwell"
+            );
+
+            for &track_id in &qualified {
+                if let Some(journey) = journey_manager.get_mut_any(track_id) {
+                    journey.acc_matched = true;
+                }
+                journey_manager.add_event(
+                    track_id,
+                    JourneyEvent::new(JourneyEventType::Acc, ts)
+                        .with_zone(pos)
+                        .with_extra(&format!("kiosk={kiosk_str},group={}", qualified.len())),
+                );
+            }
+
+            return qualified;
+        }
+
+        let all_pos_zones: Vec<_> = self.pos_groups.keys().collect();
+        debug!(
+            pos = %pos,
+            available_pos_groups = ?all_pos_zones,
+            "acc_no_match_present_dwell"
         );
         vec![]
     }

@@ -451,7 +451,8 @@ impl Metrics {
             let open_since = self.gate_open_since_ms.load(Ordering::Relaxed);
             if open_since > 0 {
                 let duration_ms = epoch_ms().saturating_sub(open_since);
-                if duration_ms >= 60_000 && self.gate_very_long_counted.swap(1, Ordering::Relaxed) == 0
+                if duration_ms >= 60_000
+                    && self.gate_very_long_counted.swap(1, Ordering::Relaxed) == 0
                 {
                     self.gate_very_long_opens_total.fetch_add(1, Ordering::Relaxed);
                 }

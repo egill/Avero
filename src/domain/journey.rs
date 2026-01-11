@@ -206,34 +206,17 @@ impl Journey {
         *self.tids.last().unwrap_or(&TrackId(0))
     }
 
-    /// Check if this journey has meaningful activity (not just STORE zone)
+    /// Check if this journey has meaningful activity
     ///
     /// A journey is considered meaningful if it:
     /// - Had dwell time in a POS zone (total_dwell_ms > 0)
     /// - Received an ACC match
     /// - Had a gate command sent
-    /// - Visited any zone with POS, GATE, APPROACH, or EXIT in the name
+    ///
+    /// Zone presence alone (ZONE_ENTRY without dwell) is not meaningful
+    /// as it may be sensor noise or brief re-detections.
     pub fn has_meaningful_activity(&self) -> bool {
-        // Had dwell time or ACC match or gate command
-        if self.total_dwell_ms > 0 || self.acc_matched || self.gate_cmd_at.is_some() {
-            return true;
-        }
-
-        // Check zone events for meaningful areas
-        for event in &self.events {
-            if let Some(zone) = &event.z {
-                let zone_upper = zone.to_uppercase();
-                if zone_upper.contains("POS")
-                    || zone_upper.contains("GATE")
-                    || zone_upper.contains("APPROACH")
-                    || zone_upper.contains("EXIT")
-                {
-                    return true;
-                }
-            }
-        }
-
-        false
+        self.total_dwell_ms > 0 || self.acc_matched || self.gate_cmd_at.is_some()
     }
 
     /// Convert to short-key JSON string (without site)

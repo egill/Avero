@@ -160,7 +160,12 @@ fn write_latency_metrics(output: &mut String, site: &str, summary: &MetricsSumma
     );
 }
 
-fn write_gate_metrics(output: &mut String, site: &str, summary: &MetricsSummary, metrics: &Metrics) {
+fn write_gate_metrics(
+    output: &mut String,
+    site: &str,
+    summary: &MetricsSummary,
+    metrics: &Metrics,
+) {
     write_metric(
         output,
         "gateway_gate_commands_total",

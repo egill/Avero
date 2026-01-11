@@ -52,6 +52,7 @@ interval_secs = 10
 listener_enabled = true
 # Port for ACC TCP listener (protocol: "ACC <receipt_id>\n")
 listener_port = 25803
+grouping_strategy = "legacy"
 
 # IP to POS zone mapping - maps ACC terminal IP to POS zone
 [acc.ip_to_pos]
