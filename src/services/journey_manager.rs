@@ -213,23 +213,18 @@ impl JourneyManager {
                     self.pid_by_track.remove(tid);
                 }
 
-                // Filter: must have crossed entry AND have meaningful activity
-                // (not just wandering in STORE zone)
-                if pending.journey.crossed_entry && pending.journey.has_meaningful_activity() {
+                // Filter: keep journeys with entry crossing OR meaningful activity
+                // Only discard pure store wanderers (no entry, no meaningful stops)
+                if pending.journey.crossed_entry || pending.journey.has_meaningful_activity() {
                     info!(
                         jid = %pending.journey.jid,
                         pid = %pending.journey.pid,
                         tids = ?pending.journey.tids,
                         outcome = %pending.journey.outcome.as_str(),
+                        crossed_entry = %pending.journey.crossed_entry,
                         "journey_ready_for_egress"
                     );
                     ready.push(pending.journey);
-                } else if !pending.journey.crossed_entry {
-                    debug!(
-                        jid = %pending.journey.jid,
-                        tids = ?pending.journey.tids,
-                        "journey_discarded_no_entry"
-                    );
                 } else {
                     debug!(
                         jid = %pending.journey.jid,
@@ -412,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tick_filters_store_only() {
+    fn test_tick_emits_entry_only() {
         let mut manager = JourneyManager::new();
         manager.new_journey(TrackId(100));
 
@@ -429,10 +424,34 @@ mod tests {
             pending.eligible_at = Instant::now() - Duration::from_secs(1);
         }
 
-        // Should be filtered out - no meaningful activity
+        // Should emit - has crossed_entry (OR logic)
         let ready = manager.tick();
-        assert!(ready.is_empty());
-        assert_eq!(manager.pending_count(), 0); // Was processed and discarded
+        assert_eq!(ready.len(), 1);
+        assert!(ready[0].crossed_entry);
+    }
+
+    #[test]
+    fn test_tick_emits_meaningful_activity_only() {
+        let mut manager = JourneyManager::new();
+        manager.new_journey(TrackId(100));
+
+        // NO crossed entry but HAS meaningful activity (ACC match)
+        if let Some(j) = manager.get_mut(TrackId(100)) {
+            j.crossed_entry = false;
+            j.acc_matched = true; // Meaningful activity
+        }
+
+        manager.end_journey(TrackId(100), JourneyOutcome::Lost);
+
+        // Manually set eligible_at to past
+        if let Some(pending) = manager.pending_egress.get_mut(&TrackId(100)) {
+            pending.eligible_at = Instant::now() - Duration::from_secs(1);
+        }
+
+        // Should emit - has meaningful activity (OR logic)
+        let ready = manager.tick();
+        assert_eq!(ready.len(), 1);
+        assert!(ready[0].acc_matched);
     }
 
     #[test]

@@ -218,9 +218,10 @@ async fn test_journey_complete_on_exit_line() {
 }
 
 #[tokio::test]
-async fn test_exit_inferred_when_lost_in_exit_corridor() {
-    // When a track crosses approach forward, enters gate zone, then disappears
-    // before crossing the exit line, we infer the exit rather than marking as lost.
+async fn test_lost_in_exit_corridor_is_stitch_candidate() {
+    // When a track enters gate zone but doesn't cross the exit line, it's marked
+    // as Lost (stitch candidate) rather than Completed. We don't infer exit -
+    // only proven exits (EXIT cross or EXIT zone) are Completed.
     let config = Config::default().with_min_dwell_ms(10).with_approach_line(1008);
     let mut tracker = create_test_tracker_with_config(config);
 
@@ -231,7 +232,7 @@ async fn test_exit_inferred_when_lost_in_exit_corridor() {
     tokio::time::sleep(millis(20)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
 
-    // Manually authorize (simulating ACC match) - authorization comes from ACC, not dwell
+    // Manually authorize (simulating ACC match)
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
@@ -249,20 +250,15 @@ async fn test_exit_inferred_when_lost_in_exit_corridor() {
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1007)));
 
     // Track deleted - simulating sensor loss in exit corridor
-    // Person should still be in gate area (last zone is GATE_1)
-    // Set current zone back to gate to simulate being in gate area when deleted
-    tracker.persons.get_mut(&TrackId(100)).unwrap().current_zone = Some(GeometryId(1007));
-
     tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]));
 
     // Track should be gone (pending for stitch)
     assert_eq!(tracker.active_tracks(), 0);
 
-    // Check journey - should have exit_inferred=true and Completed outcome
-    // Journey is in pending_egress, accessible via get_any
+    // Journey should be Lost (stitch candidate) - went deep (GATE) but didn't exit
     let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
-    assert_eq!(journey.outcome, JourneyOutcome::Completed);
-    assert!(journey.exit_inferred, "Expected exit_inferred to be true");
+    assert_eq!(journey.outcome, JourneyOutcome::Lost);
+    assert!(!journey.exit_inferred, "exit_inferred should be false - no proven exit");
     assert!(journey.authorized);
 }
 
@@ -293,6 +289,9 @@ async fn test_stitch_transfers_state() {
     // Create track with position
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70]));
 
+    // Enter POS zone (makes track a valid stitch candidate - went deep)
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+
     // Manually authorize (simulating ACC match) and set dwell
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
@@ -302,7 +301,7 @@ async fn test_stitch_transfers_state() {
 
     let dwell = tracker.persons.get(&TrackId(100)).unwrap().accumulated_dwell_ms;
 
-    // Delete track (goes to stitch pending)
+    // Delete track (goes to stitch pending - Lost because went deep but didn't exit)
     tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]));
     assert_eq!(tracker.active_tracks(), 0);
 
@@ -322,6 +321,10 @@ async fn test_stitch_fails_too_late() {
 
     // Create and authorize track
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [1.0, 1.0, 1.70]));
+
+    // Enter POS zone (makes track a valid stitch candidate)
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
@@ -332,8 +335,8 @@ async fn test_stitch_fails_too_late() {
     tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]));
     assert_eq!(tracker.active_tracks(), 0);
 
-    // Wait beyond stitch window (4.5s)
-    tokio::time::sleep(millis(4600)).await;
+    // Wait beyond stitch window (8s for POS zone, base is 4.5s)
+    tokio::time::sleep(millis(8100)).await;
 
     // New track nearby - should NOT stitch (too late)
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71]));

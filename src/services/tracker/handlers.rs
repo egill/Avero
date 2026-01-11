@@ -245,12 +245,11 @@ impl Tracker {
                 ),
             );
 
-            // Determine journey outcome based on last zone and events
+            // Determine journey outcome based on events
             // ReturnedToStore: went back into store (POS zone, STORE, or backward entry cross)
             // Completed: exit inferred (track lost in exit corridor after approach cross)
             // Lost: disappeared near gate/exit area without clear exit signal
-            let (outcome, exit_inferred) =
-                self.determine_journey_outcome(track_id, &person, &last_zone);
+            let (outcome, exit_inferred) = self.determine_journey_outcome(track_id);
             if exit_inferred {
                 if let Some(journey) = self.journey_manager.get_mut(track_id) {
                     journey.exit_inferred = true;
@@ -861,54 +860,51 @@ impl Tracker {
 
     /// Determine the journey outcome when a track is deleted
     ///
-    /// Returns (outcome, exit_inferred) where exit_inferred is true if track was lost in exit corridor.
-    fn determine_journey_outcome(
-        &self,
-        track_id: TrackId,
-        person: &Person,
-        last_zone: &str,
-    ) -> (JourneyOutcome, bool) {
-        // Check journey events for backward entry line crossing or exit corridor pattern
-        if let Some(journey) = self.journey_manager.get_any(track_id) {
-            // Backward entry crossing = strong signal they returned to store
-            let has_backward_entry = journey.events.iter().rev().any(|e| {
-                e.t == JourneyEventType::EntryCross
-                    && e.extra.as_ref().is_some_and(|x| x.contains("dir=backward"))
-            });
+    /// Priority:
+    /// 1. EXIT line crossed → Completed (definitive exit)
+    /// 2. Last zone was EXIT → Completed (they're gone)
+    /// 3. Backward entry cross → ReturnedToStore (went back)
+    /// 4. Only touched STORE/ENTRY → ReturnedToStore (never went deep)
+    /// 5. Else → Lost (stitch candidate)
+    fn determine_journey_outcome(&self, track_id: TrackId) -> (JourneyOutcome, bool) {
+        let Some(journey) = self.journey_manager.get_any(track_id) else {
+            return (JourneyOutcome::Lost, false);
+        };
 
-            if has_backward_entry {
-                debug!(track_id = %track_id, "journey_returned_backward_entry");
-                return (JourneyOutcome::ReturnedToStore, false);
-            }
-
-            // Exit corridor pattern: approach forward + gate zone + no exit cross
-            let has_approach_forward = journey.events.iter().any(|e| {
-                e.t == JourneyEventType::ApproachCross
-                    && e.extra.as_ref().is_some_and(|x| x.contains("dir=forward"))
-            });
-            let has_exit_cross = journey.events.iter().any(|e| e.t == JourneyEventType::ExitCross);
-            let in_gate_area = last_zone.to_uppercase().contains("GATE");
-
-            if has_approach_forward && in_gate_area && !has_exit_cross {
-                debug!(track_id = %track_id, zone = %last_zone, "journey_exit_inferred");
-                return (JourneyOutcome::Completed, true);
-            }
+        // 1. Crossed EXIT line = definitely gone
+        if journey.events.iter().any(|e| e.t == JourneyEventType::ExitCross) {
+            debug!(track_id = %track_id, "journey_completed_exit_cross");
+            return (JourneyOutcome::Completed, false);
         }
 
-        // In POS zone = returned to shopping
-        if person.current_zone.is_some_and(|z| self.config.is_pos_zone(z.0)) {
-            debug!(track_id = %track_id, zone = %last_zone, "journey_returned_pos_zone");
+        // 2. Last zone was EXIT = gone
+        if journey.events.iter().rev().find_map(|e| e.z.as_deref()) == Some("EXIT") {
+            debug!(track_id = %track_id, "journey_completed_exit_zone");
+            return (JourneyOutcome::Completed, false);
+        }
+
+        // 3. Backward entry cross = returned to store
+        let has_backward_entry = journey.events.iter().any(|e| {
+            e.t == JourneyEventType::EntryCross
+                && e.extra.as_ref().is_some_and(|x| x.contains("dir=backward"))
+        });
+        if has_backward_entry {
+            debug!(track_id = %track_id, "journey_returned_backward_entry");
             return (JourneyOutcome::ReturnedToStore, false);
         }
 
-        // Zone name indicates store area = returned to shopping
-        let zone_upper = last_zone.to_uppercase();
-        if zone_upper.contains("STORE") || zone_upper.contains("SHOPPING") {
-            debug!(track_id = %track_id, zone = %last_zone, "journey_returned_store_zone");
+        // 4. Only touched shallow zones (STORE/ENTRY) = never went deep into checkout
+        let went_deep = journey.events.iter().filter_map(|e| e.z.as_deref()).any(|z| {
+            z.starts_with("POS_") || z.starts_with("GATE") || z == "APPROACH" || z == "EXIT"
+        });
+
+        if !went_deep {
+            debug!(track_id = %track_id, "journey_returned_shallow");
             return (JourneyOutcome::ReturnedToStore, false);
         }
 
-        debug!(track_id = %track_id, zone = %last_zone, "journey_lost");
+        // 5. Went deep but didn't exit = stitch candidate
+        debug!(track_id = %track_id, "journey_lost_stitch_candidate");
         (JourneyOutcome::Lost, false)
     }
 }
