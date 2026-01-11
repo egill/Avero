@@ -9,8 +9,14 @@
 
 use rustc_hash::FxHashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::info;
+
+/// Get current epoch time in milliseconds
+#[inline]
+fn epoch_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
 
 /// Prometheus-style exponential bucket boundaries (microseconds)
 /// Buckets: ≤100, ≤200, ≤400, ≤800, ≤1600, ≤3200, ≤6400, ≤12800, ≤25600, ≤51200, >51200
@@ -141,6 +147,16 @@ pub struct Metrics {
     gate_commands_since_report: AtomicU64,
     /// Current gate state (0=closed, 1=moving, 2=open)
     gate_state: AtomicU64,
+    /// Timestamp (epoch_ms) when gate became open (0 if not open)
+    gate_open_since_ms: AtomicU64,
+    /// Counter of gate openings that exceeded 30 seconds
+    gate_long_opens_total: AtomicU64,
+    /// Counter of gate openings that exceeded 60 seconds
+    gate_very_long_opens_total: AtomicU64,
+    /// Flag to track if we already counted this opening as "long" (30s)
+    gate_long_counted: AtomicU64,
+    /// Flag to track if we already counted this opening as "very long" (60s)
+    gate_very_long_counted: AtomicU64,
     /// Total exits through gate (monotonic)
     exits_total: AtomicU64,
     /// ACC events received (monotonic)
@@ -244,6 +260,11 @@ impl Metrics {
             gate_latency_max_us: AtomicU64::new(0),
             gate_commands_since_report: AtomicU64::new(0),
             gate_state: AtomicU64::new(GATE_STATE_CLOSED),
+            gate_open_since_ms: AtomicU64::new(0),
+            gate_long_opens_total: AtomicU64::new(0),
+            gate_very_long_opens_total: AtomicU64::new(0),
+            gate_long_counted: AtomicU64::new(0),
+            gate_very_long_counted: AtomicU64::new(0),
             exits_total: AtomicU64::new(0),
             acc_events_total: AtomicU64::new(0),
             acc_matched_total: AtomicU64::new(0),
@@ -389,9 +410,80 @@ impl Metrics {
     }
 
     /// Set gate state (0=closed, 1=moving, 2=open)
+    /// Also tracks when gate opens and counts long-duration openings
     #[inline]
     pub fn set_gate_state(&self, state: u64) {
-        self.gate_state.store(state, Ordering::Relaxed);
+        let prev_state = self.gate_state.swap(state, Ordering::Relaxed);
+
+        if state == GATE_STATE_OPEN && prev_state != GATE_STATE_OPEN {
+            // Gate just opened - record timestamp and reset flags
+            self.gate_open_since_ms.store(epoch_ms(), Ordering::Relaxed);
+            self.gate_long_counted.store(0, Ordering::Relaxed);
+            self.gate_very_long_counted.store(0, Ordering::Relaxed);
+        } else if state != GATE_STATE_OPEN && prev_state == GATE_STATE_OPEN {
+            // Gate just closed - check if it was a long opening
+            let open_since = self.gate_open_since_ms.swap(0, Ordering::Relaxed);
+            if open_since > 0 {
+                let duration_ms = epoch_ms().saturating_sub(open_since);
+                if duration_ms >= 60_000 {
+                    // If we haven't counted this as very long yet, count it
+                    if self.gate_very_long_counted.swap(1, Ordering::Relaxed) == 0 {
+                        self.gate_very_long_opens_total.fetch_add(1, Ordering::Relaxed);
+                    }
+                    // Also count as long if not already counted
+                    if self.gate_long_counted.swap(1, Ordering::Relaxed) == 0 {
+                        self.gate_long_opens_total.fetch_add(1, Ordering::Relaxed);
+                    }
+                } else if duration_ms >= 30_000 {
+                    // Count as long open if not already counted
+                    if self.gate_long_counted.swap(1, Ordering::Relaxed) == 0 {
+                        self.gate_long_opens_total.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check and increment long open counters while gate is still open
+    /// Called periodically by prometheus endpoint to catch long opens in real-time
+    pub fn check_gate_long_open(&self) {
+        if self.gate_state.load(Ordering::Relaxed) == GATE_STATE_OPEN {
+            let open_since = self.gate_open_since_ms.load(Ordering::Relaxed);
+            if open_since > 0 {
+                let duration_ms = epoch_ms().saturating_sub(open_since);
+                if duration_ms >= 60_000 && self.gate_very_long_counted.swap(1, Ordering::Relaxed) == 0
+                {
+                    self.gate_very_long_opens_total.fetch_add(1, Ordering::Relaxed);
+                }
+                if duration_ms >= 30_000 && self.gate_long_counted.swap(1, Ordering::Relaxed) == 0 {
+                    self.gate_long_opens_total.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    /// Get current gate open duration in seconds (0 if gate is not open)
+    #[inline]
+    pub fn gate_open_duration_seconds(&self) -> f64 {
+        if self.gate_state.load(Ordering::Relaxed) == GATE_STATE_OPEN {
+            let open_since = self.gate_open_since_ms.load(Ordering::Relaxed);
+            if open_since > 0 {
+                return epoch_ms().saturating_sub(open_since) as f64 / 1000.0;
+            }
+        }
+        0.0
+    }
+
+    /// Get total count of gate openings that exceeded 30 seconds
+    #[inline]
+    pub fn gate_long_opens_total(&self) -> u64 {
+        self.gate_long_opens_total.load(Ordering::Relaxed)
+    }
+
+    /// Get total count of gate openings that exceeded 60 seconds
+    #[inline]
+    pub fn gate_very_long_opens_total(&self) -> u64 {
+        self.gate_very_long_opens_total.load(Ordering::Relaxed)
     }
 
     /// Get current gate state

@@ -97,7 +97,7 @@ fn format_prometheus_metrics(
 
     write_core_metrics(&mut output, site_id, &summary);
     write_latency_metrics(&mut output, site_id, &summary);
-    write_gate_metrics(&mut output, site_id, &summary);
+    write_gate_metrics(&mut output, site_id, &summary, metrics);
     write_track_metrics(&mut output, site_id, &summary);
     write_pos_occupancy(&mut output, site_id, metrics);
     write_acc_metrics(&mut output, site_id, &summary);
@@ -160,7 +160,7 @@ fn write_latency_metrics(output: &mut String, site: &str, summary: &MetricsSumma
     );
 }
 
-fn write_gate_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
+fn write_gate_metrics(output: &mut String, site: &str, summary: &MetricsSummary, metrics: &Metrics) {
     write_metric(
         output,
         "gateway_gate_commands_total",
@@ -204,6 +204,35 @@ fn write_gate_metrics(output: &mut String, site: &str, summary: &MetricsSummary)
         site,
         summary.gate_state,
     );
+
+    // Check for long opens while scraping (catches in-progress long opens)
+    metrics.check_gate_long_open();
+
+    // Gate open duration (real-time, not from summary)
+    write_gauge_f64(
+        output,
+        "gateway_gate_open_duration_seconds",
+        "Current gate open duration in seconds (0 if closed)",
+        site,
+        metrics.gate_open_duration_seconds(),
+    );
+    write_metric(
+        output,
+        "gateway_gate_long_opens_total",
+        "Total gate openings exceeding 30 seconds",
+        MetricType::Counter,
+        site,
+        metrics.gate_long_opens_total(),
+    );
+    write_metric(
+        output,
+        "gateway_gate_very_long_opens_total",
+        "Total gate openings exceeding 60 seconds",
+        MetricType::Counter,
+        site,
+        metrics.gate_very_long_opens_total(),
+    );
+
     write_metric(
         output,
         "gateway_exits_total",
