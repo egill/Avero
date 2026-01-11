@@ -1,196 +1,131 @@
 {
-  "branchName": "ralph/perf-fixes",
+  "branchName": "gateway/analysis-logger",
   "userStories": [
     {
-      "id": "US-001",
-      "title": "Decouple gate commands from tracker loop",
-      "category": "performance",
+      "id": "GA-001",
+      "title": "Create gateway-analysis binary with config + CLI",
+      "category": "diagnostics",
       "acceptanceCriteria": [
-        "Gate command sends via spawned GateCmdWorker task",
-        "Tracker enqueues command and returns immediately (never awaits network)",
-        "Worker measures queue delay + send latency",
-        "Metrics updated: queue_delay_us, send_latency_us",
-        "Gate state payloads include timing info",
-        "All existing tests pass"
+        "New binary `gateway-analysis` builds and runs",
+        "Supports --config, --log-dir, --topics, --rotation, --site-id",
+        "Defaults align with existing config (MQTT host, ACC port, RS485 device)",
+        "Help text documents all flags"
       ],
-      "instructions": "Create src/services/gate_worker.rs with GateCmdWorker that owns GateController. Add gate_cmd_tx: mpsc::Sender<GateCmd> to Tracker. send_gate_open_command becomes 'enqueue + record timestamp' and returns immediately. Worker does actual send_open_command, measures latency, updates metrics. Adjust src/main.rs to spawn worker.",
-      "files": ["src/services/tracker/handlers.rs", "src/services/gate_worker.rs (new)", "src/main.rs"],
+      "instructions": "Add src/bin/gateway_analysis.rs with CLI parsing. Reuse Config where possible and add analysis-specific defaults for log dir/rotation.",
+      "files": ["Cargo.toml", "src/bin/gateway_analysis.rs", "src/infra/config.rs"],
       "priority": 0,
       "passes": true,
-      "notes": "CRITICAL: Primary cause of 'gate open too late'. Creates new gate_worker.rs module."
+      "notes": "Single binary preferred for correlation and simpler ops."
     },
     {
-      "id": "US-002",
-      "title": "Make MQTT/ACC event sending non-blocking with drop metrics",
-      "category": "performance",
+      "id": "GA-001a",
+      "title": "Run Mosquitto broker with auth for test capture",
+      "category": "diagnostics",
       "acceptanceCriteria": [
-        "MQTT uses try_send instead of send().await",
-        "ACC uses try_send instead of send().await",
-        "Dropped events counted per-source (mqtt_events_dropped, acc_events_dropped)",
-        "Warning logged on drop (rate-limited to 1/sec per source)",
-        "MQTT eventloop never stalls on tracker backpressure",
-        "All existing tests pass"
+        "Mosquitto runs as the broker for the test window",
+        "Username/password auth enabled (user: avero, pass: avero)",
+        "Publishers can connect and publish successfully",
+        "Broker logs stored to file for backup"
       ],
-      "instructions": "In src/io/mqtt.rs:60 and src/io/acc_listener.rs, change send().await to try_send(). On TrySendError::Full, increment source-specific counter and log rate-limited warning. Add mqtt_events_dropped and acc_events_dropped AtomicU64 to Metrics.",
-      "files": ["src/io/mqtt.rs", "src/io/acc_listener.rs", "src/infra/metrics.rs"],
+      "instructions": "Create a Mosquitto config for the test run (listener, allow_anonymous false, password file). Document commands to start/stop and verify connectivity.",
+      "files": ["docs/gateway-analysis.md", "config/mosquitto.conf (new)", "config/mosquitto.passwd (new)"],
       "priority": 0,
       "passes": true,
-      "notes": "CRITICAL: MQTT stalls cause disconnects. Combined MQTT+ACC in one story since same pattern."
+      "notes": "Broker replaces gateway broker during test."
     },
     {
-      "id": "US-003",
-      "title": "RS485 door state: use watch channel for lossless delivery",
-      "category": "performance",
+      "id": "GA-002",
+      "title": "MQTT topic logging to per-topic JSONL files",
+      "category": "logging",
       "acceptanceCriteria": [
-        "RS485 uses tokio::sync::watch for door state (not mpsc)",
-        "Latest door state always available, never dropped",
-        "Tracker reads door state from watch receiver",
-        "Remove try_send failure path (watch never fails)",
-        "Cap read latency: reduce MAX_READ_ATTEMPTS or timeout",
-        "All existing tests pass"
+        "Subscribes to configured MQTT topics (events, tracks, acc, gate, journeys, metrics)",
+        "Writes JSONL per topic: logs/mqtt/<topic>-YYYYMMDD.jsonl",
+        "Each record includes ts_recv, topic, payload_raw, and parsed fields",
+        "Logging continues when a payload is malformed"
       ],
-      "instructions": "RS485 door state is stateful (latest value matters, not event stream). Replace mpsc channel with watch channel. RS485Monitor sends via watch::Sender. Tracker/DoorCorrelator receives via watch::Receiver. This ensures door state is never dropped. Also reduce MAX_READ_ATTEMPTS from 50 to 10 to cap stall time at ~500ms.",
-      "files": ["src/io/rs485.rs", "src/main.rs", "src/services/tracker/mod.rs"],
+      "instructions": "Reuse existing MQTT client; on message, write a JSONL record with receive timestamp and raw payload. Keep parsing best-effort.",
+      "files": ["src/bin/gateway_analysis.rs", "src/io/mqtt.rs", "src/io/analysis_logger.rs"],
       "priority": 0,
       "passes": true,
-      "notes": "CRITICAL: Door state is stateful - must be lossless. Watch channel guarantees latest value."
+      "notes": "Must include gateway/tracks for delete/lost/stitch."
     },
     {
-      "id": "US-004",
-      "title": "CloudPlus gate queue: try_send with explicit failure handling",
-      "category": "performance",
+      "id": "GA-003",
+      "title": "ACC TCP logging to dedicated JSONL",
+      "category": "logging",
       "acceptanceCriteria": [
-        "send_open uses try_send instead of send().await",
-        "On queue full: log error, increment gate_cmd_dropped counter, return Err",
-        "Caller logs 'gate command dropped due to queue full' at WARN level",
-        "Metric: gate_cmds_dropped counter added",
-        "Document: dropped command means gate won't open for this customer",
-        "All existing tests pass"
+        "Listens on ACC port (default 25803)",
+        "Logs raw line + parsed fields to logs/acc/acc-YYYYMMDD.jsonl",
+        "Records kiosk_ip, receipt_id (if present), and pos mapping (if known)",
+        "Config option to split per kiosk file is available"
       ],
-      "instructions": "In src/io/cloudplus.rs:579, change to try_send(). On Full, log and return Err('queue full'). In gate.rs caller, log WARN that gate command was dropped. Add gate_cmds_dropped to Metrics. This is acceptable: if TCP is so backed up, dropping is better than blocking forever.",
-      "files": ["src/io/cloudplus.rs", "src/services/gate.rs", "src/infra/metrics.rs"],
+      "instructions": "Reuse ACC listener; log on receive with raw line and parsed fields. Default to a single file; optional per-kiosk split via CLI/config.",
+      "files": ["src/bin/gateway_analysis.rs", "src/io/acc_listener.rs", "src/io/analysis_logger.rs"],
+      "priority": 0,
+      "passes": true,
+      "notes": "Key for validating ACC mapping and timing."
+    },
+    {
+      "id": "GA-004",
+      "title": "RS485 logging to dedicated JSONL",
+      "category": "logging",
+      "acceptanceCriteria": [
+        "RS485 monitor runs in analysis binary",
+        "Logs raw frame + parsed door state to logs/rs485/rs485-YYYYMMDD.jsonl",
+        "Includes ts_recv and decoded fields"
+      ],
+      "instructions": "Reuse RS485 monitor code; emit JSONL per frame and per parsed state.",
+      "files": ["src/bin/gateway_analysis.rs", "src/io/rs485.rs", "src/io/analysis_logger.rs"],
       "priority": 1,
       "passes": true,
-      "notes": "HIGH: Explicit failure handling - dropped command = customer waits."
+      "notes": "Required for gate timing correlation."
     },
     {
-      "id": "US-005",
-      "title": "Add queue depth and lag metrics for diagnosability",
-      "category": "performance",
+      "id": "GA-005",
+      "title": "Unified JSONL schema + log writer with rotation",
+      "category": "logging",
       "acceptanceCriteria": [
-        "Metric: event_queue_depth (current channel size)",
-        "Metric: gate_queue_depth (CloudPlus outbound channel size)",
-        "Metric: gate_enqueue_to_send_latency_us histogram",
-        "Metrics exposed via Prometheus endpoint",
-        "Can diagnose 'late gate open' by observing queue lag"
+        "All logs use a consistent schema (ts_recv, ts_event, src, site, payload_raw, fields)",
+        "Daily rotation is default; optional size-based rotation available",
+        "Writing is non-blocking (buffered writer or channel)",
+        "Logging continues on IO errors with warnings"
       ],
-      "instructions": "Add queue depth tracking: wrap channels with Arc to share capacity checks, or periodically sample len(). For gate latency, record timestamp at enqueue (in GateCmd struct), measure delta at send time. Add to Prometheus output. This makes backlog visible.",
-      "files": ["src/infra/metrics.rs", "src/services/gate_worker.rs", "src/io/prometheus.rs"],
+      "instructions": "Create analysis_logger module to handle file routing and rotation. Ensure per-topic file paths are deterministic.",
+      "files": ["src/io/analysis_logger.rs", "src/bin/gateway_analysis.rs"],
       "priority": 1,
       "passes": true,
-      "notes": "HIGH: Without queue metrics, 'late gate open' is inferred not diagnosed."
+      "notes": "Rotation prevents runaway disk usage."
     },
     {
-      "id": "US-006",
-      "title": "Move journey egress to async worker",
-      "category": "performance",
+      "id": "GA-006",
+      "title": "Add periodic summary stats for data-gap detection",
+      "category": "diagnostics",
       "acceptanceCriteria": [
-        "EgressWriter task owns file handle and receives Journey via channel",
-        "Tracker tick_and_egress enqueues to channel, returns immediately",
-        "No std::fs on tracker hot path",
-        "Batch flush every N journeys or M milliseconds",
-        "Write errors logged but don't affect tracker",
-        "All existing tests pass"
+        "Writes 1-min summary rows to logs/summary/summary-YYYYMMDD.jsonl",
+        "Tracks counts: zone_entry/exit, track_create/delete/lost, acc received/matched",
+        "Highlights imbalances (e.g., entries without exits)",
+        "Summary includes time bucket and site"
       ],
-      "instructions": "Create EgressWriter task with mpsc::Receiver<Journey>. In tracker, replace direct egress.write_journeys() with channel send. Writer uses spawn_blocking for actual file I/O, or dedicated thread with BufWriter. Flush on batch size or timer.",
-      "files": ["src/io/egress.rs", "src/services/tracker/mod.rs", "src/main.rs"],
+      "instructions": "Maintain counters in memory; flush once per minute.",
+      "files": ["src/bin/gateway_analysis.rs", "src/io/analysis_logger.rs"],
       "priority": 2,
       "passes": true,
-      "notes": "MEDIUM: SSD is fast but sync I/O in async context blocks the runtime."
+      "notes": "Quick sanity checks without offline analysis."
     },
     {
-      "id": "US-007",
-      "title": "Cache zone names to avoid per-event allocation",
-      "category": "performance",
+      "id": "GA-007",
+      "title": "Add runbook + sample analysis queries",
+      "category": "docs",
       "acceptanceCriteria": [
-        "Zone names stored as Arc<str> in config",
-        "zone_name returns Arc<str> or &str, not String",
-        "No allocation on zone_name lookup for known zones",
-        "Fallback for unknown zones still works",
-        "All callers updated",
-        "All tests pass"
+        "Docs explain how to run the binary and where logs go",
+        "Includes example jq/rg commands to inspect ACC matching gaps",
+        "Explains how to correlate ACC, tracks, and POS sessions"
       ],
-      "instructions": "In Config, change zone_names HashMap value from String to Arc<str>. zone_name() returns Arc<str> clone (cheap) or creates new Arc for unknown zones. Update callers to accept impl AsRef<str>.",
-      "files": ["src/infra/config.rs", "src/services/tracker/handlers.rs"],
-      "priority": 3,
+      "instructions": "Document minimal operational steps and example analysis commands.",
+      "files": ["docs/gateway-analysis.md"],
+      "priority": 2,
       "passes": true,
-      "notes": "LOW: Per-event String clone adds up under high load."
-    },
-    {
-      "id": "US-008",
-      "title": "Reduce per-event logging or add sampling",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "info! logs for zone entry/exit demoted to debug! or sampled",
-        "High-frequency events don't spam logs",
-        "Critical events (gate_cmd, door state) remain at info!",
-        "Optional: add sampling rate config"
-      ],
-      "instructions": "Review src/services/tracker/handlers.rs for info! on per-event paths. Demote zone_entry/zone_exit to debug! or add sampling (log every Nth event). Keep gate_open_command, gate_open_correlated at info!.",
-      "files": ["src/services/tracker/handlers.rs"],
-      "priority": 3,
-      "passes": true,
-      "notes": "LOW: Logging overhead can be significant at high event rates."
-    },
-    {
-      "id": "US-009",
-      "title": "Remove MQTT parse_frame HashMap allocation",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "No HashMap allocation per frame",
-        "Position lookup uses linear search over tracked_objects",
-        "All MQTT parsing tests pass"
-      ],
-      "instructions": "In src/io/mqtt.rs:129, replace HashMap with linear search: for each event, find matching track_id with tracked_objects.iter().find(). O(n²) is fine for small n (typically <10 objects per frame).",
-      "files": ["src/io/mqtt.rs"],
-      "priority": 3,
-      "passes": true,
-      "notes": "LOW: Avoids allocation, O(n²) acceptable for small n."
-    },
-    {
-      "id": "US-010",
-      "title": "Expose drop counters and drop ratios for ingress/egress",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Metrics track mqtt_events_received, acc_events_received, mqtt_events_dropped, acc_events_dropped",
-        "Metrics track gate_cmds_dropped and journey_egress_dropped",
-        "Prometheus exposes *_received_total and *_dropped_total counters",
-        "Prometheus exposes drop ratio gauges (mqtt_drop_ratio, acc_drop_ratio, egress_drop_ratio)",
-        "Metrics summary log includes drop counters and ratios",
-        "All existing tests pass"
-      ],
-      "instructions": "Add received counters in src/infra/metrics.rs and increment them in src/io/mqtt.rs and src/io/acc_listener.rs before try_send. Add journey_egress_dropped counter in tracker when journey_tx.try_send fails. Compute drop ratios in Metrics::report (dropped / received, guard divide-by-zero). Update Prometheus output in src/io/prometheus.rs to expose counters and ratios. Update MetricsSummary::log to include drops/ratios.",
-      "files": ["src/infra/metrics.rs", "src/io/mqtt.rs", "src/io/acc_listener.rs", "src/services/tracker/mod.rs", "src/io/prometheus.rs"],
-      "priority": 1,
-      "passes": true,
-      "notes": "HIGH: Needed to quantify whether we're dropping a small vs large portion of events."
-    },
-    {
-      "id": "US-011",
-      "title": "Expose queue utilization percentages for pressure monitoring",
-      "category": "performance",
-      "acceptanceCriteria": [
-        "Metric: event_queue_utilization_pct (0-100)",
-        "Metric: gate_queue_utilization_pct (0-100)",
-        "Prometheus exposes utilization gauges",
-        "Metrics summary log includes utilization",
-        "All existing tests pass"
-      ],
-      "instructions": "In src/main.rs sampler, compute utilization = depth / max_capacity * 100 for event and gate queues. Add setters and fields in Metrics, include in MetricsSummary and Prometheus output. Use u64 or f64 as appropriate, keep units clear.",
-      "files": ["src/main.rs", "src/infra/metrics.rs", "src/io/prometheus.rs"],
-      "priority": 1,
-      "passes": true,
-      "notes": "MEDIUM: Helps identify when we're close to capacity even before drops occur."
+      "notes": "Keeps future investigations repeatable."
     }
   ]
 }

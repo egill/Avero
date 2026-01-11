@@ -34,13 +34,6 @@ pub enum GateMode {
     Tcp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AccGroupingStrategy {
-    Legacy,
-    PresentDwell,
-    FlickerFocusSoft,
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MqttConfig {
@@ -103,22 +96,10 @@ pub struct AccConfig {
     pub listener_enabled: bool,
     #[serde(default = "Defaults::acc_listener_port")]
     pub listener_port: u16,
-    #[serde(default = "Defaults::acc_grouping_strategy")]
-    pub grouping_strategy: AccGroupingStrategy,
-    #[serde(default = "Defaults::acc_grouping_entry_spread_s")]
-    pub grouping_entry_spread_s: u64,
-    #[serde(default = "Defaults::acc_grouping_other_pos_window_s")]
-    pub grouping_other_pos_window_s: u64,
-    #[serde(default = "Defaults::acc_grouping_other_pos_min_s")]
-    pub grouping_other_pos_min_s: u64,
-    #[serde(default = "Defaults::acc_grouping_flicker_merge_s")]
-    pub grouping_flicker_merge_s: u64,
+    #[serde(default = "Defaults::acc_flicker_merge_s")]
+    pub flicker_merge_s: u64,
     #[serde(default = "Defaults::acc_recent_exit_window_ms")]
     pub recent_exit_window_ms: u64,
-    #[serde(default = "Defaults::acc_grouping_overlap_grace_s")]
-    pub grouping_overlap_grace_s: u64,
-    #[serde(default = "Defaults::acc_grouping_overlap_soft_dwell_ms")]
-    pub grouping_overlap_soft_dwell_ms: u64,
 }
 
 impl Default for AccConfig {
@@ -127,14 +108,8 @@ impl Default for AccConfig {
             ip_to_pos: HashMap::new(),
             listener_enabled: true,
             listener_port: DEFAULT_ACC_LISTENER_PORT,
-            grouping_strategy: AccGroupingStrategy::Legacy,
-            grouping_entry_spread_s: Defaults::acc_grouping_entry_spread_s(),
-            grouping_other_pos_window_s: Defaults::acc_grouping_other_pos_window_s(),
-            grouping_other_pos_min_s: Defaults::acc_grouping_other_pos_min_s(),
-            grouping_flicker_merge_s: Defaults::acc_grouping_flicker_merge_s(),
+            flicker_merge_s: Defaults::acc_flicker_merge_s(),
             recent_exit_window_ms: Defaults::acc_recent_exit_window_ms(),
-            grouping_overlap_grace_s: Defaults::acc_grouping_overlap_grace_s(),
-            grouping_overlap_soft_dwell_ms: Defaults::acc_grouping_overlap_soft_dwell_ms(),
         }
     }
 }
@@ -229,28 +204,10 @@ impl Defaults {
     fn acc_listener_port() -> u16 {
         DEFAULT_ACC_LISTENER_PORT
     }
-    fn acc_grouping_strategy() -> AccGroupingStrategy {
-        AccGroupingStrategy::Legacy
-    }
-    fn acc_grouping_entry_spread_s() -> u64 {
-        10
-    }
-    fn acc_grouping_other_pos_window_s() -> u64 {
-        30
-    }
-    fn acc_grouping_other_pos_min_s() -> u64 {
-        2
-    }
-    fn acc_grouping_flicker_merge_s() -> u64 {
+    fn acc_flicker_merge_s() -> u64 {
         10
     }
     fn acc_recent_exit_window_ms() -> u64 {
-        3000
-    }
-    fn acc_grouping_overlap_grace_s() -> u64 {
-        2
-    }
-    fn acc_grouping_overlap_soft_dwell_ms() -> u64 {
         3000
     }
     fn egress_file() -> String {
@@ -360,14 +317,8 @@ pub struct Config {
     acc_ip_to_pos: HashMap<String, String>,
     acc_listener_enabled: bool,
     acc_listener_port: u16,
-    acc_grouping_strategy: AccGroupingStrategy,
-    acc_grouping_entry_spread_s: u64,
-    acc_grouping_other_pos_window_s: u64,
-    acc_grouping_other_pos_min_s: u64,
-    acc_grouping_flicker_merge_s: u64,
+    acc_flicker_merge_s: u64,
     acc_recent_exit_window_ms: u64,
-    acc_grouping_overlap_grace_s: u64,
-    acc_grouping_overlap_soft_dwell_ms: u64,
 
     // Egress
     egress_file: String,
@@ -451,14 +402,8 @@ impl Default for Config {
             acc_ip_to_pos: HashMap::new(),
             acc_listener_enabled: true,
             acc_listener_port: DEFAULT_ACC_LISTENER_PORT,
-            acc_grouping_strategy: AccGroupingStrategy::Legacy,
-            acc_grouping_entry_spread_s: Defaults::acc_grouping_entry_spread_s(),
-            acc_grouping_other_pos_window_s: Defaults::acc_grouping_other_pos_window_s(),
-            acc_grouping_other_pos_min_s: Defaults::acc_grouping_other_pos_min_s(),
-            acc_grouping_flicker_merge_s: Defaults::acc_grouping_flicker_merge_s(),
+            acc_flicker_merge_s: Defaults::acc_flicker_merge_s(),
             acc_recent_exit_window_ms: Defaults::acc_recent_exit_window_ms(),
-            acc_grouping_overlap_grace_s: Defaults::acc_grouping_overlap_grace_s(),
-            acc_grouping_overlap_soft_dwell_ms: Defaults::acc_grouping_overlap_soft_dwell_ms(),
             egress_file: "journeys.jsonl".to_string(),
             broker_bind_address: "0.0.0.0".to_string(),
             broker_port: DEFAULT_BROKER_PORT,
@@ -577,14 +522,8 @@ impl Config {
             acc_ip_to_pos: toml_config.acc.ip_to_pos,
             acc_listener_enabled: toml_config.acc.listener_enabled,
             acc_listener_port: toml_config.acc.listener_port,
-            acc_grouping_strategy: toml_config.acc.grouping_strategy,
-            acc_grouping_entry_spread_s: toml_config.acc.grouping_entry_spread_s,
-            acc_grouping_other_pos_window_s: toml_config.acc.grouping_other_pos_window_s,
-            acc_grouping_other_pos_min_s: toml_config.acc.grouping_other_pos_min_s,
-            acc_grouping_flicker_merge_s: toml_config.acc.grouping_flicker_merge_s,
+            acc_flicker_merge_s: toml_config.acc.flicker_merge_s,
             acc_recent_exit_window_ms: toml_config.acc.recent_exit_window_ms,
-            acc_grouping_overlap_grace_s: toml_config.acc.grouping_overlap_grace_s,
-            acc_grouping_overlap_soft_dwell_ms: toml_config.acc.grouping_overlap_soft_dwell_ms,
             egress_file: toml_config.egress.file,
             broker_bind_address: toml_config.broker.bind_address,
             broker_port: toml_config.broker.port,
@@ -695,14 +634,8 @@ impl Config {
         prometheus_port -> u16,
         acc_listener_enabled -> bool,
         acc_listener_port -> u16,
-        acc_grouping_strategy -> AccGroupingStrategy,
-        acc_grouping_entry_spread_s -> u64,
-        acc_grouping_other_pos_window_s -> u64,
-        acc_grouping_other_pos_min_s -> u64,
-        acc_grouping_flicker_merge_s -> u64,
+        acc_flicker_merge_s -> u64,
         acc_recent_exit_window_ms -> u64,
-        acc_grouping_overlap_grace_s -> u64,
-        acc_grouping_overlap_soft_dwell_ms -> u64,
         broker_port -> u16,
         mqtt_egress_enabled -> bool,
         mqtt_egress_metrics_interval_secs -> u64,
@@ -769,41 +702,6 @@ impl Config {
     #[cfg(test)]
     pub fn with_acc_ip_to_pos(mut self, ip_to_pos: HashMap<String, String>) -> Self {
         self.acc_ip_to_pos = ip_to_pos;
-        self
-    }
-
-    /// Builder method for tests to set ACC grouping strategy
-    #[cfg(test)]
-    pub fn with_acc_grouping_strategy(mut self, strategy: AccGroupingStrategy) -> Self {
-        self.acc_grouping_strategy = strategy;
-        self
-    }
-
-    /// Builder method for tests to set ACC grouping entry spread (seconds)
-    #[cfg(test)]
-    pub fn with_acc_grouping_entry_spread_s(mut self, spread_s: u64) -> Self {
-        self.acc_grouping_entry_spread_s = spread_s;
-        self
-    }
-
-    /// Builder method for tests to set other POS window (seconds)
-    #[cfg(test)]
-    pub fn with_acc_grouping_other_pos_window_s(mut self, window_s: u64) -> Self {
-        self.acc_grouping_other_pos_window_s = window_s;
-        self
-    }
-
-    /// Builder method for tests to set other POS minimum duration (seconds)
-    #[cfg(test)]
-    pub fn with_acc_grouping_other_pos_min_s(mut self, min_s: u64) -> Self {
-        self.acc_grouping_other_pos_min_s = min_s;
-        self
-    }
-
-    /// Builder method for tests to set flicker merge window (seconds)
-    #[cfg(test)]
-    pub fn with_acc_grouping_flicker_merge_s(mut self, merge_s: u64) -> Self {
-        self.acc_grouping_flicker_merge_s = merge_s;
         self
     }
 

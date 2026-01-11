@@ -52,14 +52,8 @@ interval_secs = 10
 listener_enabled = true
 # Port for ACC TCP listener (protocol: "ACC <receipt_id>\n")
 listener_port = 25803
-grouping_strategy = "legacy"
-grouping_entry_spread_s = 10
-grouping_other_pos_window_s = 30
-grouping_other_pos_min_s = 2
-grouping_flicker_merge_s = 10
+flicker_merge_s = 10
 recent_exit_window_ms = 3000
-grouping_overlap_grace_s = 2
-grouping_overlap_soft_dwell_ms = 3000
 
 # IP to POS zone mapping - maps ACC terminal IP to POS zone
 [acc.ip_to_pos]

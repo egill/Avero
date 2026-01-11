@@ -572,7 +572,7 @@ impl Tracker {
     ///
     /// The ip is the peer IP address of the ACC terminal connection.
     /// It's mapped to a POS zone via the ip_to_pos config.
-    /// If a group is detected (co-presence), all group members are authorized.
+    /// Authorizes all present tracks at POS with accumulated_dwell >= min_dwell.
     pub(crate) fn handle_acc_event(&mut self, ip: &str, received_at: Instant) {
         let ts = epoch_ms();
 
@@ -585,18 +585,18 @@ impl Tracker {
             self.persons.iter().map(|(tid, p)| (*tid, p.accumulated_dwell_ms)).collect();
 
         // Try to match ACC to journeys using IP → POS lookup
-        // Returns all group members if any member qualifies (sufficient dwell)
-        let matched_tracks = self.acc_collector.process_acc(
+        // Returns (primary_track, all_authorized_tracks)
+        let (primary, authorized_tracks) = self.acc_collector.process_acc(
             ip,
             &mut self.journey_manager,
             Some(&accumulated_dwells),
         );
 
         // Record ACC metric
-        self.metrics.record_acc_event(!matched_tracks.is_empty());
+        self.metrics.record_acc_event(!authorized_tracks.is_empty());
 
-        // Authorize all matched group members
-        for &track_id in &matched_tracks {
+        // Authorize all matched tracks
+        for &track_id in &authorized_tracks {
             if let Some(person) = self.persons.get_mut(&track_id) {
                 person.authorized = true;
             }
@@ -630,20 +630,9 @@ impl Tracker {
             }
         }
 
-        // Set ACC group size and member track IDs on all matched journeys (for Command display)
-        let group_size = matched_tracks.len() as u8;
-        if group_size > 1 {
-            for &track_id in &matched_tracks {
-                if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
-                    journey.acc_group_size = group_size;
-                    journey.acc_group_tids = matched_tracks.iter().copied().collect();
-                }
-            }
-        }
-
         let gate_zone = self.config.gate_zone();
         let gate_zone_name = self.config.zone_name(gate_zone);
-        for &track_id in &matched_tracks {
+        for &track_id in &authorized_tracks {
             if let Some(journey) = self.journey_manager.get_any(track_id) {
                 let gate_entry_ts = journey
                     .events
@@ -705,21 +694,21 @@ impl Tracker {
             }
         }
 
-        if !matched_tracks.is_empty() {
+        if !authorized_tracks.is_empty() {
             info!(
                 ip = %ip,
                 pos = ?pos,
-                group_size = %matched_tracks.len(),
-                tracks = ?matched_tracks,
-                "acc_group_authorized"
+                authorized_count = %authorized_tracks.len(),
+                tracks = ?authorized_tracks,
+                primary = ?primary,
+                "acc_authorized"
             );
         }
 
         // Publish ACC event to MQTT
         if let Some(ref sender) = self.egress_sender {
-            if !matched_tracks.is_empty() {
-                // Matched - send event for primary track (first in group)
-                let primary_track = matched_tracks[0];
+            if let Some(primary_track) = primary {
+                // Matched - send event for primary track
                 let dwell_ms = self.persons.get(&primary_track).map(|p| p.accumulated_dwell_ms);
                 sender.send_acc_event(AccEventPayload {
                     site: None,
