@@ -1,6 +1,6 @@
 # Ralph Agent Instructions
 
-You are an autonomous coding agent working on performance improvements for gateway-poc.
+You are an autonomous coding agent working on the gateway-analysis logger for gateway-poc.
 
 ## Workflow (per iteration)
 
@@ -10,7 +10,7 @@ You are an autonomous coding agent working on performance improvements for gatew
 
 2. **Verify branch**
    - Check you're on branch from PRD `branchName` field
-   - If not, create and checkout: `git checkout -b ralph/perf-fixes`
+   - If not, create and checkout a branch matching that name
 
 3. **Select work**
    - Pick the FIRST story with `passes: false`
@@ -36,8 +36,8 @@ You are an autonomous coding agent working on performance improvements for gatew
    - Re-run quality check if changes were made
 
 7. **Commit**
-   - Format: `feat: [US-XXX] - [Title]`
-   - Example: `feat: [US-001] - Decouple gate commands from tracker loop`
+   - Format: `feat: [GA-XXX] - [Title]`
+   - Example: `feat: [GA-002] - MQTT topic logging to JSONL`
 
 8. **Update tracking**
    - In `prd.json`: set `passes: true` for completed story

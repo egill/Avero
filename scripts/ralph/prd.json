@@ -127,5 +127,22 @@
       "passes": true,
       "notes": "Keeps future investigations repeatable."
     }
+    ,
+    {
+      "id": "GA-008",
+      "title": "Add smoke tests for RS485, Xovis MQTT, and ACC logging",
+      "category": "diagnostics",
+      "acceptanceCriteria": [
+        "Runbook includes a 60s smoke test for RS485 on /dev/ttyAMA4 @ 19200 baud",
+        "Runbook includes MQTT/Xovis smoke test (receive at least one message on gateway/events or gateway/tracks)",
+        "Runbook includes ACC smoke test (receive at least one ACC line)",
+        "Failures are clearly indicated with next-step guidance"
+      ],
+      "instructions": "Document quick smoke-test steps and expected outputs, including where to check the JSONL logs for each stream.",
+      "files": ["docs/gateway-analysis.md"],
+      "priority": 1,
+      "passes": true,
+      "notes": "Ensures we validate data capture before long runs."
+    }
   ]
 }

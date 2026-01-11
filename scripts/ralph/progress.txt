@@ -10,3 +10,4 @@ Status legend: [ ] not started, [~] in progress, [x] done
 [ ] GA-005 Unified JSONL schema + log writer with rotation
 [ ] GA-006 Add periodic summary stats for data-gap detection
 [ ] GA-007 Add runbook + sample analysis queries
+[ ] GA-008 Add smoke tests for RS485, Xovis MQTT, and ACC logging
