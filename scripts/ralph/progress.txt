@@ -2,11 +2,35 @@ Gateway Analysis Logger Progress
 
 Status legend: [ ] not started, [~] in progress, [x] done
 
-[ ] GA-001 Create gateway-analysis binary with config + CLI
-[ ] GA-001a Run Mosquitto broker with auth for test capture
+[x] GA-001 Create gateway-analysis binary with config + CLI
+[x] GA-001a Run Mosquitto broker with auth for test capture
 [ ] GA-002 MQTT topic logging to per-topic JSONL files
 [ ] GA-003 ACC TCP logging to dedicated JSONL
 [ ] GA-004 RS485 logging to dedicated JSONL
 [ ] GA-005 Unified JSONL schema + log writer with rotation
 [ ] GA-006 Add periodic summary stats for data-gap detection
 [ ] GA-007 Add runbook + sample analysis queries
+[ ] GA-008 Add smoke tests for RS485, Xovis MQTT, and ACC logging
+
+---
+
+## Codebase Patterns
+
+- **CLI args**: Use `clap` with `#[derive(Parser)]` for binary CLIs (see main.rs, gateway_analysis.rs)
+- **Config reuse**: Import `gateway_poc::infra::Config` and call `Config::load_from_path()` for TOML settings
+- **Tracing setup**: Use `tracing_subscriber::fmt()` with `UtcTime::rfc_3339()` and `EnvFilter`
+- **Small enums**: Add `#[derive(Copy)]` when all fields are `Copy` types (reduces `.clone()` calls)
+
+---
+
+## 2026-01-11 - GA-001 - Create gateway-analysis binary with config + CLI
+- Files changed: Cargo.toml, src/bin/gateway_analysis.rs
+- What was done: Created gateway-analysis binary with clap CLI parsing. Supports --config, --log-dir, --topics, --rotation, --site-id. AnalysisConfig struct wraps gateway Config with analysis-specific settings. RotationStrategy enum parses "daily" or "size:N" patterns.
+- **Learnings:** Reuse Config::load_from_path() rather than duplicating TOML parsing. The TUI binary has a similar pattern but with custom TOML parsing - prefer the main Config approach.
+---
+
+## 2026-01-11 - GA-001a - Run Mosquitto broker with auth for test capture
+- Files changed: config/mosquitto.conf (new), config/mosquitto.passwd (new), docs/gateway-analysis.md (new)
+- What was done: Created Mosquitto broker configuration with username/password auth (avero:avero). Added documentation with commands to install, start/stop broker, verify connectivity, and check logs.
+- **Learnings:** Mosquitto password files need to be hashed with `mosquitto_passwd -U` before first use. Keep plaintext version in repo for easy setup, hash on target.
+---

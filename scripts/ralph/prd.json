@@ -12,7 +12,11 @@
         "Help text documents all flags"
       ],
       "instructions": "Add src/bin/gateway_analysis.rs with CLI parsing. Reuse Config where possible and add analysis-specific defaults for log dir/rotation.",
-      "files": ["Cargo.toml", "src/bin/gateway_analysis.rs", "src/infra/config.rs"],
+      "files": [
+        "Cargo.toml",
+        "src/bin/gateway_analysis.rs",
+        "src/infra/config.rs"
+      ],
       "priority": 0,
       "passes": true,
       "notes": "Single binary preferred for correlation and simpler ops."
@@ -28,7 +32,11 @@
         "Broker logs stored to file for backup"
       ],
       "instructions": "Create a Mosquitto config for the test run (listener, allow_anonymous false, password file). Document commands to start/stop and verify connectivity.",
-      "files": ["docs/gateway-analysis.md", "config/mosquitto.conf (new)", "config/mosquitto.passwd (new)"],
+      "files": [
+        "docs/gateway-analysis.md",
+        "config/mosquitto.conf (new)",
+        "config/mosquitto.passwd (new)"
+      ],
       "priority": 0,
       "passes": true,
       "notes": "Broker replaces gateway broker during test."
@@ -44,9 +52,13 @@
         "Logging continues when a payload is malformed"
       ],
       "instructions": "Reuse existing MQTT client; on message, write a JSONL record with receive timestamp and raw payload. Keep parsing best-effort.",
-      "files": ["src/bin/gateway_analysis.rs", "src/io/mqtt.rs", "src/io/analysis_logger.rs"],
+      "files": [
+        "src/bin/gateway_analysis.rs",
+        "src/io/mqtt.rs",
+        "src/io/analysis_logger.rs"
+      ],
       "priority": 0,
-      "passes": true,
+      "passes": false,
       "notes": "Must include gateway/tracks for delete/lost/stitch."
     },
     {
@@ -60,9 +72,13 @@
         "Config option to split per kiosk file is available"
       ],
       "instructions": "Reuse ACC listener; log on receive with raw line and parsed fields. Default to a single file; optional per-kiosk split via CLI/config.",
-      "files": ["src/bin/gateway_analysis.rs", "src/io/acc_listener.rs", "src/io/analysis_logger.rs"],
+      "files": [
+        "src/bin/gateway_analysis.rs",
+        "src/io/acc_listener.rs",
+        "src/io/analysis_logger.rs"
+      ],
       "priority": 0,
-      "passes": true,
+      "passes": false,
       "notes": "Key for validating ACC mapping and timing."
     },
     {
@@ -75,9 +91,13 @@
         "Includes ts_recv and decoded fields"
       ],
       "instructions": "Reuse RS485 monitor code; emit JSONL per frame and per parsed state.",
-      "files": ["src/bin/gateway_analysis.rs", "src/io/rs485.rs", "src/io/analysis_logger.rs"],
+      "files": [
+        "src/bin/gateway_analysis.rs",
+        "src/io/rs485.rs",
+        "src/io/analysis_logger.rs"
+      ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": "Required for gate timing correlation."
     },
     {
@@ -91,9 +111,12 @@
         "Logging continues on IO errors with warnings"
       ],
       "instructions": "Create analysis_logger module to handle file routing and rotation. Ensure per-topic file paths are deterministic.",
-      "files": ["src/io/analysis_logger.rs", "src/bin/gateway_analysis.rs"],
+      "files": [
+        "src/io/analysis_logger.rs",
+        "src/bin/gateway_analysis.rs"
+      ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": "Rotation prevents runaway disk usage."
     },
     {
@@ -107,9 +130,12 @@
         "Summary includes time bucket and site"
       ],
       "instructions": "Maintain counters in memory; flush once per minute.",
-      "files": ["src/bin/gateway_analysis.rs", "src/io/analysis_logger.rs"],
+      "files": [
+        "src/bin/gateway_analysis.rs",
+        "src/io/analysis_logger.rs"
+      ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": "Quick sanity checks without offline analysis."
     },
     {
@@ -122,10 +148,30 @@
         "Explains how to correlate ACC, tracks, and POS sessions"
       ],
       "instructions": "Document minimal operational steps and example analysis commands.",
-      "files": ["docs/gateway-analysis.md"],
+      "files": [
+        "docs/gateway-analysis.md"
+      ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": "Keeps future investigations repeatable."
+    },
+    {
+      "id": "GA-008",
+      "title": "Add smoke tests for RS485, Xovis MQTT, and ACC logging",
+      "category": "diagnostics",
+      "acceptanceCriteria": [
+        "Runbook includes a 60s smoke test for RS485 on /dev/ttyAMA4 @ 19200 baud",
+        "Runbook includes MQTT/Xovis smoke test (receive at least one message on gateway/events or gateway/tracks)",
+        "Runbook includes ACC smoke test (receive at least one ACC line)",
+        "Failures are clearly indicated with next-step guidance"
+      ],
+      "instructions": "Document quick smoke-test steps and expected outputs, including where to check the JSONL logs for each stream.",
+      "files": [
+        "docs/gateway-analysis.md"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Ensures we validate data capture before long runs."
     }
   ]
 }

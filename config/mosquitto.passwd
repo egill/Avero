@@ -1,0 +1,7 @@
+# Mosquitto password file for gateway-analysis
+#
+# This file contains plaintext credentials for initial setup.
+# On the target system, hash it with: mosquitto_passwd -U mosquitto.passwd
+#
+# Format: username:password
+avero:avero
