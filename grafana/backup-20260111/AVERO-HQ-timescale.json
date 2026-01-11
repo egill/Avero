@@ -1,0 +1,2119 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "P40AE60E18F02DE32"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "green",
+        "name": "Gate Opens",
+        "query": "SELECT time, COALESCE(data->>'reason', 'unknown') || COALESCE(' #' || data->>'person_id', '') as text FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'gates' AND data->>'type' = 'gate.opened' AND $__timeFilter(time)",
+        "rawQuery": true,
+        "showIn": 0
+      },
+      {
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "P40AE60E18F02DE32"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "blue",
+        "name": "Exits",
+        "query": "SELECT time, 'Exit #' || COALESCE(data->>'person_id', '?') as text FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'exits' AND data->>'type' = 'exit.line_crossed' AND $__timeFilter(time)",
+        "rawQuery": true,
+        "showIn": 0
+      }
+    ]
+  },
+  "editable": true,
+  "id": 12,
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "h"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COALESCE((data->>'uptime_seconds')::float / 3600, 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' ORDER BY time DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway Uptime",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT person_id)::int as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'people' AND time > NOW() - INTERVAL '2 minutes'",
+          "refId": "A"
+        }
+      ],
+      "title": "Concurrent Persons",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "Offline"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "green",
+                  "text": "Online"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 0
+      },
+      "id": 3,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN data->>'type' = 'gate.online' THEN 1 ELSE 0 END as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'gates' AND data->>'type' IN ('gate.online', 'gate.offline') ORDER BY time DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Status",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 0
+      },
+      "id": 4,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'exit.confirmed' AND time > NOW() - INTERVAL '1 hour'",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 0
+      },
+      "id": 5,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'gate.opened' AND time > NOW() - INTERVAL '1 hour'",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Opens (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 0
+      },
+      "id": 6,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'payments' AND time > NOW() - INTERVAL '1 hour'",
+          "refId": "A"
+        }
+      ],
+      "title": "Payments (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 0
+      },
+      "id": 7,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'gate.fault' AND time > NOW() - INTERVAL '1 hour'",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Faults (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 8,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'tracking' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'people' AND data->>'type' = 'person.state.changed' AND data->>'to_state' = 'tracking' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'in_zone' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'people' AND data->>'type' = 'person.state.changed' AND data->>'to_state' = 'in_zone' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'at_gate' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'people' AND data->>'type' = 'person.state.changed' AND data->>'to_state' = 'at_gate' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "C"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'exited' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'people' AND data->>'type' = 'person.state.changed' AND data->>'to_state' = 'exited' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "D"
+        }
+      ],
+      "title": "People Tracking",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 9,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Occupied Zones' as metric, COALESCE(COUNT(DISTINCT zone)::int, 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'pos' AND data->>'type' = 'pos.occupied' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Zone Occupancy",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 10,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'POS_1' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'payments' AND COALESCE(data->>'zone', zone) = 'POS_1' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'POS_2' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'payments' AND COALESCE(data->>'zone', zone) = 'POS_2' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'POS_3' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'payments' AND COALESCE(data->>'zone', zone) = 'POS_3' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "D"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'POS_4' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'payments' AND COALESCE(data->>'zone', zone) = 'POS_4' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "E"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'POS_5' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'payments' AND COALESCE(data->>'zone', zone) = 'POS_5' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "F"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Total' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'payments' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "C"
+        }
+      ],
+      "title": "Payments by Zone",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Authorized"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Unauthorized"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 11,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Authorized' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'exit.confirmed' AND data->>'authorized' = 'true' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 minute', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Unauthorized' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'exit.confirmed' AND data->>'authorized' = 'false' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        }
+      ],
+      "title": "Exits by Authorization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 12,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 minute', time) as time, 'p50' as metric, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (data->>'bus_avg_latency_us')::float / 1000000) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 minute', time) as time, 'p95' as metric, PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY (data->>'bus_avg_latency_us')::float / 1000000) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 minute', time) as time, 'p99' as metric, PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY (data->>'bus_avg_latency_us')::float / 1000000) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "C"
+        }
+      ],
+      "title": "Event Processing Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          },
+          "unit": "µs"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 13,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Avg Latency' as metric, (data->>'bus_avg_latency_us')::float as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) ORDER BY time",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Max Latency' as metric, (data->>'bus_max_latency_us')::float as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) ORDER BY time",
+          "refId": "B"
+        }
+      ],
+      "title": "Event Bus Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 14,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'CPU %' as metric, COALESCE(100 - (data->>'cpu_idle_percent')::float, 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) ORDER BY time",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Memory %' as metric, COALESCE((data->>'mem_used_percent')::float, 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) ORDER BY time",
+          "refId": "B"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Events/s' as metric, COALESCE((data->>'bus_events_per_second')::float, 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) ORDER BY time",
+          "refId": "C"
+        }
+      ],
+      "title": "System Resources",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 0,
+            "showPoints": "never"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "green",
+                  "text": "Closed"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "yellow",
+                  "text": "Moving"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "2": {
+                  "color": "red",
+                  "text": "Open"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "max": 2,
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 15,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Gate ' || COALESCE(data->>'g', '1') as metric, (data->>'s')::int as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'gates' AND data->>'type' = 'gate.status.heartbeat' AND $__timeFilter(time) ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate State History",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "staircase": true
+          },
+          "decimals": 0,
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "authorized"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unauthorized"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "id": 16,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('5 minutes', time) as time, 'authorized' as metric, SUM(COUNT(*)) OVER (ORDER BY time_bucket('5 minutes', time)) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'exit.confirmed' AND data->>'authorized' = 'true' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('5 minutes', time) as time, 'unauthorized' as metric, SUM(COUNT(*)) OVER (ORDER BY time_bucket('5 minutes', time)) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'exit.confirmed' AND data->>'authorized' = 'false' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        }
+      ],
+      "title": "Cumulative Exits",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1
+          },
+          "decimals": 1,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 17,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Load 1m' as metric, COALESCE((data->>'load_1m')::float, 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) ORDER BY time",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Goroutines' as metric, COALESCE((data->>'goroutines')::int, 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) ORDER BY time",
+          "refId": "B"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'CPU Temp' as metric, COALESCE((data->>'cpu_temp_celsius')::float, 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'system.metrics' AND $__timeFilter(time) ORDER BY time",
+          "refId": "C"
+        }
+      ],
+      "title": "System Health",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "id": 18,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('5 minutes', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Entry Forward' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'xovis.line.cross' AND data->>'line' = 'ENTRY_1' AND data->>'direction' = 'forward' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('5 minutes', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Entry Backward' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'xovis.line.cross' AND data->>'line' = 'ENTRY_1' AND data->>'direction' = 'backward' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('5 minutes', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Exit Forward' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'xovis.line.cross' AND data->>'line' = 'EXIT_1' AND data->>'direction' = 'forward' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "C"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('5 minutes', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Exit Backward' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'xovis.line.cross' AND data->>'line' = 'EXIT_1' AND data->>'direction' = 'backward' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "D"
+        }
+      ],
+      "title": "Line Crossings",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "id": 19,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Gate ' || COALESCE(data->>'gate_id', '1') as metric, COALESCE((data->>'open_duration_ms')::float, 0) / 1000 as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'gates' AND data->>'type' = 'gate.closed' AND $__timeFilter(time) ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Cycle Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "id": 20,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time, 'Gate ' || COALESCE(data->>'gate_id', '1') || ' Crossings' as metric, COALESCE((data->'exit_summary'->>'total_crossings')::int, 1) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'gates' AND data->>'type' = 'gate.closed' AND $__timeFilter(time) ORDER BY time",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('5 minutes', time, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'Multi-Exit Cycles' as metric, COALESCE(COUNT(*), 0) as value FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'gates' AND data->>'type' = 'gate.closed' AND COALESCE((data->'exit_summary'->>'total_crossings')::int, 1) > 1 AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        }
+      ],
+      "title": "Gate Cycle Crossings (Tailgating)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "id": 21,
+      "options": {
+        "stacking": "none",
+        "xField": "Exits per Cycle"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COALESCE((data->'exit_summary'->>'total_crossings')::int, 1) as \"Exits per Cycle\", COUNT(*) as \"Count\" FROM events WHERE site = 'AP-NETTO-GR-01' AND event_type = 'gates' AND data->>'type' = 'gate.closed' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Multi-Exit Distribution",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 60
+      },
+      "id": 22,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM incidents WHERE site = 'AP-NETTO-GR-01' AND severity = 'high' AND created_at > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "High Severity Incidents (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 60
+      },
+      "id": 23,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM incidents WHERE site = 'AP-NETTO-GR-01' AND severity = 'medium' AND created_at > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Medium Severity Incidents (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 60
+      },
+      "id": 24,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM incidents WHERE site = 'AP-NETTO-GR-01' AND severity = 'info' AND created_at > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Info Incidents (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 60
+      },
+      "id": 25,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM incidents WHERE site = 'AP-NETTO-GR-01' AND created_at > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Incidents (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "high"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "medium"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "info"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "id": 26,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 hour', created_at, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'high' as metric, COALESCE(COUNT(*), 0) as value FROM incidents WHERE site = 'AP-NETTO-GR-01' AND severity = 'high' AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 hour', created_at, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'medium' as metric, COALESCE(COUNT(*), 0) as value FROM incidents WHERE site = 'AP-NETTO-GR-01' AND severity = 'medium' AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket_gapfill('1 hour', created_at, $__timeFrom()::timestamptz, $__timeTo()::timestamptz) as time, 'info' as metric, COALESCE(COUNT(*), 0) as value FROM incidents WHERE site = 'AP-NETTO-GR-01' AND severity = 'info' AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1",
+          "refId": "C"
+        }
+      ],
+      "title": "Incidents Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 8,
+        "x": 16,
+        "y": 60
+      },
+      "id": 27,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "xField": "Incident Type"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT type as \"Incident Type\", COUNT(*)::bigint as \"Count\" FROM incidents WHERE site = 'AP-NETTO-GR-01' AND created_at > NOW() - INTERVAL '24 hours' GROUP BY type ORDER BY \"Count\" DESC LIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "title": "Incidents by Type (24h)",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 95
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 72
+      },
+      "id": 29,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ROUND(COUNT(*) FILTER (WHERE data->>'authorized' = 'true') * 100.0 / NULLIF(COUNT(*), 0), 1) as value FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Paid Exit Rate % (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.98
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 72
+      },
+      "id": 30,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "WITH payments AS (SELECT COUNT(*) as cnt FROM events WHERE event_type = 'payments' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours'), exits AS (SELECT COUNT(*) as cnt FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours') SELECT COALESCE(ROUND((p.cnt::numeric / NULLIF(e.cnt, 0)), 2), 0) as value FROM payments p, exits e",
+          "refId": "A"
+        }
+      ],
+      "title": "Payment:Exit Ratio (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 72
+      },
+      "id": 31,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "WITH multi AS (SELECT COUNT(*) as cnt FROM events WHERE data->>'type' = 'gate.closed' AND (data->'exit_summary'->>'total_crossings')::int > 1 AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours'), total AS (SELECT COUNT(*) as cnt FROM events WHERE data->>'type' = 'gate.closed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours') SELECT ROUND(m.cnt * 100.0 / NULLIF(t.cnt, 0), 1) as value FROM multi m, total t",
+          "refId": "A"
+        }
+      ],
+      "title": "Tailgating Rate % (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sort_order"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 76
+      },
+      "id": 32,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "xField": "stage"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT 'Entries' as stage, 1 as sort_order, COUNT(*)::bigint as count FROM events WHERE data->>'type' = 'xovis.line.cross' AND data->>'line' LIKE 'ENTRY%' AND data->>'direction' = 'forward' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' UNION ALL SELECT 'POS Visits' as stage, 2 as sort_order, COUNT(DISTINCT person_id)::bigint FROM events WHERE event_type = 'pos' AND data->>'type' = 'pos.occupied' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' UNION ALL SELECT 'Payments' as stage, 3 as sort_order, COUNT(*)::bigint FROM events WHERE event_type = 'payments' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' UNION ALL SELECT 'Exits' as stage, 4 as sort_order, COUNT(*)::bigint FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' ORDER BY sort_order",
+          "refId": "A"
+        }
+      ],
+      "title": "Customer Journey Funnel (24h)",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.98
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 76
+      },
+      "id": 33,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "WITH payments AS (SELECT time_bucket('1 hour', time) as hour, COUNT(*) as cnt FROM events WHERE event_type = 'payments' AND site = 'AP-NETTO-GR-01' AND $__timeFilter(time) GROUP BY 1), exits AS (SELECT time_bucket('1 hour', time) as hour, COUNT(*) as cnt FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND $__timeFilter(time) GROUP BY 1) SELECT COALESCE(p.hour, e.hour) as time, 'Ratio' as metric, COALESCE(ROUND((COALESCE(p.cnt, 0)::numeric / NULLIF(COALESCE(e.cnt, 0), 0)), 2), 0) as value FROM payments p FULL OUTER JOIN exits e ON p.hour = e.hour WHERE COALESCE(p.hour, e.hour) IS NOT NULL ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Payment-to-Exit Ratio Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 84
+      },
+      "id": 35,
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "axisLabel": "Hour of Day"
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT created_at as time, EXTRACT(hour FROM created_at)::int as hour, COUNT(*)::int as count FROM incidents WHERE site = 'AP-NETTO-GR-01' AND created_at > NOW() - INTERVAL '7 days' GROUP BY 1, 2 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Incidents by Hour (Last 7 Days)",
+      "type": "heatmap"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "center"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Payment Rate %"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 60
+                    },
+                    {
+                      "color": "green",
+                      "value": 80
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 92
+      },
+      "id": 36,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "WITH zone_visits AS (SELECT COALESCE(data->>'zone', zone) as zone_name, COUNT(*) as visits FROM events WHERE ((event_type = 'pos' AND data->>'type' = 'pos.occupied') OR (event_type = 'sensors' AND data->>'type' = 'xovis.zone.entry')) AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' AND (COALESCE(data->>'zone', zone) LIKE 'POS%') GROUP BY 1), zone_payments AS (SELECT COALESCE(data->>'zone', zone) as zone_name, COUNT(*) as payments FROM events WHERE event_type = 'payments' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' GROUP BY 1), zone_dwell AS (SELECT COALESCE(data->>'zone', zone) as zone_name, ROUND(AVG((data->>'dwell_ms')::numeric / 1000), 1) as avg_dwell_sec FROM events WHERE event_type = 'dwell' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' AND (COALESCE(data->>'zone', zone) LIKE 'POS%') GROUP BY 1) SELECT v.zone_name as \"Zone\", COALESCE(v.visits, 0) as \"Visits\", COALESCE(p.payments, 0) as \"Payments\", CASE WHEN v.visits > 0 THEN ROUND((COALESCE(p.payments, 0) * 100.0 / v.visits)::numeric, 1) ELSE 0 END as \"Payment Rate %\", COALESCE(d.avg_dwell_sec, 0) as \"Avg Dwell (s)\" FROM zone_visits v LEFT JOIN zone_payments p ON v.zone_name = p.zone_name LEFT JOIN zone_dwell d ON v.zone_name = d.zone_name ORDER BY v.zone_name",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Zone Stats (24h)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left"
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 92
+      },
+      "id": 37,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "WITH journeys AS (SELECT person_id, CASE WHEN data->>'authorized' = 'true' THEN 'Entry -> POS -> PAID -> Exit-OK' ELSE 'Entry -> Exit-FAIL' END as path FROM events WHERE site = 'AP-NETTO-GR-01' AND data->>'type' = 'journey.completed' AND time > NOW() - INTERVAL '24 hours') SELECT path as \"Customer Path\", COUNT(*) as \"Count\" FROM journeys GROUP BY path ORDER BY \"Count\" DESC LIMIT 15",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Customer Paths (24h)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "displayName": "Exits Today",
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 100
+      },
+      "id": 38,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits Today vs Yesterday",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "displayName": "Payments Today",
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 100
+      },
+      "id": 39,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM events WHERE event_type = 'payments' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Payments Today vs Yesterday",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "displayName": "Tailgating Today",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 100
+      },
+      "id": 40,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*)::bigint as value FROM events WHERE data->>'type' = 'gate.closed' AND (data->'exit_summary'->>'total_crossings')::int > 1 AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Tailgating Events Today vs Yesterday",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Today Exits"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Yesterday Exits"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 100
+      },
+      "id": 41,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', time) as time, 'Today Exits' as metric, COUNT(*)::int as value FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', time) + INTERVAL '24 hours' as time, 'Yesterday Exits' as metric, COUNT(*)::int as value FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '48 hours' AND time <= NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1",
+          "refId": "B"
+        }
+      ],
+      "title": "Daily Comparison Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "center"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "Occupied": {
+                        "color": "orange",
+                        "text": "Occupied"
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
+                      "Empty": {
+                        "color": "green",
+                        "text": "Empty"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 108
+      },
+      "id": 47,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "WITH all_zones AS (SELECT unnest(ARRAY['POS_1', 'POS_2', 'POS_3', 'POS_4', 'POS_5']) as zone), zone_activity AS (SELECT zone, COUNT(DISTINCT person_id) as people, MAX(time) as last_activity FROM events WHERE site = 'AP-NETTO-GR-01' AND zone LIKE 'POS%' AND event_type = 'people' AND data->>'type' = 'person.state.changed' AND data->>'to_state' = 'in_zone' AND time > NOW() - INTERVAL '2 minutes' GROUP BY zone) SELECT az.zone as \"Zone\", CASE WHEN za.people > 0 AND za.last_activity > NOW() - INTERVAL '30 seconds' THEN 'Occupied' ELSE 'Empty' END as \"Status\", COALESCE(za.people, 0) as \"People\", COALESCE(TO_CHAR(za.last_activity, 'HH24:MI:SS'), '-') as \"Last Activity\" FROM all_zones az LEFT JOIN zone_activity za ON az.zone = za.zone ORDER BY az.zone",
+          "refId": "A"
+        }
+      ],
+      "title": "🔴 POS Zone Live Status",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 114
+      },
+      "id": 48,
+      "title": "📊 Real-time Metrics (Prometheus)",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "blue",
+                  "text": "SYNC"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "green",
+                  "text": "ASYNC"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 115
+      },
+      "id": 49,
+      "targets": [
+        {
+          "expr": "gateway_async_mode_enabled{site=\"AVERO-HQ\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Processing Mode",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 9,
+        "x": 3,
+        "y": 115
+      },
+      "id": 50,
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "gateway_persister_queue_depth{site=\"AVERO-HQ\"}",
+          "legendFormat": "Persister",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_journey_queue_depth{site=\"AVERO-HQ\"}",
+          "legendFormat": "Journey",
+          "refId": "B"
+        },
+        {
+          "expr": "gateway_worker_pool_queue_depth{site=\"AVERO-HQ\"}",
+          "legendFormat": "Worker Pool",
+          "refId": "C"
+        },
+        {
+          "expr": "gateway_event_queue_depth{site=\"AVERO-HQ\"}",
+          "legendFormat": "Event Bus",
+          "refId": "D"
+        }
+      ],
+      "title": "Queue Depths",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 115
+      },
+      "id": 51,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_slow_handlers_total{site=\"AVERO-HQ\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Slow Handlers (5m)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 115
+      },
+      "id": 52,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_cross_person_delays_total{site=\"AVERO-HQ\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Cross-Person Delays (5m)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 119
+      },
+      "id": 53,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_handler_duration_seconds_bucket{site=\"AVERO-HQ\"}[5m])) by (le, handler_name))",
+          "legendFormat": "{{handler_name}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_handler_duration_seconds_bucket{site=\"AVERO-HQ\"}[5m])) by (le, handler_name))",
+          "legendFormat": "{{handler_name}} p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Handler Duration (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Tracks latency: auth_processing, payment_to_auth, gate_open_request, gate_opened",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 119
+      },
+      "id": 54,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_gate_latency_seconds_bucket{site=\"AVERO-HQ\"}[5m])) by (le, operation))",
+          "legendFormat": "{{operation}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_gate_latency_seconds_bucket{site=\"AVERO-HQ\"}[5m])) by (le, operation))",
+          "legendFormat": "{{operation}} p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Gate Latency (Payment to Gate Open)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": [
+    "avero",
+    "AVERO-HQ",
+    "timescaledb"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "AVERO-HQ Gateway (TimescaleDB)",
+  "uid": "AVERO-HQ-timescale",
+  "version": 1
+}

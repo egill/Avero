@@ -1,0 +1,1426 @@
+{
+  "editable": true,
+  "id": 4,
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "blue",
+                  "text": "SYNC"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "green",
+                  "text": "ASYNC"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "gateway_async_mode_enabled{site=\"NETTO-GRANDI\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Processing Mode",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "gateway_concurrent_persons{site=\"NETTO-GRANDI\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Concurrent Persons",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "Offline"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "green",
+                  "text": "Online"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 0
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "gateway_gate_online{site=~\".*[Nn]etto.*\"}",
+          "legendFormat": "Gate {{gate_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Status",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 0
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_exits_total{site=\"NETTO-GRANDI\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 0
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_gate_opens_total{site=\"NETTO-GRANDI\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Opens (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 0
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_payments_total{site=\"NETTO-GRANDI\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Payments (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 0
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_gate_faults_total{site=\"NETTO-GRANDI\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Faults (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "gateway_people_tracking{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_concurrent_persons{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Concurrent",
+          "refId": "B"
+        }
+      ],
+      "title": "People Tracking",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum(clamp_max(gateway_pos_occupancy{site=\"NETTO-GRANDI\"}, 1))",
+          "legendFormat": "Occupied Zones",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Zone Occupancy",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "round(increase(gateway_payments_per_zone_total{site=\"NETTO-GRANDI\"}[1m]))",
+          "legendFormat": "{{zone}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Payments by Zone",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "increase(gateway_exits_total{site=\"NETTO-GRANDI\"}[1m])",
+          "legendFormat": "{{authorized}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits by Type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 12,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_event_processing_duration_seconds_bucket{site=\"NETTO-GRANDI\"}[1m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_event_processing_duration_seconds_bucket{site=\"NETTO-GRANDI\"}[1m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_event_processing_duration_seconds_bucket{site=\"NETTO-GRANDI\"}[1m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Event Processing Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 13,
+      "targets": [
+        {
+          "expr": "increase(gateway_cross_person_delays_total{site=\"NETTO-GRANDI\"}[5m])",
+          "legendFormat": "{{event_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cross-Person Delays",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 14,
+      "targets": [
+        {
+          "expr": "gateway_persister_queue_depth{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Persister",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_journey_queue_depth{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Journey",
+          "refId": "B"
+        },
+        {
+          "expr": "gateway_worker_pool_queue_depth{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Worker Pool",
+          "refId": "C"
+        },
+        {
+          "expr": "gateway_event_queue_depth{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Event Bus",
+          "refId": "D"
+        }
+      ],
+      "title": "Queue Depths",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "green",
+                  "text": "Closed"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "yellow",
+                  "text": "Moving"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "2": {
+                  "color": "red",
+                  "text": "Open"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 15,
+      "options": {
+        "alignValue": "center",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "mergeValues": true,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "expr": "gateway_gate_state{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Gate {{gate_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate State History",
+      "type": "state-timeline"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "staircase": true
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "id": 16,
+      "targets": [
+        {
+          "expr": "sum(gateway_exits_total{site=\"NETTO-GRANDI\"}) by (authorized)",
+          "legendFormat": "{{authorized}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cumulative Exits",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 17,
+      "targets": [
+        {
+          "expr": "gateway_events_dropped_total{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Events Dropped",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_persist_dropped_total{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Persist Dropped",
+          "refId": "B"
+        },
+        {
+          "expr": "gateway_journey_dropped_total{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Journey Dropped",
+          "refId": "C"
+        },
+        {
+          "expr": "gateway_worker_pool_dropped_total{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "Worker Pool Dropped",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(gateway_tracker_handler_errors_total{site=\"NETTO-GRANDI\"}) by (handler)",
+          "legendFormat": "Handler Errors ({{handler}})",
+          "refId": "E"
+        }
+      ],
+      "title": "System Health (Errors & Drops)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0,
+          "noValue": "0",
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "id": 18,
+      "targets": [
+        {
+          "expr": "rate(gateway_line_crossings_total{site=\"NETTO-GRANDI\", line=\"entry\", direction=\"forward\"}[1m]) * 60 or vector(0)",
+          "legendFormat": "Entry Forward",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(gateway_line_crossings_total{site=\"NETTO-GRANDI\", line=\"entry\", direction=\"backward\"}[1m]) * 60 or vector(0)",
+          "legendFormat": "Entry Backward",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(gateway_line_crossings_total{site=\"NETTO-GRANDI\", line=\"exit\", direction=\"forward\"}[1m]) * 60 or vector(0)",
+          "legendFormat": "Exit Forward",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(gateway_line_crossings_total{site=\"NETTO-GRANDI\", line=\"exit\", direction=\"backward\"}[1m]) * 60 or vector(0)",
+          "legendFormat": "Exit Backward",
+          "refId": "D"
+        }
+      ],
+      "title": "Line Crossings (per minute)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "id": 19,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_gate_cycle_duration_seconds_bucket{site=\"NETTO-GRANDI\"}[5m])) by (le, gate_id))",
+          "legendFormat": "Gate {{gate_id}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_gate_cycle_duration_seconds_bucket{site=\"NETTO-GRANDI\"}[5m])) by (le, gate_id))",
+          "legendFormat": "Gate {{gate_id}} p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Gate Cycle Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "id": 20,
+      "targets": [
+        {
+          "expr": "increase(gateway_gate_cycle_crossings_total{site=\"NETTO-GRANDI\"}[5m])",
+          "legendFormat": "Gate {{gate_id}} Crossings",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(gateway_gate_cycle_multi_exit_total{site=\"NETTO-GRANDI\"}[5m])) by (gate_id)",
+          "legendFormat": "Gate {{gate_id}} Multi-Exit Cycles",
+          "refId": "B"
+        }
+      ],
+      "title": "Gate Cycle Crossings (Tailgating)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "id": 21,
+      "targets": [
+        {
+          "expr": "increase(gateway_gate_cycle_multi_exit_total{site=\"NETTO-GRANDI\"}[1h])",
+          "legendFormat": "{{crossing_count}} exits",
+          "refId": "A"
+        }
+      ],
+      "title": "Multi-Exit Distribution",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 60
+      },
+      "id": 22,
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "gateway_data_flow_last_seen_seconds{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Data Flow Last Seen",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 60
+      },
+      "id": 23,
+      "targets": [
+        {
+          "expr": "increase(gateway_data_flow_gaps_total{site=\"NETTO-GRANDI\"}[1h])",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Data Flow Gaps (1h)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 60
+      },
+      "id": 24,
+      "targets": [
+        {
+          "expr": "increase(gateway_slow_handlers_total{site=\"NETTO-GRANDI\"}[5m])",
+          "legendFormat": "{{handler_name}} ({{event_type}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Slow Handlers (5m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 64
+      },
+      "id": 25,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_pos_visit_unpaid_total{site=\"NETTO-GRANDI\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Visits Unpaid (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 64
+      },
+      "id": 26,
+      "targets": [
+        {
+          "expr": "increase(gateway_exits_lost_total{site=\"NETTO-GRANDI\"}[1h])",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits Lost (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 65
+              }
+            ]
+          },
+          "unit": "celsius"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 68
+      },
+      "id": 27,
+      "targets": [
+        {
+          "expr": "gateway_sensor_temperature_celsius{site=\"NETTO-GRANDI\", type=\"die\"}",
+          "legendFormat": "Die Temp ({{sensor_id}})",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_sensor_temperature_celsius{site=\"NETTO-GRANDI\", type=\"housing\"}",
+          "legendFormat": "Housing Temp ({{sensor_id}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Xovis Sensor Temperature",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "unit": "d"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 68
+      },
+      "id": 28,
+      "targets": [
+        {
+          "expr": "gateway_sensor_uptime_seconds{site=\"NETTO-GRANDI\"} / 86400",
+          "legendFormat": "{{sensor_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Xovis Sensor Uptime",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "OFFLINE"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "green",
+                  "text": "ONLINE"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 68
+      },
+      "id": 29,
+      "options": {
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "expr": "gateway_sensor_online{site=\"NETTO-GRANDI\"}",
+          "legendFormat": "{{sensor_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Xovis Sensor Online",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Tracks latency at each stage: auth_processing (internal auth time), payment_to_auth (total payment-to-auth), gate_open_request (request delay), gate_opened (open delay)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 76
+      },
+      "id": 30,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_gate_latency_seconds_bucket{site=\"NETTO-GRANDI\"}[5m])) by (le, operation))",
+          "legendFormat": "{{operation}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_gate_latency_seconds_bucket{site=\"NETTO-GRANDI\"}[5m])) by (le, operation))",
+          "legendFormat": "{{operation}} p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_gate_latency_seconds_bucket{site=\"NETTO-GRANDI\"}[5m])) by (le, operation))",
+          "legendFormat": "{{operation}} p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Gate Latency (Payment to Gate Open)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Time from command sent to gate movement detected (OPENING state)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 84
+      },
+      "id": 31,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_gate_command_latency_seconds_bucket{site=\"NETTO-GRANDI\"}[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_gate_command_latency_seconds_bucket{site=\"NETTO-GRANDI\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_gate_command_latency_seconds_bucket{site=\"NETTO-GRANDI\"}[5m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Gate Command Response Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Commands sent but gate didn't respond within 3s timeout",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 84
+      },
+      "id": 32,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_gate_command_no_response_total{site=\"NETTO-GRANDI\"}[1h]))",
+          "legendFormat": "No Response (1h)",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Command Failures",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3000
+              },
+              {
+                "color": "red",
+                "value": 6000
+              }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 92
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "gateway_acc_empty_pos_time_avg_ms{site=\"netto\"}",
+          "legendFormat": "Avg Time Since Empty",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_acc_empty_pos_time_max_ms{site=\"netto\"}",
+          "legendFormat": "Max Time Since Empty",
+          "refId": "B"
+        }
+      ],
+      "title": "ACC Empty POS Timing (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 92
+      },
+      "id": 34,
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "increase(gateway_acc_empty_pos_count{site=\"netto\"}[1h])",
+          "legendFormat": "ACC at Empty POS (1h)",
+          "refId": "A"
+        }
+      ],
+      "title": "ACC at Empty POS (Count)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3000
+              },
+              {
+                "color": "red",
+                "value": 6000
+              }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 92
+      },
+      "id": 35,
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "gateway_acc_empty_pos_time_max_ms{site=\"netto\"}",
+          "legendFormat": "Max",
+          "refId": "A"
+        }
+      ],
+      "title": "ACC Empty POS Max (ms)",
+      "type": "stat"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 37,
+  "tags": [
+    "avero",
+    "NETTO-GRANDI",
+    "gateway"
+  ],
+  "timezone": "browser",
+  "title": "NETTO-GRANDI Gateway",
+  "uid": "NETTO-GRANDI-gateway",
+  "version": 5
+}
