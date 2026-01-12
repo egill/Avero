@@ -21,7 +21,11 @@ use tracing::{debug, info, warn};
 const XOVIS_GROUP_BIT: i64 = 0x80000000;
 
 /// Check if a track ID represents a Xovis GROUP aggregate (not an individual person)
+///
+/// Retained for future metrics/logging use. Group tracks now flow through all handlers
+/// like regular tracks (can accumulate dwell, be authorized, and trigger gate opens).
 #[inline]
+#[allow(dead_code)]
 fn is_group_track(track_id: TrackId) -> bool {
     track_id.0 & XOVIS_GROUP_BIT != 0
 }
@@ -35,12 +39,6 @@ impl Tracker {
     /// 3. Create a fresh new journey
     pub(crate) fn handle_track_create(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
-
-        if is_group_track(track_id) {
-            debug!(track_id = %track_id, "skipping_group_track");
-            return;
-        }
-
         let ts = epoch_ms();
 
         // Determine if this looks like a "spawn" (re-detection)
@@ -191,11 +189,6 @@ impl Tracker {
     /// If no stitch occurs within the time window, the journey will be finalized.
     pub(crate) fn handle_track_delete(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
-
-        if is_group_track(track_id) {
-            return;
-        }
-
         let ts = epoch_ms();
 
         if let Some(mut person) = self.persons.remove(&track_id) {
@@ -282,11 +275,6 @@ impl Tracker {
     /// - Gate zone (when authorized): send gate open command
     pub(crate) fn handle_zone_entry(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
-
-        if is_group_track(track_id) {
-            return;
-        }
-
         let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
         let zone = self.config.zone_name(geometry_id);
         let ts = epoch_ms();
@@ -362,11 +350,6 @@ impl Tracker {
     /// For POS zones, calculates dwell time and checks authorization threshold.
     pub(crate) fn handle_zone_exit(&mut self, event: &ParsedEvent) {
         let track_id = event.track_id;
-
-        if is_group_track(track_id) {
-            return;
-        }
-
         let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
         let zone = self.config.zone_name(geometry_id);
         let ts = epoch_ms();
@@ -450,11 +433,6 @@ impl Tracker {
     /// - Exit line (forward): completes the journey
     pub(crate) fn handle_line_cross(&mut self, event: &ParsedEvent, direction: &str) {
         let track_id = event.track_id;
-
-        if is_group_track(track_id) {
-            return;
-        }
-
         let geometry_id = event.geometry_id.unwrap_or(GeometryId(0));
         let line = self.config.zone_name(geometry_id);
         let ts = epoch_ms();
