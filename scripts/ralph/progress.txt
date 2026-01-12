@@ -11,7 +11,7 @@ Status legend: [ ] not started, [~] in progress, [x] done
 [x] POS-004 Integrate PosOccupancyState with tracker
 [x] POS-005 Simplify AccCollector
 [x] POS-006 Simplify Person struct
-[ ] POS-007 Verify journey logging captures POS events
+[x] POS-007 Verify journey logging captures POS events
 [ ] POS-008 Unit tests for PosOccupancyState
 [ ] POS-009 Update tracker tests for per-zone semantics
 [ ] POS-010 Add group track tests
@@ -85,5 +85,16 @@ Key files:
   - Stitcher now logs without dwell_ms; PendingTrackInfo.dwell_ms hardcoded to 0
   - Updated tracker tests to not assert on Person.accumulated_dwell_ms
 - **Learnings:** Person struct simplification required coordinating changes across types.rs, handlers.rs, stitcher.rs, tests.rs, and pos_occupancy.rs. The key insight was making record_exit() return dwell info so handlers can update journey.total_dwell_ms incrementally. Journey tracks total dwell across all zones for logging; PosOccupancyState tracks per-zone dwell for ACC matching.
+---
+
+## 2026-01-13 - POS-007 - Verify journey logging captures POS events
+- Files changed: src/services/tracker/handlers.rs
+- What was done:
+  - Verified POS zone entry/exit events are logged correctly with timestamps and dwell_ms
+  - Added dwell_ms to ACC match journey events (now includes `dwell={dwell_ms}` in extra field)
+  - Changed ACC loop to iterate over `qualified` vec to access dwell alongside track_id
+  - Verified authorization flag set correctly on ACC match
+  - Verified journey persistence on track delete and exit line cross
+- **Learnings:** When iterating over tuples `Vec<(TrackId, u64)>`, use `for &(track_id, dwell_ms) in &vec` to destructure while borrowing. The `qualified` vector already had the dwell info needed - just needed to access it in the loop.
 ---
 

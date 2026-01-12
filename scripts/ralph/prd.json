@@ -148,7 +148,7 @@
         "src/services/journey_manager.rs"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "May require passing dwell from get_candidates result to journey logging."
     },
     {
