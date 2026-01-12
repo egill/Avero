@@ -587,7 +587,7 @@ impl Tracker {
         let authorized_tracks: Vec<TrackId> = qualified.iter().map(|(tid, _)| *tid).collect();
 
         // Record ACC match on all authorized journeys
-        for &track_id in &authorized_tracks {
+        for &(track_id, dwell_ms) in &qualified {
             if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
                 journey.acc_matched = true;
             }
@@ -595,7 +595,10 @@ impl Tracker {
                 track_id,
                 JourneyEvent::new(JourneyEventType::Acc, ts)
                     .with_zone(&pos_zone)
-                    .with_extra(&format!("kiosk={ip},count={}", authorized_tracks.len())),
+                    .with_extra(&format!(
+                        "kiosk={ip},count={},dwell={dwell_ms}",
+                        qualified.len()
+                    )),
             );
         }
 
