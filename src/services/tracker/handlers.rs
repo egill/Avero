@@ -318,7 +318,9 @@ impl Tracker {
 
         if self.config.is_pos_zone(geometry_id.0) {
             person.zone_entered_at = Some(event.received_at);
-            // Record POS entry for ACC matching
+            // Record POS entry in new per-zone occupancy state
+            self.pos_occupancy.record_entry(&zone, track_id, event.received_at);
+            // Record POS entry for ACC matching (legacy - to be removed in POS-005)
             self.acc_collector.record_pos_entry(track_id, &zone);
             // Update POS occupancy metric
             self.metrics.pos_zone_enter(geometry_id.0);
@@ -371,7 +373,9 @@ impl Tracker {
                 let dwell_ms = entered_at.elapsed().as_millis() as u64;
                 person.accumulated_dwell_ms += dwell_ms;
 
-                // Record POS exit for ACC matching
+                // Record POS exit in new per-zone occupancy state
+                self.pos_occupancy.record_exit(&zone, track_id, Instant::now());
+                // Record POS exit for ACC matching (legacy - to be removed in POS-005)
                 self.acc_collector.record_pos_exit(track_id, &zone, dwell_ms);
                 // Update POS occupancy metric
                 self.metrics.pos_zone_exit(geometry_id.0);
@@ -550,25 +554,48 @@ impl Tracker {
     ///
     /// The ip is the peer IP address of the ACC terminal connection.
     /// It's mapped to a POS zone via the ip_to_pos config.
-    /// Authorizes all present tracks at POS with accumulated_dwell >= min_dwell.
+    /// Uses PosOccupancyState to find candidates with accumulated_dwell >= min_dwell.
     pub(crate) fn handle_acc_event(&mut self, ip: &str, received_at: Instant) {
         let ts = epoch_ms();
+        let now = Instant::now();
 
-        // Look up POS zone from IP
-        let pos = self.acc_collector.pos_for_ip(ip).map(|s| s.to_string());
+        // Look up POS zone from IP - early return if unknown
+        let Some(pos_zone) = self.acc_collector.pos_for_ip(ip).map(|s| s.to_string()) else {
+            self.publish_unmatched_acc_event(ip, None, ts);
+            return;
+        };
 
-        // Build accumulated dwell map from persons for ACC matching
-        // This ensures ACC uses total journey dwell, not just current POS session dwell
-        let accumulated_dwells: std::collections::HashMap<TrackId, u64> =
-            self.persons.iter().map(|(tid, p)| (*tid, p.accumulated_dwell_ms)).collect();
+        // Get candidates sorted by: present first (dwell desc), then recent exits (dwell desc)
+        let candidates = self.pos_occupancy.get_candidates(&pos_zone, now);
+        self.pos_occupancy.prune_expired(&pos_zone, now);
 
-        // Try to match ACC to journeys using IP → POS lookup
-        // Returns (primary_track, all_authorized_tracks)
-        let (primary, authorized_tracks) = self.acc_collector.process_acc(
-            ip,
-            &mut self.journey_manager,
-            Some(&accumulated_dwells),
-        );
+        // Filter by min_dwell_ms
+        let min_dwell = self.pos_occupancy.min_dwell_ms();
+        let qualified: Vec<(TrackId, u64)> =
+            candidates.into_iter().filter(|(_, dwell)| *dwell >= min_dwell).collect();
+
+        if qualified.is_empty() {
+            self.metrics.record_acc_event(false);
+            self.publish_unmatched_acc_event(ip, Some(&pos_zone), ts);
+            return;
+        }
+
+        // Primary is first (highest dwell among present, or highest dwell among recent exits)
+        let primary = qualified[0].0;
+        let authorized_tracks: Vec<TrackId> = qualified.iter().map(|(tid, _)| *tid).collect();
+
+        // Record ACC match on all authorized journeys
+        for &track_id in &authorized_tracks {
+            if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+                journey.acc_matched = true;
+            }
+            self.journey_manager.add_event(
+                track_id,
+                JourneyEvent::new(JourneyEventType::Acc, ts)
+                    .with_zone(&pos_zone)
+                    .with_extra(&format!("kiosk={ip},count={}", authorized_tracks.len())),
+            );
+        }
 
         // Record ACC metric
         self.metrics.record_acc_event(!authorized_tracks.is_empty());

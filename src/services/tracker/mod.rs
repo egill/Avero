@@ -19,6 +19,7 @@ use crate::services::acc_collector::AccCollector;
 use crate::services::door_correlator::DoorCorrelator;
 use crate::services::gate_worker::GateCmd;
 use crate::services::journey_manager::JourneyManager;
+use crate::services::pos_occupancy::PosOccupancyState;
 use crate::services::reentry_detector::ReentryDetector;
 use crate::services::stitcher::Stitcher;
 use rustc_hash::FxHashMap;
@@ -40,6 +41,8 @@ pub struct Tracker {
     pub(crate) door_correlator: DoorCorrelator,
     /// Detects re-entry patterns
     pub(crate) reentry_detector: ReentryDetector,
+    /// Per-zone POS occupancy state (single source of truth for POS dwell)
+    pub(crate) pos_occupancy: PosOccupancyState,
     /// Correlates ACC (payment) events with journeys
     pub(crate) acc_collector: AccCollector,
     /// Application configuration
@@ -77,12 +80,15 @@ impl Tracker {
         door_rx: watch::Receiver<DoorStatus>,
     ) -> Self {
         let acc_collector = AccCollector::new(&config, metrics.clone());
+        let pos_occupancy =
+            PosOccupancyState::new(config.pos_exit_grace_ms(), config.min_dwell_ms());
         Self {
             persons: FxHashMap::default(),
             stitcher: Stitcher::with_metrics(metrics.clone()),
             journey_manager: JourneyManager::new(),
             door_correlator: DoorCorrelator::new(),
             reentry_detector: ReentryDetector::new(),
+            pos_occupancy,
             acc_collector,
             config,
             gate_cmd_tx,
