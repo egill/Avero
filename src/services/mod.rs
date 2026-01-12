@@ -15,6 +15,7 @@ pub mod door_correlator;
 pub mod gate;
 pub mod gate_worker;
 pub mod journey_manager;
+pub mod pos_occupancy;
 pub mod reentry_detector;
 pub mod stitcher;
 pub mod tracker;
