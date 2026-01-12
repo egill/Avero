@@ -79,7 +79,7 @@ impl Tracker {
         egress_sender: Option<EgressSender>,
         door_rx: watch::Receiver<DoorStatus>,
     ) -> Self {
-        let acc_collector = AccCollector::new(&config, metrics.clone());
+        let acc_collector = AccCollector::new(&config);
         let pos_occupancy =
             PosOccupancyState::new(config.pos_exit_grace_ms(), config.min_dwell_ms());
         Self {

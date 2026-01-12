@@ -318,10 +318,8 @@ impl Tracker {
 
         if self.config.is_pos_zone(geometry_id.0) {
             person.zone_entered_at = Some(event.received_at);
-            // Record POS entry in new per-zone occupancy state
+            // Record POS entry in per-zone occupancy state
             self.pos_occupancy.record_entry(&zone, track_id, event.received_at);
-            // Record POS entry for ACC matching (legacy - to be removed in POS-005)
-            self.acc_collector.record_pos_entry(track_id, &zone);
             // Update POS occupancy metric
             self.metrics.pos_zone_enter(geometry_id.0);
         } else if geometry_id == self.config.gate_zone() {
@@ -373,10 +371,8 @@ impl Tracker {
                 let dwell_ms = entered_at.elapsed().as_millis() as u64;
                 person.accumulated_dwell_ms += dwell_ms;
 
-                // Record POS exit in new per-zone occupancy state
+                // Record POS exit in per-zone occupancy state
                 self.pos_occupancy.record_exit(&zone, track_id, Instant::now());
-                // Record POS exit for ACC matching (legacy - to be removed in POS-005)
-                self.acc_collector.record_pos_exit(track_id, &zone, dwell_ms);
                 // Update POS occupancy metric
                 self.metrics.pos_zone_exit(geometry_id.0);
 
@@ -598,7 +594,7 @@ impl Tracker {
         }
 
         // Record ACC metric
-        self.metrics.record_acc_event(!authorized_tracks.is_empty());
+        self.metrics.record_acc_event(true);
 
         // Authorize all matched tracks
         for &track_id in &authorized_tracks {
@@ -612,7 +608,7 @@ impl Tracker {
                 warn!(
                     track_id = %track_id,
                     ip = %ip,
-                    pos = ?pos,
+                    pos = %pos_zone,
                     "acc_matched_no_journey"
                 );
                 if let Some(ref sender) = self.egress_sender {
@@ -621,7 +617,7 @@ impl Tracker {
                         ts,
                         t: "matched_no_journey".to_string(),
                         ip: ip.to_string(),
-                        pos: pos.clone(),
+                        pos: Some(pos_zone.clone()),
                         tid: Some(track_id.0),
                         dwell_ms: None,
                         gate_zone: None,
@@ -635,156 +631,176 @@ impl Tracker {
             }
         }
 
+        // Check for late ACC (customer already entered gate zone before ACC arrived)
         let gate_zone = self.config.gate_zone();
         let gate_zone_name = self.config.zone_name(gate_zone);
         for &track_id in &authorized_tracks {
-            if let Some(journey) = self.journey_manager.get_any(track_id) {
-                let gate_entry_ts = journey
-                    .events
-                    .iter()
-                    .rev()
-                    .find(|e| {
-                        e.t == JourneyEventType::ZoneEntry
-                            && e.z.as_deref() == Some(&*gate_zone_name)
-                    })
-                    .map(|e| e.ts);
-                if let Some(entry_ts) = gate_entry_ts {
-                    let delta_ms = ts.saturating_sub(entry_ts);
-                    if delta_ms > 0 {
-                        self.metrics.record_acc_late();
-                        info!(
-                            track_id = %track_id,
-                            ip = %ip,
-                            pos = ?pos,
-                            gate_zone = %gate_zone_name,
-                            gate_entry_ts = %entry_ts,
-                            acc_ts = %ts,
-                            delta_ms = %delta_ms,
-                            gate_cmd_at = ?journey.gate_cmd_at,
-                            "late_acc_after_gate_entry"
-                        );
-                        if let Some(ref sender) = self.egress_sender {
-                            sender.send_acc_event(AccEventPayload {
-                                site: None,
-                                ts,
-                                t: "late_after_gate".to_string(),
-                                ip: ip.to_string(),
-                                pos: pos.clone(),
-                                tid: Some(track_id.0),
-                                dwell_ms: self
-                                    .persons
-                                    .get(&track_id)
-                                    .map(|p| p.accumulated_dwell_ms),
-                                gate_zone: Some(gate_zone_name.to_string()),
-                                gate_entry_ts: Some(entry_ts),
-                                delta_ms: Some(delta_ms),
-                                gate_cmd_at: journey.gate_cmd_at,
-                                debug_active: None,
-                                debug_pending: None,
-                            });
-                        }
-                    }
-                }
-            }
-
-            let in_gate_zone = self
-                .persons
-                .get(&track_id)
-                .and_then(|p| p.current_zone)
-                .is_some_and(|z| z == gate_zone);
-            let gate_already_opened =
-                self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
-            if in_gate_zone && !gate_already_opened {
-                self.send_gate_open_command(track_id, ts, "acc", received_at);
-            }
-        }
-
-        if !authorized_tracks.is_empty() {
-            info!(
-                ip = %ip,
-                pos = ?pos,
-                authorized_count = %authorized_tracks.len(),
-                tracks = ?authorized_tracks,
-                primary = ?primary,
-                "acc_authorized"
+            self.check_late_acc_and_open_gate(
+                track_id,
+                ip,
+                &pos_zone,
+                &gate_zone_name,
+                gate_zone,
+                ts,
+                received_at,
             );
         }
 
-        // Publish ACC event to MQTT
+        info!(
+            ip = %ip,
+            pos = %pos_zone,
+            authorized_count = %authorized_tracks.len(),
+            tracks = ?authorized_tracks,
+            primary = %primary,
+            "acc_authorized"
+        );
+
+        // Publish matched ACC event to MQTT
         if let Some(ref sender) = self.egress_sender {
-            if let Some(primary_track) = primary {
-                // Matched - send event for primary track
-                let dwell_ms = self.persons.get(&primary_track).map(|p| p.accumulated_dwell_ms);
-                sender.send_acc_event(AccEventPayload {
-                    site: None,
-                    ts,
-                    t: "matched".to_string(),
-                    ip: ip.to_string(),
-                    pos: pos.clone(),
-                    tid: Some(primary_track.0),
-                    dwell_ms,
-                    gate_zone: None,
-                    gate_entry_ts: None,
-                    delta_ms: None,
-                    gate_cmd_at: None,
-                    debug_active: None,
-                    debug_pending: None,
-                });
-            } else {
-                // Unmatched (unknown IP or no one at POS) - include debug info
-                let debug_active: Vec<AccDebugTrack> = self
-                    .persons
-                    .iter()
-                    .map(|(tid, p)| AccDebugTrack {
-                        tid: tid.0,
-                        zone: p.current_zone.map(|z| self.config.zone_name(z).to_string()),
-                        dwell_ms: p.accumulated_dwell_ms,
-                        auth: p.authorized,
-                    })
-                    .collect();
+            let dwell_ms = self.persons.get(&primary).map(|p| p.accumulated_dwell_ms);
+            sender.send_acc_event(AccEventPayload {
+                site: None,
+                ts,
+                t: "matched".to_string(),
+                ip: ip.to_string(),
+                pos: Some(pos_zone),
+                tid: Some(primary.0),
+                dwell_ms,
+                gate_zone: None,
+                gate_entry_ts: None,
+                delta_ms: None,
+                gate_cmd_at: None,
+                debug_active: None,
+                debug_pending: None,
+            });
+        }
+    }
 
-                let debug_pending: Vec<AccDebugPending> = self
-                    .stitcher
-                    .get_pending_info()
-                    .into_iter()
-                    .map(|p| AccDebugPending {
-                        tid: p.track_id.0,
-                        last_zone: p.last_zone,
-                        dwell_ms: p.dwell_ms,
-                        auth: p.authorized,
-                        pending_ms: p.pending_ms,
-                    })
-                    .collect();
+    /// Check if ACC arrived late (after customer entered gate zone) and open gate if needed
+    fn check_late_acc_and_open_gate(
+        &mut self,
+        track_id: TrackId,
+        ip: &str,
+        pos_zone: &str,
+        gate_zone_name: &Arc<str>,
+        gate_zone: GeometryId,
+        ts: u64,
+        received_at: Instant,
+    ) {
+        // Check for late ACC (customer entered gate zone before ACC)
+        if let Some(journey) = self.journey_manager.get_any(track_id) {
+            let gate_entry_ts = journey
+                .events
+                .iter()
+                .rev()
+                .find(|e| {
+                    e.t == JourneyEventType::ZoneEntry && e.z.as_deref() == Some(&**gate_zone_name)
+                })
+                .map(|e| e.ts);
 
-                info!(
-                    ip = %ip,
-                    pos = ?pos,
-                    active_tracks = %debug_active.len(),
-                    pending_tracks = %debug_pending.len(),
-                    "acc_unmatched"
-                );
-
-                sender.send_acc_event(AccEventPayload {
-                    site: None,
-                    ts,
-                    t: "unmatched".to_string(),
-                    ip: ip.to_string(),
-                    pos: pos.clone(),
-                    tid: None,
-                    dwell_ms: None,
-                    gate_zone: None,
-                    gate_entry_ts: None,
-                    delta_ms: None,
-                    gate_cmd_at: None,
-                    debug_active: if debug_active.is_empty() { None } else { Some(debug_active) },
-                    debug_pending: if debug_pending.is_empty() {
-                        None
-                    } else {
-                        Some(debug_pending)
-                    },
-                });
+            if let Some(entry_ts) = gate_entry_ts {
+                let delta_ms = ts.saturating_sub(entry_ts);
+                if delta_ms > 0 {
+                    self.metrics.record_acc_late();
+                    info!(
+                        track_id = %track_id,
+                        ip = %ip,
+                        pos = %pos_zone,
+                        gate_zone = %gate_zone_name,
+                        gate_entry_ts = %entry_ts,
+                        acc_ts = %ts,
+                        delta_ms = %delta_ms,
+                        gate_cmd_at = ?journey.gate_cmd_at,
+                        "late_acc_after_gate_entry"
+                    );
+                    if let Some(ref sender) = self.egress_sender {
+                        sender.send_acc_event(AccEventPayload {
+                            site: None,
+                            ts,
+                            t: "late_after_gate".to_string(),
+                            ip: ip.to_string(),
+                            pos: Some(pos_zone.to_string()),
+                            tid: Some(track_id.0),
+                            dwell_ms: self.persons.get(&track_id).map(|p| p.accumulated_dwell_ms),
+                            gate_zone: Some(gate_zone_name.to_string()),
+                            gate_entry_ts: Some(entry_ts),
+                            delta_ms: Some(delta_ms),
+                            gate_cmd_at: journey.gate_cmd_at,
+                            debug_active: None,
+                            debug_pending: None,
+                        });
+                    }
+                }
             }
         }
+
+        // Open gate if customer is currently in gate zone and gate hasn't opened yet
+        let in_gate_zone = self
+            .persons
+            .get(&track_id)
+            .and_then(|p| p.current_zone)
+            .is_some_and(|z| z == gate_zone);
+        let gate_already_opened =
+            self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
+
+        if in_gate_zone && !gate_already_opened {
+            self.send_gate_open_command(track_id, ts, "acc", received_at);
+        }
+    }
+
+    /// Publish an unmatched ACC event with debug info
+    fn publish_unmatched_acc_event(&self, ip: &str, pos: Option<&str>, ts: u64) {
+        let Some(ref sender) = self.egress_sender else {
+            return;
+        };
+
+        let debug_active: Vec<AccDebugTrack> = self
+            .persons
+            .iter()
+            .map(|(tid, p)| AccDebugTrack {
+                tid: tid.0,
+                zone: p.current_zone.map(|z| self.config.zone_name(z).to_string()),
+                dwell_ms: p.accumulated_dwell_ms,
+                auth: p.authorized,
+            })
+            .collect();
+
+        let debug_pending: Vec<AccDebugPending> = self
+            .stitcher
+            .get_pending_info()
+            .into_iter()
+            .map(|p| AccDebugPending {
+                tid: p.track_id.0,
+                last_zone: p.last_zone,
+                dwell_ms: p.dwell_ms,
+                auth: p.authorized,
+                pending_ms: p.pending_ms,
+            })
+            .collect();
+
+        info!(
+            ip = %ip,
+            pos = ?pos,
+            active_tracks = %debug_active.len(),
+            pending_tracks = %debug_pending.len(),
+            "acc_unmatched"
+        );
+
+        sender.send_acc_event(AccEventPayload {
+            site: None,
+            ts,
+            t: "unmatched".to_string(),
+            ip: ip.to_string(),
+            pos: pos.map(|s| s.to_string()),
+            tid: None,
+            dwell_ms: None,
+            gate_zone: None,
+            gate_entry_ts: None,
+            delta_ms: None,
+            gate_cmd_at: None,
+            debug_active: if debug_active.is_empty() { None } else { Some(debug_active) },
+            debug_pending: if debug_pending.is_empty() { None } else { Some(debug_pending) },
+        });
     }
 
     /// Enqueue gate open command to worker and record E2E latency
