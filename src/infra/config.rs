@@ -22,6 +22,7 @@ const DEFAULT_PROMETHEUS_PORT: u16 = 80;
 const DEFAULT_ACC_LISTENER_PORT: u16 = 25803;
 const DEFAULT_BROKER_PORT: u16 = 1883;
 const DEFAULT_METRICS_PUBLISH_INTERVAL: u64 = 5;
+const DEFAULT_POS_EXIT_GRACE_MS: u64 = 5000;
 
 // ============================================================================
 // TOML config structs
@@ -33,7 +34,6 @@ pub enum GateMode {
     Http,
     Tcp,
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MqttConfig {
@@ -79,6 +79,23 @@ pub struct ZonesConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthorizationConfig {
     pub min_dwell_ms: u64,
+}
+
+/// POS tracking configuration (new canonical location for dwell settings)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PosTrackingConfig {
+    /// Grace window for re-entry (ms) - if track re-enters within this window
+    /// after exit, the session is reopened rather than creating a new one
+    pub exit_grace_ms: u64,
+    /// Minimum dwell time for ACC qualification (ms)
+    pub min_dwell_ms: Option<u64>,
+}
+
+impl Default for PosTrackingConfig {
+    fn default() -> Self {
+        Self { exit_grace_ms: DEFAULT_POS_EXIT_GRACE_MS, min_dwell_ms: None }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -266,6 +283,8 @@ pub struct TomlConfig {
     pub broker: BrokerConfig,
     #[serde(default)]
     pub mqtt_egress: MqttEgressConfig,
+    #[serde(default)]
+    pub pos_tracking: PosTrackingConfig,
 }
 
 // ============================================================================
@@ -306,8 +325,9 @@ pub struct Config {
     store_zone: Option<i32>,
     zone_names: HashMap<i32, Arc<str>>,
 
-    // Authorization
+    // Authorization / POS tracking
     min_dwell_ms: u64,
+    pos_exit_grace_ms: u64,
 
     // Metrics
     metrics_interval_secs: u64,
@@ -397,6 +417,7 @@ impl Default for Config {
             store_zone: None,
             zone_names: Self::default_zone_names(),
             min_dwell_ms: 7000,
+            pos_exit_grace_ms: 5000,
             metrics_interval_secs: 10,
             prometheus_port: DEFAULT_PROMETHEUS_PORT,
             acc_ip_to_pos: HashMap::new(),
@@ -494,6 +515,28 @@ impl Config {
             }
         }
 
+        // Resolve min_dwell_ms: prefer [pos_tracking].min_dwell_ms, fall back to [authorization]
+        let auth_min_dwell = toml_config.authorization.min_dwell_ms;
+        let min_dwell_ms = if let Some(pos_val) = toml_config.pos_tracking.min_dwell_ms {
+            // New location is set - validate it doesn't conflict with old location
+            if pos_val != auth_min_dwell {
+                anyhow::bail!(
+                    "Config conflict: [pos_tracking].min_dwell_ms ({}) differs from \
+                     [authorization].min_dwell_ms ({}). Please use only [pos_tracking].min_dwell_ms.",
+                    pos_val,
+                    auth_min_dwell
+                );
+            }
+            pos_val
+        } else {
+            // New location not set - use old location with deprecation warning
+            eprintln!(
+                "Warning: [authorization].min_dwell_ms is deprecated. \
+                 Please move to [pos_tracking].min_dwell_ms"
+            );
+            auth_min_dwell
+        };
+
         Ok(Self {
             site_id: toml_config.site.id,
             mqtt_host: toml_config.mqtt.host,
@@ -515,7 +558,8 @@ impl Config {
             approach_line: toml_config.zones.approach_line,
             store_zone: toml_config.zones.store_zone,
             zone_names,
-            min_dwell_ms: toml_config.authorization.min_dwell_ms,
+            min_dwell_ms,
+            pos_exit_grace_ms: toml_config.pos_tracking.exit_grace_ms,
             metrics_interval_secs: toml_config.metrics.interval_secs,
             prometheus_port: toml_config.metrics.prometheus_port,
             config_file: path.display().to_string(),
@@ -630,6 +674,7 @@ impl Config {
         rs485_poll_interval_ms -> u64,
         exit_line -> i32,
         min_dwell_ms -> u64,
+        pos_exit_grace_ms -> u64,
         metrics_interval_secs -> u64,
         prometheus_port -> u16,
         acc_listener_enabled -> bool,
@@ -725,6 +770,7 @@ mod tests {
         assert_eq!(config.mqtt_port(), 1883);
         assert_eq!(config.mqtt_topic(), "#");
         assert_eq!(config.min_dwell_ms(), 7000);
+        assert_eq!(config.pos_exit_grace_ms(), 5000);
         assert_eq!(config.metrics_interval_secs(), 10);
         assert_eq!(config.pos_zones(), &[1001, 1002, 1003, 1004, 1005]);
         assert_eq!(config.gate_zone(), GeometryId(1007));
@@ -781,5 +827,12 @@ mod tests {
         // Verify that Config::default() also has proper egress file
         let config = Config::default();
         assert_eq!(config.egress_file(), "journeys.jsonl");
+    }
+
+    #[test]
+    fn test_pos_tracking_config_defaults() {
+        let pos_tracking = PosTrackingConfig::default();
+        assert_eq!(pos_tracking.exit_grace_ms, 5000);
+        assert!(pos_tracking.min_dwell_ms.is_none());
     }
 }
