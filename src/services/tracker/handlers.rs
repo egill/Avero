@@ -81,11 +81,13 @@ impl Tracker {
             person.track_id = track_id;
             person.last_position = event.position;
 
+            let dwell_ms = self.journey_manager.get_dwell(old_track_id);
+
             debug!(
                 new_track_id = %track_id,
                 old_track_id = %old_track_id,
                 authorized = %person.authorized,
-                dwell_ms = %person.accumulated_dwell_ms,
+                dwell_ms = %dwell_ms,
                 time_ms = %time_ms,
                 distance_cm = %distance_cm,
                 spawn_hint = %spawn_hint,
@@ -101,7 +103,7 @@ impl Tracker {
                     tid: track_id.0,
                     prev_tid: Some(old_track_id.0),
                     auth: person.authorized,
-                    dwell_ms: person.accumulated_dwell_ms,
+                    dwell_ms,
                     stitch_dist_cm: Some(distance_cm as u64),
                     stitch_time_ms: Some(time_ms),
                     parent_jid: None,
@@ -202,10 +204,12 @@ impl Tracker {
                 .map(|id| self.config.zone_name(id).to_string())
                 .unwrap_or_default();
 
+            let journey_dwell = self.journey_manager.get_dwell(track_id);
+
             debug!(
                 track_id = %track_id,
                 authorized = %person.authorized,
-                dwell_ms = %person.accumulated_dwell_ms,
+                dwell_ms = %journey_dwell,
                 last_zone = %last_zone,
                 "track_pending_stitch"
             );
@@ -219,7 +223,7 @@ impl Tracker {
                     tid: track_id.0,
                     prev_tid: None,
                     auth: person.authorized,
-                    dwell_ms: person.accumulated_dwell_ms,
+                    dwell_ms: journey_dwell,
                     stitch_dist_cm: None,
                     stitch_time_ms: None,
                     parent_jid: None,
@@ -229,13 +233,12 @@ impl Tracker {
             // Update journey manager state before going to pending
             if let Some(journey) = self.journey_manager.get_mut(track_id) {
                 journey.authorized = person.authorized;
-                journey.total_dwell_ms = person.accumulated_dwell_ms;
             }
             self.journey_manager.add_event(
                 track_id,
-                JourneyEvent::new(JourneyEventType::Pending, ts).with_zone(&last_zone).with_extra(
-                    &format!("auth={},dwell={}", person.authorized, person.accumulated_dwell_ms),
-                ),
+                JourneyEvent::new(JourneyEventType::Pending, ts)
+                    .with_zone(&last_zone)
+                    .with_extra(&format!("auth={},dwell={}", person.authorized, journey_dwell)),
             );
 
             // Determine journey outcome based on events
@@ -301,6 +304,8 @@ impl Tracker {
             JourneyEvent::new(JourneyEventType::ZoneEntry, ts).with_zone(&zone),
         );
 
+        let journey_dwell = self.journey_manager.get_dwell(track_id);
+
         // Publish zone event to MQTT
         if let Some(ref sender) = self.egress_sender {
             sender.send_zone_event(ZoneEventPayload {
@@ -311,13 +316,12 @@ impl Tracker {
                 ts,
                 auth: person.authorized,
                 dwell_ms: None,
-                total_dwell_ms: Some(person.accumulated_dwell_ms),
+                total_dwell_ms: Some(journey_dwell),
                 event_time: Some(event.event_time),
             });
         }
 
         if self.config.is_pos_zone(geometry_id.0) {
-            person.zone_entered_at = Some(event.received_at);
             // Record POS entry in per-zone occupancy state
             self.pos_occupancy.record_entry(&zone, track_id, event.received_at);
             // Update POS occupancy metric
@@ -330,7 +334,7 @@ impl Tracker {
                 // Emit gate blocked event for TUI visibility
                 info!(
                     track_id = %track_id,
-                    dwell_ms = %person.accumulated_dwell_ms,
+                    dwell_ms = %journey_dwell,
                     "gate_entry_not_authorized"
                 );
                 if let Some(ref sender) = self.egress_sender {
@@ -365,38 +369,39 @@ impl Tracker {
             return;
         };
 
-        // Calculate dwell time if exiting a POS zone
+        // Calculate dwell time if exiting a POS zone (from PosOccupancyState)
         let zone_dwell_ms = if self.config.is_pos_zone(geometry_id.0) {
-            if let Some(entered_at) = person.zone_entered_at.take() {
-                let dwell_ms = entered_at.elapsed().as_millis() as u64;
-                person.accumulated_dwell_ms += dwell_ms;
+            // Record POS exit in per-zone occupancy state and get dwell
+            let dwell_result = self.pos_occupancy.record_exit(&zone, track_id, Instant::now());
+            // Update POS occupancy metric
+            self.metrics.pos_zone_exit(geometry_id.0);
 
-                // Record POS exit in per-zone occupancy state
-                self.pos_occupancy.record_exit(&zone, track_id, Instant::now());
-                // Update POS occupancy metric
-                self.metrics.pos_zone_exit(geometry_id.0);
-
-                // Update journey manager
+            if let Some((session_dwell_ms, _zone_total_dwell_ms)) = dwell_result {
+                // Update journey manager with session dwell (adds to journey total)
                 self.journey_manager.add_event(
                     track_id,
                     JourneyEvent::new(JourneyEventType::ZoneExit, ts)
                         .with_zone(&zone)
-                        .with_extra(&format!("dwell={dwell_ms}")),
+                        .with_extra(&format!("dwell={session_dwell_ms}")),
                 );
-                if let Some(journey) = self.journey_manager.get_mut(track_id) {
-                    journey.total_dwell_ms = person.accumulated_dwell_ms;
-                }
+                // Journey tracks total dwell across ALL zones
+                let journey_total = if let Some(journey) = self.journey_manager.get_mut(track_id) {
+                    journey.total_dwell_ms += session_dwell_ms;
+                    journey.total_dwell_ms
+                } else {
+                    0
+                };
 
                 // Log when dwell threshold met (authorization comes from ACC match)
-                if person.accumulated_dwell_ms >= self.config.min_dwell_ms() {
+                if journey_total >= self.config.min_dwell_ms() {
                     debug!(
                         track_id = %track_id,
                         zone = %zone,
-                        dwell_ms = %person.accumulated_dwell_ms,
+                        dwell_ms = %journey_total,
                         "dwell_threshold_met"
                     );
                 }
-                Some(dwell_ms)
+                Some(session_dwell_ms)
             } else {
                 None
             }
@@ -408,6 +413,8 @@ impl Tracker {
             None
         };
 
+        let journey_dwell = self.journey_manager.get_dwell(track_id);
+
         // Publish zone exit event to MQTT
         if let Some(ref sender) = self.egress_sender {
             sender.send_zone_event(ZoneEventPayload {
@@ -418,7 +425,7 @@ impl Tracker {
                 ts,
                 auth: person.authorized,
                 dwell_ms: zone_dwell_ms,
-                total_dwell_ms: Some(person.accumulated_dwell_ms),
+                total_dwell_ms: Some(journey_dwell),
                 event_time: Some(event.event_time),
             });
         }
@@ -484,11 +491,11 @@ impl Tracker {
         // Journey complete if crossing exit line forward
         if geometry_id.0 == self.config.exit_line() && direction == "forward" {
             // Get journey info for logging
-            let (gate_cmd_at, event_count, started_at) = self
+            let (gate_cmd_at, event_count, started_at, journey_dwell) = self
                 .journey_manager
                 .get(track_id)
-                .map(|j| (j.gate_cmd_at, j.events.len(), j.started_at))
-                .unwrap_or((None, 0, 0));
+                .map(|j| (j.gate_cmd_at, j.events.len(), j.started_at, j.total_dwell_ms))
+                .unwrap_or((None, 0, 0, 0));
             let duration_ms =
                 if started_at > 0 { epoch_ms().saturating_sub(started_at) } else { 0 };
 
@@ -497,15 +504,14 @@ impl Tracker {
                 authorized = %person.authorized,
                 gate_opened = %gate_cmd_at.is_some(),
                 duration_ms = %duration_ms,
-                dwell_ms = %person.accumulated_dwell_ms,
+                dwell_ms = %journey_dwell,
                 events = %event_count,
                 "journey_complete"
             );
 
-            // Sync final state to journey manager and complete
+            // Sync final auth state to journey manager and complete
             if let Some(journey) = self.journey_manager.get_mut(track_id) {
                 journey.authorized = person.authorized;
-                journey.total_dwell_ms = person.accumulated_dwell_ms;
 
                 // Record exit for potential re-entry detection
                 let height = person.last_position.map(|p| p[2]);
@@ -657,7 +663,7 @@ impl Tracker {
 
         // Publish matched ACC event to MQTT
         if let Some(ref sender) = self.egress_sender {
-            let dwell_ms = self.persons.get(&primary).map(|p| p.accumulated_dwell_ms);
+            let dwell_ms = self.journey_manager.get_dwell(primary);
             sender.send_acc_event(AccEventPayload {
                 site: None,
                 ts,
@@ -665,7 +671,7 @@ impl Tracker {
                 ip: ip.to_string(),
                 pos: Some(pos_zone),
                 tid: Some(primary.0),
-                dwell_ms,
+                dwell_ms: Some(dwell_ms),
                 gate_zone: None,
                 gate_entry_ts: None,
                 delta_ms: None,
@@ -721,7 +727,7 @@ impl Tracker {
                             ip: ip.to_string(),
                             pos: Some(pos_zone.to_string()),
                             tid: Some(track_id.0),
-                            dwell_ms: self.persons.get(&track_id).map(|p| p.accumulated_dwell_ms),
+                            dwell_ms: Some(journey.total_dwell_ms),
                             gate_zone: Some(gate_zone_name.to_string()),
                             gate_entry_ts: Some(entry_ts),
                             delta_ms: Some(delta_ms),
@@ -760,7 +766,7 @@ impl Tracker {
             .map(|(tid, p)| AccDebugTrack {
                 tid: tid.0,
                 zone: p.current_zone.map(|z| self.config.zone_name(z).to_string()),
-                dwell_ms: p.accumulated_dwell_ms,
+                dwell_ms: self.journey_manager.get_dwell(*tid),
                 auth: p.authorized,
             })
             .collect();

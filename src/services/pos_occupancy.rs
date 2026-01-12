@@ -29,12 +29,7 @@ pub struct PosState {
 
 impl PosState {
     fn new(entry_time: Instant) -> Self {
-        Self {
-            is_present: true,
-            entry_time,
-            exit_time: None,
-            accumulated_dwell_ms: 0,
-        }
+        Self { is_present: true, entry_time, exit_time: None, accumulated_dwell_ms: 0 }
     }
 }
 
@@ -53,11 +48,7 @@ pub struct PosOccupancyState {
 
 impl PosOccupancyState {
     pub fn new(exit_grace_ms: u64, min_dwell_ms: u64) -> Self {
-        Self {
-            zones: HashMap::new(),
-            exit_grace_ms,
-            min_dwell_ms,
-        }
+        Self { zones: HashMap::new(), exit_grace_ms, min_dwell_ms }
     }
 
     /// Record a track entering a POS zone
@@ -96,18 +87,19 @@ impl PosOccupancyState {
     /// Record a track exiting a POS zone
     ///
     /// Accumulates dwell time from entry_time to now and marks as not present.
-    pub fn record_exit(&mut self, zone: &str, track_id: TrackId, now: Instant) {
-        let Some(zone_tracks) = self.zones.get_mut(zone) else {
-            return;
-        };
-
-        let Some(state) = zone_tracks.get_mut(&track_id.0) else {
-            return;
-        };
+    /// Returns (session_dwell_ms, total_accumulated_dwell_ms) or None if no-op.
+    pub fn record_exit(
+        &mut self,
+        zone: &str,
+        track_id: TrackId,
+        now: Instant,
+    ) -> Option<(u64, u64)> {
+        let zone_tracks = self.zones.get_mut(zone)?;
+        let state = zone_tracks.get_mut(&track_id.0)?;
 
         if !state.is_present {
             // Already exited, no-op
-            return;
+            return None;
         }
 
         // Calculate dwell for this session and accumulate
@@ -115,6 +107,8 @@ impl PosOccupancyState {
         state.accumulated_dwell_ms += session_dwell_ms;
         state.is_present = false;
         state.exit_time = Some(now);
+
+        Some((session_dwell_ms, state.accumulated_dwell_ms))
     }
 
     /// Get candidate tracks for ACC matching at a specific zone
@@ -166,18 +160,15 @@ impl PosOccupancyState {
         };
 
         zone_tracks.retain(|_, state| {
-            // Keep all present tracks
             if state.is_present {
                 return true;
             }
             // Keep exits within grace window; remove expired or invalid states
-            state
-                .exit_time
-                .map(|exit_time| {
-                    let elapsed_ms = now.duration_since(exit_time).as_millis() as u64;
-                    elapsed_ms <= self.exit_grace_ms
-                })
-                .unwrap_or(false)
+            let Some(exit_time) = state.exit_time else {
+                return false;
+            };
+            let elapsed_ms = now.duration_since(exit_time).as_millis() as u64;
+            elapsed_ms <= self.exit_grace_ms
         });
     }
 

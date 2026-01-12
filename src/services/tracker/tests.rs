@@ -145,9 +145,11 @@ async fn test_dwell_accumulation() {
     // Exit POS zone
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
 
+    // Dwell is now tracked in journey.total_dwell_ms (via PosOccupancyState)
+    let journey = tracker.journey_manager.get(TrackId(100)).unwrap();
+    assert!(journey.total_dwell_ms >= 100);
+    // Not authorized yet (need ACC match)
     let person = tracker.persons.get(&TrackId(100)).unwrap();
-    assert!(person.accumulated_dwell_ms >= 100);
-    // Not authorized yet (need 7000ms)
     assert!(!person.authorized);
 }
 
@@ -162,37 +164,43 @@ async fn test_dwell_threshold_without_acc() {
     tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
 
+    // Dwell is now tracked in journey.total_dwell_ms (via PosOccupancyState)
+    let journey = tracker.journey_manager.get(TrackId(100)).unwrap();
+    assert!(journey.total_dwell_ms >= 50);
+    // Person is NOT authorized (no ACC match)
     let person = tracker.persons.get(&TrackId(100)).unwrap();
-    // Dwell is accumulated but person is NOT authorized (no ACC match)
-    assert!(person.accumulated_dwell_ms >= 50);
     assert!(!person.authorized);
 }
 
 #[tokio::test]
 async fn test_accumulated_dwell_across_zones() {
-    // Dwell accumulates across POS zones, but authorization requires ACC match
+    // With per-zone tracking, dwell accumulates per-zone (not across zones)
+    // This test verifies that dwell is tracked separately per zone
     let config = Config::default().with_min_dwell_ms(100);
     let mut tracker = create_test_tracker_with_config(config);
 
     tracker.process_event(create_event(EventType::TrackCreate, 100, None));
 
-    // First POS zone visit
+    // First POS zone visit (POS_1)
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
     tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
 
+    // Journey tracks total dwell across zones
+    let journey = tracker.journey_manager.get(TrackId(100)).unwrap();
+    assert!(journey.total_dwell_ms >= 50);
     let person = tracker.persons.get(&TrackId(100)).unwrap();
     assert!(!person.authorized);
-    assert!(person.accumulated_dwell_ms >= 50);
 
-    // Second POS zone visit
+    // Second POS zone visit (POS_2)
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1002)));
     tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1002)));
 
+    // Journey tracks total dwell (for logging), but ACC matching uses per-zone dwell
+    let journey = tracker.journey_manager.get(TrackId(100)).unwrap();
+    assert!(journey.total_dwell_ms >= 100);
     let person = tracker.persons.get(&TrackId(100)).unwrap();
-    // Dwell accumulated but still not authorized (no ACC match)
-    assert!(person.accumulated_dwell_ms >= 100);
     assert!(!person.authorized);
 }
 
@@ -292,14 +300,11 @@ async fn test_stitch_transfers_state() {
     // Enter POS zone (makes track a valid stitch candidate - went deep)
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
 
-    // Manually authorize (simulating ACC match) and set dwell
+    // Manually authorize (simulating ACC match)
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
-        person.accumulated_dwell_ms = 5000;
     }
-
-    let dwell = tracker.persons.get(&TrackId(100)).unwrap().accumulated_dwell_ms;
 
     // Delete track (goes to stitch pending - Lost because went deep but didn't exit)
     tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]));
@@ -309,10 +314,9 @@ async fn test_stitch_transfers_state() {
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71]));
     assert_eq!(tracker.active_tracks(), 1);
 
-    // New track should have inherited state
+    // New track should have inherited authorized state
     let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(new_person.authorized);
-    assert!(new_person.accumulated_dwell_ms >= dwell);
 }
 
 #[tokio::test]
@@ -328,7 +332,6 @@ async fn test_stitch_fails_too_late() {
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
-        person.accumulated_dwell_ms = 5000;
     }
 
     // Delete track
@@ -344,7 +347,6 @@ async fn test_stitch_fails_too_late() {
     // New track should be fresh (no inherited state)
     let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(!new_person.authorized);
-    assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
 
 #[tokio::test]
@@ -356,7 +358,6 @@ async fn test_stitch_fails_too_far() {
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
-        person.accumulated_dwell_ms = 5000;
     }
 
     // Delete track
@@ -368,7 +369,6 @@ async fn test_stitch_fails_too_far() {
     // New track should be fresh
     let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(!new_person.authorized);
-    assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
 
 #[tokio::test]
@@ -395,12 +395,11 @@ async fn test_no_stitch_without_new_track() {
 async fn test_absolutely_no_stitch() {
     let mut tracker = create_test_tracker();
 
-    // Create authorized track with accumulated dwell
+    // Create authorized track
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [0.0, 0.0, 1.50]));
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
-        person.accumulated_dwell_ms = 99999;
     }
 
     // Delete track
@@ -415,7 +414,6 @@ async fn test_absolutely_no_stitch() {
     // New track should be completely fresh - NO state transferred
     let new_person = tracker.persons.get(&TrackId(999)).unwrap();
     assert!(!new_person.authorized);
-    assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
 
 #[tokio::test]

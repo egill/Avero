@@ -170,6 +170,15 @@ impl JourneyManager {
         self.pending_egress.get(&track_id).map(|p| &p.journey)
     }
 
+    /// Get total dwell time for a track (from active or pending journey)
+    ///
+    /// Returns 0 if no journey exists. Dwell is tracked via PosOccupancyState
+    /// and accumulated in journey.total_dwell_ms on zone exits.
+    #[inline]
+    pub fn get_dwell(&self, track_id: TrackId) -> u64 {
+        self.get_any(track_id).map(|j| j.total_dwell_ms).unwrap_or(0)
+    }
+
     /// End a journey and move to pending egress
     pub fn end_journey(&mut self, track_id: TrackId, outcome: JourneyOutcome) {
         if let Some(mut journey) = self.active.remove(&track_id) {

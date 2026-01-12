@@ -196,8 +196,6 @@ impl EventType {
 pub struct Person {
     pub track_id: TrackId,
     pub current_zone: Option<GeometryId>,
-    pub zone_entered_at: Option<Instant>,
-    pub accumulated_dwell_ms: u64,
     pub authorized: bool,
     pub last_position: Option<[f64; 3]>, // [x, y, height] for stitching
 }
@@ -205,14 +203,7 @@ pub struct Person {
 impl Person {
     #[inline]
     pub fn new(track_id: TrackId) -> Self {
-        Self {
-            track_id,
-            current_zone: None,
-            zone_entered_at: None,
-            accumulated_dwell_ms: 0,
-            authorized: false,
-            last_position: None,
-        }
+        Self { track_id, current_zone: None, authorized: false, last_position: None }
     }
 }
 
