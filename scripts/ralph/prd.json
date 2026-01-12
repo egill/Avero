@@ -1,177 +1,217 @@
 {
-  "branchName": "gateway/analysis-logger",
+  "branchName": "pos/per-zone-dwell",
   "userStories": [
     {
-      "id": "GA-001",
-      "title": "Create gateway-analysis binary with config + CLI",
-      "category": "diagnostics",
+      "id": "POS-001",
+      "title": "Create PosOccupancyState module",
+      "category": "core",
       "acceptanceCriteria": [
-        "New binary `gateway-analysis` builds and runs",
-        "Supports --config, --log-dir, --topics, --rotation, --site-id",
-        "Defaults align with existing config (MQTT host, ACC port, RS485 device)",
-        "Help text documents all flags"
+        "New module `src/services/pos_occupancy.rs` exists",
+        "PosState struct tracks: is_present, entry_time, exit_time, accumulated_dwell_ms",
+        "PosOccupancyState has zones: HashMap<String, HashMap<i64, PosState>>",
+        "record_entry() creates/updates entry, reopens if within grace window",
+        "record_exit() marks exit and accumulates dwell from entry_time",
+        "get_candidates() returns (track_id, dwell_ms) sorted by: present first (dwell desc), then recent exits (dwell desc)",
+        "prune_expired() removes entries where exit_time + grace < now",
+        "Configurable exit_grace_ms and min_dwell_ms"
       ],
-      "instructions": "Add src/bin/gateway_analysis.rs with CLI parsing. Reuse Config where possible and add analysis-specific defaults for log dir/rotation.",
+      "instructions": "Create the core state machine. Entry/exit timestamps use Instant. Dwell accumulates only on exit (not on re-entry reopen). get_candidates is the primary query method for ACC matching.",
       "files": [
-        "Cargo.toml",
-        "src/bin/gateway_analysis.rs",
+        "src/services/pos_occupancy.rs",
+        "src/services/mod.rs"
+      ],
+      "priority": 0,
+      "passes": true,
+      "notes": "This is the single source of truth for POS zone occupancy. No background cleanup - prune only on events."
+    },
+    {
+      "id": "POS-002",
+      "title": "Add pos_tracking config section",
+      "category": "config",
+      "acceptanceCriteria": [
+        "Config supports [pos_tracking] section",
+        "exit_grace_ms defaults to 5000",
+        "min_dwell_ms defaults to 7000",
+        "Existing [authorization].min_dwell_ms still works (fallback) with deprecation warning",
+        "Config validation fails if both are set to different values"
+      ],
+      "instructions": "Add PosTrackingConfig struct. Load from TOML. Getter methods on Config. Deprecation warning if old location used.",
+      "files": [
         "src/infra/config.rs"
       ],
       "priority": 0,
       "passes": true,
-      "notes": "Single binary preferred for correlation and simpler ops."
+      "notes": "Keep backwards compat for existing configs during transition."
     },
     {
-      "id": "GA-001a",
-      "title": "Run Mosquitto broker with auth for test capture",
-      "category": "diagnostics",
+      "id": "POS-003",
+      "title": "Remove group track filtering",
+      "category": "core",
       "acceptanceCriteria": [
-        "Mosquitto runs as the broker for the test window",
-        "Username/password auth enabled (user: avero, pass: avero)",
-        "Publishers can connect and publish successfully",
-        "Broker logs stored to file for backup"
+        "is_group_track() function still exists (for logging/metrics)",
+        "handle_track_create no longer early-returns on group tracks",
+        "handle_track_delete no longer early-returns on group tracks",
+        "handle_zone_entry no longer early-returns on group tracks",
+        "handle_zone_exit no longer early-returns on group tracks",
+        "handle_line_cross no longer early-returns on group tracks",
+        "Group tracks are now tracked, can accumulate dwell, can be authorized"
       ],
-      "instructions": "Create a Mosquitto config for the test run (listener, allow_anonymous false, password file). Document commands to start/stop and verify connectivity.",
+      "instructions": "Remove the early returns but keep the function for optional logging. Group tracks should flow through all handlers like regular tracks.",
       "files": [
-        "docs/gateway-analysis.md",
-        "config/mosquitto.conf (new)",
-        "config/mosquitto.passwd (new)"
-      ],
-      "priority": 0,
-      "passes": true,
-      "notes": "Broker replaces gateway broker during test."
-    },
-    {
-      "id": "GA-002",
-      "title": "MQTT topic logging to per-topic JSONL files",
-      "category": "logging",
-      "acceptanceCriteria": [
-        "Subscribes to configured MQTT topics (events, tracks, acc, gate, journeys, metrics)",
-        "Writes JSONL per topic: logs/mqtt/<topic>-YYYYMMDD.jsonl",
-        "Each record includes ts_recv, topic, payload_raw, and parsed fields",
-        "Logging continues when a payload is malformed"
-      ],
-      "instructions": "Reuse existing MQTT client; on message, write a JSONL record with receive timestamp and raw payload. Keep parsing best-effort.",
-      "files": [
-        "src/bin/gateway_analysis.rs",
-        "src/io/mqtt.rs",
-        "src/io/analysis_logger.rs"
-      ],
-      "priority": 0,
-      "passes": true,
-      "notes": "Must include gateway/tracks for delete/lost/stitch."
-    },
-    {
-      "id": "GA-003",
-      "title": "ACC TCP logging to dedicated JSONL",
-      "category": "logging",
-      "acceptanceCriteria": [
-        "Listens on ACC port (default 25803)",
-        "Logs raw line + parsed fields to logs/acc/acc-YYYYMMDD.jsonl",
-        "Records kiosk_ip, receipt_id (if present), and pos mapping (if known)",
-        "Config option to split per kiosk file is available"
-      ],
-      "instructions": "Reuse ACC listener; log on receive with raw line and parsed fields. Default to a single file; optional per-kiosk split via CLI/config.",
-      "files": [
-        "src/bin/gateway_analysis.rs",
-        "src/io/acc_listener.rs",
-        "src/io/analysis_logger.rs"
-      ],
-      "priority": 0,
-      "passes": true,
-      "notes": "Key for validating ACC mapping and timing."
-    },
-    {
-      "id": "GA-004",
-      "title": "RS485 logging to dedicated JSONL",
-      "category": "logging",
-      "acceptanceCriteria": [
-        "RS485 monitor runs in analysis binary",
-        "Logs raw frame + parsed door state to logs/rs485/rs485-YYYYMMDD.jsonl",
-        "Includes ts_recv and decoded fields"
-      ],
-      "instructions": "Reuse RS485 monitor code; emit JSONL per frame and per parsed state.",
-      "files": [
-        "src/bin/gateway_analysis.rs",
-        "src/io/rs485.rs",
-        "src/io/analysis_logger.rs"
+        "src/services/tracker/handlers.rs"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Required for gate timing correlation."
+      "notes": "Group tracks may now authorize and open gates. Monitor metrics after deploy."
     },
     {
-      "id": "GA-005",
-      "title": "Unified JSONL schema + log writer with rotation",
-      "category": "logging",
+      "id": "POS-004",
+      "title": "Integrate PosOccupancyState with tracker",
+      "category": "core",
       "acceptanceCriteria": [
-        "All logs use a consistent schema (ts_recv, ts_event, src, site, payload_raw, fields)",
-        "Daily rotation is default; optional size-based rotation available",
-        "Writing is non-blocking (buffered writer or channel)",
-        "Logging continues on IO errors with warnings"
+        "Tracker has pos_occupancy: PosOccupancyState field",
+        "Initialized from config in Tracker::new()",
+        "handle_zone_entry calls pos_occupancy.record_entry() for POS zones",
+        "handle_zone_exit calls pos_occupancy.record_exit() for POS zones",
+        "handle_acc_event uses pos_occupancy.get_candidates() instead of building accumulated_dwells from Person",
+        "handle_acc_event calls pos_occupancy.prune_expired() after getting candidates",
+        "ACC matching filters candidates by min_dwell_ms and picks highest dwell as primary"
       ],
-      "instructions": "Create analysis_logger module to handle file routing and rotation. Ensure per-topic file paths are deterministic.",
+      "instructions": "Wire up the new state machine. Zone entry/exit update PosOccupancyState. ACC events query it. Keep Person.current_zone updates for gate zone detection.",
       "files": [
-        "src/io/analysis_logger.rs",
-        "src/bin/gateway_analysis.rs"
+        "src/services/tracker/mod.rs",
+        "src/services/tracker/handlers.rs"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Rotation prevents runaway disk usage."
+      "passes": true,
+      "notes": "This is the main integration point. AccCollector still does IP→zone mapping."
     },
     {
-      "id": "GA-006",
-      "title": "Add periodic summary stats for data-gap detection",
-      "category": "diagnostics",
+      "id": "POS-005",
+      "title": "Simplify AccCollector",
+      "category": "cleanup",
       "acceptanceCriteria": [
-        "Writes 1-min summary rows to logs/summary/summary-YYYYMMDD.jsonl",
-        "Tracks counts: zone_entry/exit, track_create/delete/lost, acc received/matched",
-        "Highlights imbalances (e.g., entries without exits)",
-        "Summary includes time bucket and site"
+        "pos_sessions HashMap removed",
+        "recent_exits HashMap removed",
+        "record_pos_session_entry() removed",
+        "record_pos_session_exit() removed",
+        "prune_old_sessions() removed",
+        "tracks_present_at_zone() removed",
+        "find_recent_exit_match() removed",
+        "process_acc_by_pos() delegates to tracker's PosOccupancyState",
+        "IP→zone mapping (ip_to_pos) retained",
+        "Metrics and logging retained"
       ],
-      "instructions": "Maintain counters in memory; flush once per minute.",
+      "instructions": "Gut the session tracking code. AccCollector becomes a thin wrapper that resolves IP to zone and delegates to PosOccupancyState.",
       "files": [
-        "src/bin/gateway_analysis.rs",
-        "src/io/analysis_logger.rs"
+        "src/services/acc_collector.rs"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Major code deletion. Test thoroughly."
+    },
+    {
+      "id": "POS-006",
+      "title": "Simplify Person struct",
+      "category": "cleanup",
+      "acceptanceCriteria": [
+        "zone_entered_at: Option<Instant> field removed from Person",
+        "accumulated_dwell_ms: u64 field removed from Person",
+        "current_zone: Option<GeometryId> retained (for gate zone detection)",
+        "authorized: bool retained",
+        "All Person construction sites updated",
+        "No compiler errors or warnings"
+      ],
+      "instructions": "Remove the dwell-related fields. Update Person::new() and any code that reads these fields. Dwell is now tracked only in PosOccupancyState.",
+      "files": [
+        "src/domain/types.rs",
+        "src/services/tracker/handlers.rs"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Search for zone_entered_at and accumulated_dwell_ms usages before removing."
+    },
+    {
+      "id": "POS-007",
+      "title": "Verify journey logging captures POS events",
+      "category": "logging",
+      "acceptanceCriteria": [
+        "Journey events include POS zone entries with timestamp",
+        "Journey events include POS zone exits with timestamp and dwell_ms",
+        "Journey events include ACC match with track_id, zone, and dwell_ms",
+        "Journey authorization flag set correctly",
+        "Journey persists correctly on track delete/exit line cross"
+      ],
+      "instructions": "Review journey logging in handlers.rs. Ensure dwell_ms is passed from PosOccupancyState to journey events. Update JourneyManager calls if needed.",
+      "files": [
+        "src/services/tracker/handlers.rs",
+        "src/services/journey_manager.rs"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "Quick sanity checks without offline analysis."
+      "notes": "May require passing dwell from get_candidates result to journey logging."
     },
     {
-      "id": "GA-007",
-      "title": "Add runbook + sample analysis queries",
-      "category": "docs",
+      "id": "POS-008",
+      "title": "Unit tests for PosOccupancyState",
+      "category": "tests",
       "acceptanceCriteria": [
-        "Docs explain how to run the binary and where logs go",
-        "Includes example jq/rg commands to inspect ACC matching gaps",
-        "Explains how to correlate ACC, tracks, and POS sessions"
+        "Test entry creates new state with is_present=true",
+        "Test exit sets is_present=false and accumulates dwell",
+        "Test re-entry within grace reopens (is_present=true, exit_time cleared)",
+        "Test re-entry after grace creates new session",
+        "Test get_candidates returns present tracks sorted by dwell desc",
+        "Test get_candidates returns recent exits after present tracks",
+        "Test get_candidates excludes exits beyond grace window",
+        "Test prune_expired removes only expired entries",
+        "Boundary tests: grace window at 4999ms (pass) vs 5001ms (fail)",
+        "Boundary tests: min_dwell at 6999ms (fail) vs 7001ms (pass)"
       ],
-      "instructions": "Document minimal operational steps and example analysis commands.",
+      "instructions": "Create src/services/pos_occupancy/tests.rs or inline #[cfg(test)] module. Use deterministic timestamps (mock Instant or use epoch_ms).",
       "files": [
-        "docs/gateway-analysis.md"
+        "src/services/pos_occupancy.rs"
       ],
-      "priority": 2,
+      "priority": 3,
       "passes": false,
-      "notes": "Keeps future investigations repeatable."
+      "notes": "Critical time boundaries must be tested. See CLAUDE.md testing guidelines."
     },
     {
-      "id": "GA-008",
-      "title": "Add smoke tests for RS485, Xovis MQTT, and ACC logging",
-      "category": "diagnostics",
+      "id": "POS-009",
+      "title": "Update tracker tests for per-zone semantics",
+      "category": "tests",
       "acceptanceCriteria": [
-        "Runbook includes a 60s smoke test for RS485 on /dev/ttyAMA4 @ 19200 baud",
-        "Runbook includes MQTT/Xovis smoke test (receive at least one message on gateway/events or gateway/tracks)",
-        "Runbook includes ACC smoke test (receive at least one ACC line)",
-        "Failures are clearly indicated with next-step guidance"
+        "Existing dwell tests updated to expect per-zone behavior",
+        "Test: customer at POS_1 (3s) then POS_2 (5s) does NOT qualify for ACC at POS_1",
+        "Test: customer at POS_1 (8s) qualifies for ACC at POS_1 only",
+        "Test: ACC arrives 4s after exit, matches within grace window",
+        "Test: ACC arrives 6s after exit, no match (beyond grace)",
+        "Test: multiple tracks in POS, ACC picks highest dwell as primary"
       ],
-      "instructions": "Document quick smoke-test steps and expected outputs, including where to check the JSONL logs for each stream.",
+      "instructions": "Update src/services/tracker/tests.rs. Remove tests for global dwell. Add tests that verify per-zone isolation.",
       "files": [
-        "docs/gateway-analysis.md"
+        "src/services/tracker/tests.rs"
       ],
-      "priority": 1,
+      "priority": 3,
       "passes": false,
-      "notes": "Ensures we validate data capture before long runs."
+      "notes": "These tests validate the core behavioral change."
+    },
+    {
+      "id": "POS-010",
+      "title": "Add group track tests",
+      "category": "tests",
+      "acceptanceCriteria": [
+        "Test: group track (0x80000000 bit set) enters POS zone, tracked in PosOccupancyState",
+        "Test: group track accumulates dwell and qualifies for ACC",
+        "Test: group track authorized and at gate zone triggers gate open",
+        "Test: group track journey logged correctly"
+      ],
+      "instructions": "Add tests in tracker/tests.rs for group track behavior. Use track_id with 0x80000000 bit set.",
+      "files": [
+        "src/services/tracker/tests.rs"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "New behavior - group tracks were previously filtered. Need test coverage."
     }
   ]
 }
