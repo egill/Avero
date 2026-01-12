@@ -598,3 +598,58 @@ async fn test_acc_picks_highest_dwell_as_primary() {
     assert!(tracker.journey_manager.get(TrackId(100)).unwrap().acc_matched);
     assert!(tracker.journey_manager.get(TrackId(200)).unwrap().acc_matched);
 }
+
+// =============================================================================
+// Group Track Tests (POS-010)
+// =============================================================================
+// Group tracks have the 0x80000000 bit set and were previously filtered.
+// Now they flow through all handlers like regular tracks.
+
+const XOVIS_GROUP_BIT: i64 = 0x80000000;
+
+fn group_track_id(base_id: i64) -> i64 {
+    base_id | XOVIS_GROUP_BIT
+}
+
+#[tokio::test]
+async fn test_group_track_is_tracked() {
+    // Group track (0x80000000 bit set) is tracked as a regular person
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    let gid = group_track_id(100);
+    tracker.process_event(create_event(EventType::TrackCreate, gid, None));
+    tracker.process_event(create_event(EventType::ZoneEntry, gid, Some(1001)));
+
+    assert_eq!(tracker.active_tracks(), 1);
+    assert!(tracker.persons.contains_key(&TrackId(gid)));
+}
+
+#[tokio::test]
+async fn test_group_track_full_journey() {
+    // Group track completes full journey: dwell -> ACC match -> gate open
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    let gid = group_track_id(100);
+    tracker.process_event(create_event(EventType::TrackCreate, gid, None));
+    visit_pos_zone(&mut tracker, gid, 1001, 100).await;
+    enter_gate_zone(&mut tracker, gid);
+    send_acc_event(&mut tracker, "127.0.0.1");
+
+    // Verify authorization
+    assert!(is_authorized(&tracker, gid));
+
+    // Verify gate command was sent
+    let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
+    assert_eq!(summary.gate_commands_sent, 1);
+
+    // Verify journey state
+    let journey = tracker.journey_manager.get(TrackId(gid)).unwrap();
+    assert!(journey.total_dwell_ms >= 50);
+    assert!(journey.authorized);
+    assert!(journey.acc_matched);
+    assert!(journey.gate_cmd_at.is_some());
+    assert!(journey.tids.contains(&TrackId(gid)));
+    assert!(journey.events.len() >= 4);
+}
