@@ -28,6 +28,7 @@ defmodule AveroCommandWeb.DashboardHook do
   defp module_to_path(AveroCommandWeb.IncidentExplorerLive), do: "/explorer"
   defp module_to_path(AveroCommandWeb.ExplorerLive), do: "/debug"
   defp module_to_path(AveroCommandWeb.ConfigLive), do: "/config"
+  defp module_to_path(AveroCommandWeb.AccLive), do: "/acc"
   defp module_to_path(_), do: "/"
 
   # Handle dashboard-related events

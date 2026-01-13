@@ -30,11 +30,16 @@ Add ACC (payment terminal) monitoring to the command app. This creates an ACC en
   - Routes acc.received, acc.matched, acc.unmatched to ACC GenServer
   - Extracts POS zone from event for entity lookup
 
-### Phase 3: Dashboard Integration - FUTURE
-- [ ] Add ACC monitoring widget to dashboard LiveView
-  - Show active POS zones
-  - Display received/matched/unmatched counts
+### Phase 3: Dashboard Integration - DONE
+- [x] Add ACC monitoring LiveView (`command/lib/avero_command_web/live/acc_live.ex`)
+  - Dedicated /acc route with navigation link in sidebar
+  - Show active POS zones with health status (Active/Stale/Offline)
+  - Display received/matched/unmatched counts per zone
+  - Show match rate percentage
   - Show time since last payment per zone
+  - Summary statistics across all zones
+  - Auto-refresh every 5 seconds
+  - Dark mode support
 
 ### Phase 4: Quality Gates - DONE
 - [x] Verify build (`mix compile --warnings-as-errors`)
@@ -43,3 +48,4 @@ Add ACC (payment terminal) monitoring to the command app. This creates an ACC en
 ## Learnings
 - Elixir underscore prefix on function names does NOT suppress unused warnings (unlike variables)
 - Dashboard currently redirects to Grafana iframe, so many components are unused (removed dead code)
+- UIComponents imports `empty_state/1` which conflicts with local functions - rename local versions to avoid collision

@@ -50,6 +50,9 @@ defmodule AveroCommandWeb.Router do
       # Debug view (raw events - formerly Explorer)
       live "/debug", ExplorerLive, :index
 
+      # ACC monitoring
+      live "/acc", AccLive, :index
+
       # Configuration
       live "/config", ConfigLive, :index
     end
