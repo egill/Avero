@@ -1,0 +1,70 @@
+{
+  "projectName": "Fix Dashboard in command.e18n.net",
+  "branchName": "feature/fix-dashboard-in-commande18nnet",
+  "overview": "Fix bugs and improve stability",
+  "audience": "End users of the application",
+  "scope": "Single component or module",
+  "successCriteria": "Feature works as specified in acceptance criteria",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix the dashboard on command.e18n.net, it's not working",
+      "category": "feat",
+      "priority": 1,
+      "acceptanceCriteria": [
+        "Fix the dashboard on command.e18n.net, it's not working is implemented",
+        "Tests pass",
+        "Documentation updated",
+        "All validation commands in AGENTS.md pass"
+      ],
+      "files": [],
+      "instructions": "Implement Fix the dashboard on command.e18n.net, it's not working according to the specifications.",
+      "passes": false
+    },
+    {
+      "id": "US-002",
+      "title": "Make sure all components are connected correctly",
+      "category": "feat",
+      "priority": 2,
+      "acceptanceCriteria": [
+        "Make sure all components are connected correctly is implemented",
+        "Tests pass",
+        "Documentation updated",
+        "All validation commands in AGENTS.md pass"
+      ],
+      "files": [],
+      "instructions": "Implement Make sure all components are connected correctly according to the specifications.",
+      "passes": false
+    },
+    {
+      "id": "US-003",
+      "title": "Make the POS occupancy view work in it",
+      "category": "feat",
+      "priority": 3,
+      "acceptanceCriteria": [
+        "Make the POS occupancy view work in it is implemented",
+        "Tests pass",
+        "Documentation updated",
+        "All validation commands in AGENTS.md pass"
+      ],
+      "files": [],
+      "instructions": "Implement Make the POS occupancy view work in it according to the specifications.",
+      "passes": false
+    },
+    {
+      "id": "US-004",
+      "title": "Make the live POS view (showing how many people are present in each zone, if they've paid etc)",
+      "category": "feat",
+      "priority": 3,
+      "acceptanceCriteria": [
+        "Make the live POS view (showing how many people are present in each zone, if they've paid etc) is implemented",
+        "Tests pass",
+        "Documentation updated",
+        "All validation commands in AGENTS.md pass"
+      ],
+      "files": [],
+      "instructions": "Implement Make the live POS view (showing how many people are present in each zone, if they've paid etc) according to the specifications.",
+      "passes": false
+    }
+  ]
+}
