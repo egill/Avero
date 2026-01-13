@@ -1,13 +1,135 @@
-Gateway Analysis Logger Progress
+POS Tracking Migration Progress
+
+Goal: 100% ACC match rate via per-zone dwell tracking
+Reference: POS_MIGRATION_PLAN.md for architecture diagrams
 
 Status legend: [ ] not started, [~] in progress, [x] done
 
-[ ] GA-001 Create gateway-analysis binary with config + CLI
-[ ] GA-001a Run Mosquitto broker with auth for test capture
-[ ] GA-002 MQTT topic logging to per-topic JSONL files
-[ ] GA-003 ACC TCP logging to dedicated JSONL
-[ ] GA-004 RS485 logging to dedicated JSONL
-[ ] GA-005 Unified JSONL schema + log writer with rotation
-[ ] GA-006 Add periodic summary stats for data-gap detection
-[ ] GA-007 Add runbook + sample analysis queries
-[ ] GA-008 Add smoke tests for RS485, Xovis MQTT, and ACC logging
+[x] POS-001 Create PosOccupancyState module
+[x] POS-002 Add pos_tracking config section
+[x] POS-003 Remove group track filtering
+[x] POS-004 Integrate PosOccupancyState with tracker
+[x] POS-005 Simplify AccCollector
+[x] POS-006 Simplify Person struct
+[x] POS-007 Verify journey logging captures POS events
+[x] POS-008 Unit tests for PosOccupancyState
+[x] POS-009 Update tracker tests for per-zone semantics
+[x] POS-010 Add group track tests
+
+---
+
+## Codebase Patterns
+
+- **CLI args**: Use `clap` with `#[derive(Parser)]` for binary CLIs (see main.rs, gateway_analysis.rs)
+- **Config reuse**: Import `gateway_poc::infra::Config` and call `Config::load_from_path()` for TOML settings
+- **Tracing setup**: Use `tracing_subscriber::fmt()` with `UtcTime::rfc_3339()` and `EnvFilter`
+- **Small enums**: Add `#[derive(Copy)]` when all fields are `Copy` types (reduces `.clone()` calls)
+- **Entry API**: Use `HashMap::entry()` to avoid double lookup on insert/update
+- **Instant for timing**: Use `std::time::Instant` for elapsed time tracking, not timestamps
+
+---
+
+## Context
+
+This migration replaces global dwell tracking with per-zone POS occupancy:
+
+**Before**: Person.accumulated_dwell_ms tracks total time across ALL POS zones. Customer at POS_1 (3s) + POS_2 (5s) = 8s global dwell qualifies for any ACC.
+
+**After**: PosOccupancyState tracks dwell per zone. Same customer has 3s at POS_1, 5s at POS_2 - neither qualifies alone. ACC from POS_1 only matches tracks with sufficient POS_1 dwell.
+
+Key files:
+- `src/services/acc_collector.rs` - current session tracking (to be gutted)
+- `src/services/tracker/handlers.rs` - zone entry/exit/ACC handlers
+- `src/domain/types.rs` - Person struct with dwell fields (to be simplified)
+
+---
+
+## 2026-01-12 - POS-001 - Create PosOccupancyState module
+- Files changed: src/services/pos_occupancy.rs (new), src/services/mod.rs
+- What was done: Created per-zone POS occupancy state machine with PosState struct tracking is_present, entry_time, exit_time, accumulated_dwell_ms. Implemented record_entry(), record_exit(), get_candidates(), prune_expired() methods. Added 15 unit tests including boundary tests for grace window (4999/5001ms) and min_dwell (6999/7001ms).
+- **Learnings:** Use `std::time::Instant` for elapsed time calculations with Duration arithmetic. Vec::new() preferred over vec![] for empty vectors. Use Option::map().unwrap_or() for cleaner conditional logic.
+---
+
+## 2026-01-12 - POS-002 - Add pos_tracking config section
+- Files changed: src/infra/config.rs
+- What was done: Added PosTrackingConfig struct with exit_grace_ms (default 5000) and min_dwell_ms (Option<u64>). Added pos_exit_grace_ms getter to Config. Implemented backwards compatibility: falls back to [authorization].min_dwell_ms with deprecation warning; validation error if both set to different values. Added test for PosTrackingConfig defaults.
+- **Learnings:** Use `#[serde(default)]` at struct level instead of per-field default functions when you have a manual `Default` impl. Define default values as constants (e.g., `const DEFAULT_POS_EXIT_GRACE_MS: u64 = 5000`) for single source of truth.
+---
+
+## 2026-01-12 - POS-003 - Remove group track filtering
+- Files changed: src/services/tracker/handlers.rs
+- What was done: Removed early returns for group tracks (0x80000000 bit set) in handle_track_create, handle_track_delete, handle_zone_entry, handle_zone_exit, and handle_line_cross. Kept is_group_track() function with #[allow(dead_code)] for future metrics/logging use.
+- **Learnings:** Use #[allow(dead_code)] to retain utility functions for future use without clippy warnings.
+---
+
+## 2026-01-12 - POS-004 - Integrate PosOccupancyState with tracker
+- Files changed: src/services/tracker/mod.rs, src/services/tracker/handlers.rs
+- What was done: Verified PosOccupancyState is fully integrated with tracker. Tracker has pos_occupancy field initialized from config. handle_zone_entry calls record_entry() for POS zones. handle_zone_exit calls record_exit() for POS zones. handle_acc_event uses get_candidates() from PosOccupancyState, filters by min_dwell_ms, picks highest dwell as primary, and calls prune_expired() after getting candidates. Legacy AccCollector calls retained (marked for removal in POS-005).
+- **Learnings:** Integration was already complete from previous work. When verifying acceptance criteria, check both the new system (PosOccupancyState) and legacy code coexistence. Comments like "to be removed in POS-005" help track planned cleanup.
+---
+
+## 2026-01-12 - POS-005 - Simplify AccCollector
+- Files changed: src/services/acc_collector.rs, src/services/tracker/handlers.rs, src/services/tracker/mod.rs
+- What was done: Gutted AccCollector to only retain IP→POS zone mapping (pos_for_ip()). Removed pos_sessions, recent_exits, record_pos_session_entry(), record_pos_session_exit(), prune_old_sessions(), tracks_present_at_zone(), find_recent_exit_match(), process_acc(), process_acc_by_pos(). All ACC matching now uses PosOccupancyState in tracker. Refactored handle_acc_event with helper methods check_late_acc_and_open_gate() and publish_unmatched_acc_event().
+- **Learnings:** Large code deletions are satisfying when the replacement (PosOccupancyState) is already working. Helper methods improve readability in long handler functions. Early returns simplify control flow vs deep nesting.
+---
+
+## 2026-01-13 - POS-006 - Simplify Person struct
+- Files changed: src/domain/types.rs, src/services/tracker/handlers.rs, src/services/stitcher.rs, src/services/tracker/tests.rs, src/services/pos_occupancy.rs, src/services/journey_manager.rs
+- What was done:
+  - Removed zone_entered_at and accumulated_dwell_ms from Person struct (4 fields remain: track_id, current_zone, authorized, last_position)
+  - Changed record_exit() to return Option<(session_dwell_ms, zone_total_dwell_ms)> for handlers to update journey
+  - Updated handlers.rs: dwell now read from journey.total_dwell_ms (tracked via PosOccupancyState)
+  - Journey.total_dwell_ms accumulates across ALL zones (session_dwell added on each exit)
+  - Added JourneyManager.get_dwell() helper method
+  - Stitcher now logs without dwell_ms; PendingTrackInfo.dwell_ms hardcoded to 0
+  - Updated tracker tests to not assert on Person.accumulated_dwell_ms
+- **Learnings:** Person struct simplification required coordinating changes across types.rs, handlers.rs, stitcher.rs, tests.rs, and pos_occupancy.rs. The key insight was making record_exit() return dwell info so handlers can update journey.total_dwell_ms incrementally. Journey tracks total dwell across all zones for logging; PosOccupancyState tracks per-zone dwell for ACC matching.
+---
+
+## 2026-01-13 - POS-007 - Verify journey logging captures POS events
+- Files changed: src/services/tracker/handlers.rs
+- What was done:
+  - Verified POS zone entry/exit events are logged correctly with timestamps and dwell_ms
+  - Added dwell_ms to ACC match journey events (now includes `dwell={dwell_ms}` in extra field)
+  - Changed ACC loop to iterate over `qualified` vec to access dwell alongside track_id
+  - Verified authorization flag set correctly on ACC match
+  - Verified journey persistence on track delete and exit line cross
+- **Learnings:** When iterating over tuples `Vec<(TrackId, u64)>`, use `for &(track_id, dwell_ms) in &vec` to destructure while borrowing. The `qualified` vector already had the dwell info needed - just needed to access it in the loop.
+---
+
+## 2026-01-13 - POS-008 - Unit tests for PosOccupancyState
+- Files changed: None (tests already existed)
+- What was done:
+  - Verified all 15 unit tests already exist in src/services/pos_occupancy.rs
+  - Tests cover: entry creates state, exit accumulates dwell, re-entry within grace reopens, re-entry after grace creates new session, get_candidates ordering (present first by dwell, then recent exits by dwell), prune_expired removes only expired
+  - Boundary tests: grace window 4999ms (pass) vs 5001ms (fail), min_dwell 6999ms (fail) vs 7001ms (pass)
+  - Additional tests: multiple zones isolated, same track multiple zones, accumulated dwell across sessions
+- **Learnings:** Always check if acceptance criteria are already satisfied before implementing. The POS-001 story included comprehensive test coverage that satisfied POS-008.
+---
+
+## 2026-01-13 - POS-009 - Update tracker tests for per-zone semantics
+- Files changed: src/services/tracker/tests.rs
+- What was done:
+  - Added 6 new tests validating per-zone dwell semantics
+  - test_per_zone_dwell_does_not_combine_across_zones: verifies 3s at POS_1 + 5s at POS_2 doesn't qualify (neither reaches 7s threshold alone)
+  - test_per_zone_dwell_qualifies_at_correct_zone_only: 8s at POS_1 qualifies for ACC at POS_1, opens gate
+  - test_per_zone_acc_from_wrong_zone_does_not_match: dwell at POS_1 doesn't help ACC from POS_2
+  - test_acc_within_grace_window_matches: ACC 4s after exit matches (within 5s grace)
+  - test_acc_beyond_grace_window_does_not_match: ACC 6s after exit fails (beyond grace)
+  - test_acc_picks_highest_dwell_as_primary: all tracks in zone authorized on ACC
+  - Added helper functions: visit_pos_zone(), is_authorized(), send_acc_event(), enter_gate_zone()
+  - Added acc_ip_mapping_multi_zone() for tests needing multiple POS zones
+- **Learnings:** Helper functions reduce test boilerplate significantly - visit_pos_zone() encapsulates the entry/sleep/exit pattern. Use map_or(false, ...) for Option<T> boolean checks.
+---
+
+## 2026-01-13 - POS-010 - Add group track tests
+- Files changed: src/services/tracker/tests.rs
+- What was done:
+  - Added 2 tests verifying group tracks (0x80000000 bit set) are now processed like regular tracks
+  - test_group_track_is_tracked: verifies group track is tracked as a person
+  - test_group_track_full_journey: verifies full journey flow (dwell, ACC match, gate open, journey state)
+  - Added XOVIS_GROUP_BIT constant and group_track_id() helper function
+- **Learnings:** Tests that progressively build on each other can often be consolidated into a single comprehensive test. The original 4 tests (basic tracking, dwell+ACC, gate open, journey logging) were combined into 2 focused tests with clear purposes.
+---
+

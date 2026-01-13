@@ -80,7 +80,6 @@ impl Stitcher {
         debug!(
             track_id = %person.track_id,
             authorized = %person.authorized,
-            dwell_ms = %person.accumulated_dwell_ms,
             last_zone = ?last_zone,
             "pending_stitch_added"
         );
@@ -202,11 +201,15 @@ impl Stitcher {
             // Track best match: prefer same-zone matches, then closest distance
             let dominated = match &best_match {
                 None => false,
-                Some((_, _, true)) if !same_zone => true, // best is same-zone, this isn't
+                // Current best is same-zone, this candidate isn't - best wins
+                Some((_, _, true)) if !same_zone => true,
                 Some((_, best_dist, best_same)) => {
-                    // Keep best if it has same_zone advantage OR is closer with equal status
-                    *best_same && !same_zone
-                        || (same_zone == *best_same && *best_dist <= distance_cm)
+                    // Current candidate loses if:
+                    // - Best has same_zone advantage and candidate doesn't
+                    // - Equal same_zone status but best is closer or equal distance
+                    let best_has_zone_advantage = *best_same && !same_zone;
+                    let best_is_closer = same_zone == *best_same && *best_dist <= distance_cm;
+                    best_has_zone_advantage || best_is_closer
                 }
             };
             if !dominated {
@@ -248,7 +251,6 @@ impl Stitcher {
                 info!(
                     track_id = %p.person.track_id,
                     authorized = %p.person.authorized,
-                    dwell_ms = %p.person.accumulated_dwell_ms,
                     last_zone = ?p.last_zone,
                     age_ms = %age_ms,
                     "stitch_expired_lost"
@@ -283,7 +285,7 @@ impl Stitcher {
             .map(|p| PendingTrackInfo {
                 track_id: p.person.track_id,
                 last_zone: p.last_zone.clone(),
-                dwell_ms: p.person.accumulated_dwell_ms,
+                dwell_ms: 0, // Dwell now tracked in PosOccupancyState, not Person
                 authorized: p.person.authorized,
                 pending_ms: now.duration_since(p.deleted_at).as_millis() as u64,
             })
@@ -302,7 +304,6 @@ mod tests {
 
         let mut person = Person::new(TrackId(100));
         person.authorized = true;
-        person.accumulated_dwell_ms = 5000;
 
         // Add pending at position [1.0, 1.0, 1.7]
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
@@ -314,7 +315,6 @@ mod tests {
         let stitch = result.unwrap();
         assert_eq!(stitch.person.track_id, TrackId(100));
         assert!(stitch.person.authorized);
-        assert_eq!(stitch.person.accumulated_dwell_ms, 5000);
         assert_eq!(stitch.distance_cm, 50);
         assert!(stitch.time_ms < 100); // Should be near-instant in test
     }
@@ -404,7 +404,6 @@ mod tests {
 
         let mut person = Person::new(TrackId(100));
         person.authorized = true;
-        person.accumulated_dwell_ms = 99999;
 
         // Pending at one corner of the store
         stitcher.add_pending(person, Some([0.0, 0.0, 1.50]), Some("POS_2".to_string()));
@@ -425,14 +424,13 @@ mod tests {
 
         let mut person = Person::new(TrackId(100));
         person.authorized = true;
-        person.accumulated_dwell_ms = 5000;
         stitcher.add_pending(person, Some([1.0, 1.0, 1.70]), Some("POS_1".to_string()));
 
         let info = stitcher.get_pending_info();
         assert_eq!(info.len(), 1);
         assert_eq!(info[0].track_id, TrackId(100));
         assert_eq!(info[0].last_zone, Some("POS_1".to_string()));
-        assert_eq!(info[0].dwell_ms, 5000);
+        assert_eq!(info[0].dwell_ms, 0); // Dwell now tracked in PosOccupancyState
         assert!(info[0].authorized);
     }
 

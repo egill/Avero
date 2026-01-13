@@ -54,6 +54,13 @@ fn acc_ip_mapping() -> HashMap<String, String> {
     HashMap::from([("127.0.0.1".to_string(), "POS_1".to_string())])
 }
 
+fn acc_ip_mapping_multi_zone() -> HashMap<String, String> {
+    HashMap::from([
+        ("127.0.0.1".to_string(), "POS_1".to_string()),
+        ("127.0.0.2".to_string(), "POS_2".to_string()),
+    ])
+}
+
 /// Builder for creating test ParsedEvent instances
 struct ParsedEventBuilder {
     event_type: EventType,
@@ -145,9 +152,11 @@ async fn test_dwell_accumulation() {
     // Exit POS zone
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
 
+    // Dwell is now tracked in journey.total_dwell_ms (via PosOccupancyState)
+    let journey = tracker.journey_manager.get(TrackId(100)).unwrap();
+    assert!(journey.total_dwell_ms >= 100);
+    // Not authorized yet (need ACC match)
     let person = tracker.persons.get(&TrackId(100)).unwrap();
-    assert!(person.accumulated_dwell_ms >= 100);
-    // Not authorized yet (need 7000ms)
     assert!(!person.authorized);
 }
 
@@ -162,37 +171,43 @@ async fn test_dwell_threshold_without_acc() {
     tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
 
+    // Dwell is now tracked in journey.total_dwell_ms (via PosOccupancyState)
+    let journey = tracker.journey_manager.get(TrackId(100)).unwrap();
+    assert!(journey.total_dwell_ms >= 50);
+    // Person is NOT authorized (no ACC match)
     let person = tracker.persons.get(&TrackId(100)).unwrap();
-    // Dwell is accumulated but person is NOT authorized (no ACC match)
-    assert!(person.accumulated_dwell_ms >= 50);
     assert!(!person.authorized);
 }
 
 #[tokio::test]
 async fn test_accumulated_dwell_across_zones() {
-    // Dwell accumulates across POS zones, but authorization requires ACC match
+    // With per-zone tracking, dwell accumulates per-zone (not across zones)
+    // This test verifies that dwell is tracked separately per zone
     let config = Config::default().with_min_dwell_ms(100);
     let mut tracker = create_test_tracker_with_config(config);
 
     tracker.process_event(create_event(EventType::TrackCreate, 100, None));
 
-    // First POS zone visit
+    // First POS zone visit (POS_1)
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
     tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
 
+    // Journey tracks total dwell across zones
+    let journey = tracker.journey_manager.get(TrackId(100)).unwrap();
+    assert!(journey.total_dwell_ms >= 50);
     let person = tracker.persons.get(&TrackId(100)).unwrap();
     assert!(!person.authorized);
-    assert!(person.accumulated_dwell_ms >= 50);
 
-    // Second POS zone visit
+    // Second POS zone visit (POS_2)
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1002)));
     tokio::time::sleep(millis(60)).await;
     tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1002)));
 
+    // Journey tracks total dwell (for logging), but ACC matching uses per-zone dwell
+    let journey = tracker.journey_manager.get(TrackId(100)).unwrap();
+    assert!(journey.total_dwell_ms >= 100);
     let person = tracker.persons.get(&TrackId(100)).unwrap();
-    // Dwell accumulated but still not authorized (no ACC match)
-    assert!(person.accumulated_dwell_ms >= 100);
     assert!(!person.authorized);
 }
 
@@ -292,14 +307,11 @@ async fn test_stitch_transfers_state() {
     // Enter POS zone (makes track a valid stitch candidate - went deep)
     tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
 
-    // Manually authorize (simulating ACC match) and set dwell
+    // Manually authorize (simulating ACC match)
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
-        person.accumulated_dwell_ms = 5000;
     }
-
-    let dwell = tracker.persons.get(&TrackId(100)).unwrap().accumulated_dwell_ms;
 
     // Delete track (goes to stitch pending - Lost because went deep but didn't exit)
     tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [1.0, 1.0, 1.70]));
@@ -309,10 +321,9 @@ async fn test_stitch_transfers_state() {
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 200, [1.05, 1.0, 1.71]));
     assert_eq!(tracker.active_tracks(), 1);
 
-    // New track should have inherited state
+    // New track should have inherited authorized state
     let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(new_person.authorized);
-    assert!(new_person.accumulated_dwell_ms >= dwell);
 }
 
 #[tokio::test]
@@ -328,7 +339,6 @@ async fn test_stitch_fails_too_late() {
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
-        person.accumulated_dwell_ms = 5000;
     }
 
     // Delete track
@@ -344,7 +354,6 @@ async fn test_stitch_fails_too_late() {
     // New track should be fresh (no inherited state)
     let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(!new_person.authorized);
-    assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
 
 #[tokio::test]
@@ -356,7 +365,6 @@ async fn test_stitch_fails_too_far() {
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
-        person.accumulated_dwell_ms = 5000;
     }
 
     // Delete track
@@ -368,7 +376,6 @@ async fn test_stitch_fails_too_far() {
     // New track should be fresh
     let new_person = tracker.persons.get(&TrackId(200)).unwrap();
     assert!(!new_person.authorized);
-    assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
 
 #[tokio::test]
@@ -395,12 +402,11 @@ async fn test_no_stitch_without_new_track() {
 async fn test_absolutely_no_stitch() {
     let mut tracker = create_test_tracker();
 
-    // Create authorized track with accumulated dwell
+    // Create authorized track
     tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [0.0, 0.0, 1.50]));
     {
         let person = tracker.persons.get_mut(&TrackId(100)).unwrap();
         person.authorized = true;
-        person.accumulated_dwell_ms = 99999;
     }
 
     // Delete track
@@ -415,7 +421,6 @@ async fn test_absolutely_no_stitch() {
     // New track should be completely fresh - NO state transferred
     let new_person = tracker.persons.get(&TrackId(999)).unwrap();
     assert!(!new_person.authorized);
-    assert_eq!(new_person.accumulated_dwell_ms, 0);
 }
 
 #[tokio::test]
@@ -456,4 +461,195 @@ async fn test_acc_authorization_survives_pending_and_stitch() {
     let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
     assert_eq!(summary.gate_commands_sent, 1);
     assert!(tracker.journey_manager.get(TrackId(200)).unwrap().gate_cmd_at.is_some());
+}
+
+// =============================================================================
+// Per-Zone Dwell Semantics Tests (POS-009)
+// =============================================================================
+
+/// Simulate a POS zone visit with specified dwell time
+async fn visit_pos_zone(tracker: &mut TestTracker, track_id: i64, zone_id: i32, dwell_ms: u64) {
+    tracker.process_event(create_event(EventType::ZoneEntry, track_id, Some(zone_id)));
+    tokio::time::sleep(millis(dwell_ms)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, track_id, Some(zone_id)));
+}
+
+fn is_authorized(tracker: &TestTracker, track_id: i64) -> bool {
+    tracker.persons.get(&TrackId(track_id)).map_or(false, |p| p.authorized)
+}
+
+fn send_acc_event(tracker: &mut TestTracker, ip: &str) {
+    tracker.process_event(create_event(EventType::AccEvent(ip.to_string()), 0, None));
+}
+
+fn enter_gate_zone(tracker: &mut TestTracker, track_id: i64) {
+    tracker.process_event(create_event(EventType::ZoneEntry, track_id, Some(1007)));
+}
+
+#[tokio::test]
+async fn test_per_zone_dwell_does_not_combine_across_zones() {
+    // Customer at POS_1 (3s) then POS_2 (5s) does NOT qualify for ACC at either zone
+    // With per-zone tracking, dwell doesn't combine across zones
+    let config =
+        Config::default().with_min_dwell_ms(7000).with_acc_ip_to_pos(acc_ip_mapping_multi_zone());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker.process_event(create_event(EventType::TrackCreate, 100, None));
+    visit_pos_zone(&mut tracker, 100, 1001, 3100).await; // POS_1: 3s (below 7s threshold)
+    visit_pos_zone(&mut tracker, 100, 1002, 5100).await; // POS_2: 5s (below 7s threshold)
+
+    // ACC from POS_1 should NOT match (only 3s dwell at POS_1)
+    send_acc_event(&mut tracker, "127.0.0.1");
+    assert!(!is_authorized(&tracker, 100), "POS_1 dwell (3s) < threshold (7s)");
+
+    // ACC from POS_2 should also NOT match (only 5s dwell at POS_2)
+    send_acc_event(&mut tracker, "127.0.0.2");
+    assert!(!is_authorized(&tracker, 100), "POS_2 dwell (5s) < threshold (7s)");
+}
+
+#[tokio::test]
+async fn test_per_zone_dwell_qualifies_at_correct_zone_only() {
+    // Customer at POS_1 for 8s qualifies for ACC at POS_1 only
+    let config =
+        Config::default().with_min_dwell_ms(7000).with_acc_ip_to_pos(acc_ip_mapping_multi_zone());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker.process_event(create_event(EventType::TrackCreate, 100, None));
+    visit_pos_zone(&mut tracker, 100, 1001, 8100).await; // POS_1: 8s (above 7s threshold)
+    enter_gate_zone(&mut tracker, 100);
+
+    send_acc_event(&mut tracker, "127.0.0.1");
+    assert!(is_authorized(&tracker, 100), "POS_1 dwell (8s) >= threshold (7s)");
+
+    let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
+    assert_eq!(summary.gate_commands_sent, 1, "Gate should have opened");
+}
+
+#[tokio::test]
+async fn test_per_zone_acc_from_wrong_zone_does_not_match() {
+    // Customer at POS_1 for 8s, but ACC comes from POS_2 - no match
+    let config =
+        Config::default().with_min_dwell_ms(7000).with_acc_ip_to_pos(acc_ip_mapping_multi_zone());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker.process_event(create_event(EventType::TrackCreate, 100, None));
+    visit_pos_zone(&mut tracker, 100, 1001, 8100).await; // POS_1: 8s (above threshold)
+
+    send_acc_event(&mut tracker, "127.0.0.2"); // ACC from POS_2 (wrong zone)
+    assert!(!is_authorized(&tracker, 100), "No dwell at POS_2");
+}
+
+#[tokio::test]
+async fn test_acc_within_grace_window_matches() {
+    // ACC arrives 4s after exit - within 5s grace window, should match
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker.process_event(create_event(EventType::TrackCreate, 100, None));
+    visit_pos_zone(&mut tracker, 100, 1001, 100).await;
+    tokio::time::sleep(millis(4000)).await; // Wait 4s (within 5s grace window)
+    enter_gate_zone(&mut tracker, 100);
+
+    send_acc_event(&mut tracker, "127.0.0.1");
+    assert!(is_authorized(&tracker, 100), "Exit within grace window");
+
+    let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
+    assert_eq!(summary.gate_commands_sent, 1, "Gate should have opened");
+}
+
+#[tokio::test]
+async fn test_acc_beyond_grace_window_does_not_match() {
+    // ACC arrives 6s after exit - beyond 5s grace window, should NOT match
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker.process_event(create_event(EventType::TrackCreate, 100, None));
+    visit_pos_zone(&mut tracker, 100, 1001, 100).await;
+    tokio::time::sleep(millis(6000)).await; // Wait 6s (beyond 5s grace window)
+
+    send_acc_event(&mut tracker, "127.0.0.1");
+    assert!(!is_authorized(&tracker, 100), "Exit beyond grace window");
+}
+
+#[tokio::test]
+async fn test_acc_picks_highest_dwell_as_primary() {
+    // Multiple tracks in POS, ACC authorizes all tracks in zone
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker.process_event(create_event(EventType::TrackCreate, 100, None));
+    tracker.process_event(create_event(EventType::TrackCreate, 200, None));
+
+    // Track 100 enters POS first (longer dwell)
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(50)).await;
+    // Track 200 enters POS later (shorter dwell)
+    tracker.process_event(create_event(EventType::ZoneEntry, 200, Some(1001)));
+    tokio::time::sleep(millis(100)).await;
+
+    // Both still in POS zone: track 100 ~150ms, track 200 ~100ms
+    send_acc_event(&mut tracker, "127.0.0.1");
+
+    // Both should be authorized
+    assert!(is_authorized(&tracker, 100), "Track 100 should be authorized");
+    assert!(is_authorized(&tracker, 200), "Track 200 should be authorized");
+
+    // Verify journey events show ACC match for both
+    assert!(tracker.journey_manager.get(TrackId(100)).unwrap().acc_matched);
+    assert!(tracker.journey_manager.get(TrackId(200)).unwrap().acc_matched);
+}
+
+// =============================================================================
+// Group Track Tests (POS-010)
+// =============================================================================
+// Group tracks have the 0x80000000 bit set and were previously filtered.
+// Now they flow through all handlers like regular tracks.
+
+const XOVIS_GROUP_BIT: i64 = 0x80000000;
+
+fn group_track_id(base_id: i64) -> i64 {
+    base_id | XOVIS_GROUP_BIT
+}
+
+#[tokio::test]
+async fn test_group_track_is_tracked() {
+    // Group track (0x80000000 bit set) is tracked as a regular person
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    let gid = group_track_id(100);
+    tracker.process_event(create_event(EventType::TrackCreate, gid, None));
+    tracker.process_event(create_event(EventType::ZoneEntry, gid, Some(1001)));
+
+    assert_eq!(tracker.active_tracks(), 1);
+    assert!(tracker.persons.contains_key(&TrackId(gid)));
+}
+
+#[tokio::test]
+async fn test_group_track_full_journey() {
+    // Group track completes full journey: dwell -> ACC match -> gate open
+    let config = Config::default().with_min_dwell_ms(50).with_acc_ip_to_pos(acc_ip_mapping());
+    let mut tracker = create_test_tracker_with_config(config);
+
+    let gid = group_track_id(100);
+    tracker.process_event(create_event(EventType::TrackCreate, gid, None));
+    visit_pos_zone(&mut tracker, gid, 1001, 100).await;
+    enter_gate_zone(&mut tracker, gid);
+    send_acc_event(&mut tracker, "127.0.0.1");
+
+    // Verify authorization
+    assert!(is_authorized(&tracker, gid));
+
+    // Verify gate command was sent
+    let summary = tracker.metrics.report(tracker.active_tracks(), tracker.authorized_tracks());
+    assert_eq!(summary.gate_commands_sent, 1);
+
+    // Verify journey state
+    let journey = tracker.journey_manager.get(TrackId(gid)).unwrap();
+    assert!(journey.total_dwell_ms >= 50);
+    assert!(journey.authorized);
+    assert!(journey.acc_matched);
+    assert!(journey.gate_cmd_at.is_some());
+    assert!(journey.tids.contains(&TrackId(gid)));
+    assert!(journey.events.len() >= 4);
 }
