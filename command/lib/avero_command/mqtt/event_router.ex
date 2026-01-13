@@ -298,8 +298,27 @@ defmodule AveroCommand.MQTT.EventRouter do
     end
   end
 
-  # gateway/acc: t = received | matched | unmatched
+  # gateway/acc: t = received | matched | unmatched | matched_no_journey | late_after_gate
   defp normalize_for_scenarios("acc", event, data) do
+    # Broadcast ALL ACC events to the acc_events channel for the ACC monitor
+    acc_event = %{
+      type: data["t"],
+      ts: data["ts"],
+      ip: data["ip"],
+      pos: data["pos"],
+      tid: data["tid"],
+      dwell_ms: data["dwell_ms"],
+      gate_zone: data["gate_zone"],
+      gate_entry_ts: data["gate_entry_ts"],
+      delta_ms: data["delta_ms"],
+      gate_cmd_at: data["gate_cmd_at"],
+      debug_active: data["debug_active"],
+      debug_pending: data["debug_pending"],
+      site: event.site,
+      time: event.time
+    }
+    Phoenix.PubSub.broadcast(AveroCommand.PubSub, "acc_events", {:acc_event, acc_event})
+
     case data["t"] do
       "matched" ->
         # Broadcast payment event for dashboard POS zones
@@ -335,6 +354,29 @@ defmodule AveroCommand.MQTT.EventRouter do
           data: Map.merge(event.data, %{
             "type" => "acc.unmatched",
             "pos_zone" => data["pos"],
+            "_source" => "gateway"
+          })
+        }
+
+      "matched_no_journey" ->
+        %{event |
+          event_type: "acc",
+          data: Map.merge(event.data, %{
+            "type" => "acc.matched_no_journey",
+            "pos_zone" => data["pos"],
+            "person_id" => data["tid"],
+            "_source" => "gateway"
+          })
+        }
+
+      "late_after_gate" ->
+        %{event |
+          event_type: "acc",
+          data: Map.merge(event.data, %{
+            "type" => "acc.late_after_gate",
+            "pos_zone" => data["pos"],
+            "person_id" => data["tid"],
+            "delta_ms" => data["delta_ms"],
             "_source" => "gateway"
           })
         }

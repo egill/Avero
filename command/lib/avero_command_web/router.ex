@@ -44,6 +44,9 @@ defmodule AveroCommandWeb.Router do
       # Customer journeys feed
       live "/journeys", JourneyFeedLive, :index
 
+      # ACC (payment terminal) monitor
+      live "/acc", AccFeedLive, :index
+
       # Incident explorer (daily/weekly view)
       live "/explorer", IncidentExplorerLive, :index
 
