@@ -70,39 +70,63 @@ defmodule AveroCommand.Scenarios.Evaluator do
 
   @scenarios [
     # Loss Prevention (9 scenarios)
-    NoPaymentExit,        # #1: Person at gate without payment
-    Tailgating,           # #2: Multiple exits in one gate cycle
-    BarcodeReuse,         # #8: Same barcode used multiple times
+    # #1: Person at gate without payment
+    NoPaymentExit,
+    # #2: Multiple exits in one gate cycle
+    Tailgating,
+    # #8: Same barcode used multiple times
+    BarcodeReuse,
     # SuspiciousReturn removed - checkout returns tracked in journey log only
-    StaleReceipt,         # #5: Receipt timestamp > N hours old
-    QuickExit,            # #6: Track duration < 30s or no POS zone
-    GroupSplit,           # #7: 3+ exit, low payment ratio
-    ExitLoitering,        # #9: >60s in exit zone without crossing
-    BackwardEntry,        # #10: Wrong direction on exit line
-    MultipleFailedExits,  # #11: 3+ gate attempts, 0 authorizations
+    # #5: Receipt timestamp > N hours old
+    StaleReceipt,
+    # #6: Track duration < 30s or no POS zone
+    QuickExit,
+    # #7: 3+ exit, low payment ratio
+    GroupSplit,
+    # #9: >60s in exit zone without crossing
+    ExitLoitering,
+    # #10: Wrong direction on exit line
+    BackwardEntry,
+    # #11: 3+ gate attempts, 0 authorizations
+    MultipleFailedExits,
 
     # Equipment (10 scenarios)
-    GateStuck,            # #13: Gate open > 60 seconds
-    LongGateDuration,     # Gate open 30-60 seconds
-    GateOffline,          # #14: RS485 communication lost
-    GateFault,            # #15: Gate hardware fault
-    GateAlarm,            # #16: Gate alarm triggered
-    SensorOffline,        # #17: Sensor not responding
-    EventProcessingLag,   # #19: High queue depth or latency
-    ClockSkew,            # #20: Sensor timestamp differs from gateway
-    GateCycleFast,        # #21: Gate open/close < 1s
-    GateObstruction,      # #22: Multiple empty gate cycles (no crossings)
+    # #13: Gate open > 60 seconds
+    GateStuck,
+    # Gate open 30-60 seconds
+    LongGateDuration,
+    # #14: RS485 communication lost
+    GateOffline,
+    # #15: Gate hardware fault
+    GateFault,
+    # #16: Gate alarm triggered
+    GateAlarm,
+    # #17: Sensor not responding
+    SensorOffline,
+    # #19: High queue depth or latency
+    EventProcessingLag,
+    # #20: Sensor timestamp differs from gateway
+    ClockSkew,
+    # #21: Gate open/close < 1s
+    GateCycleFast,
+    # #22: Multiple empty gate cycles (no crossings)
+    GateObstruction,
 
     # Safety (2 scenarios)
-    PersonTrapped,        # #23: Authorized person stuck at gate
-    EmergencyMode,        # #26: Emergency mode activated
+    # #23: Authorized person stuck at gate
+    PersonTrapped,
+    # #26: Emergency mode activated
+    EmergencyMode,
 
     # Customer Experience (2 scenarios)
-    ConfusedCustomer,     # #28: 3+ zone cycles without exiting
-    QueueBuildup,         # #29: 3+ people queued, gate not cycling
+    # #28: 3+ zone cycles without exiting
+    ConfusedCustomer,
+    # #29: 3+ people queued, gate not cycling
+    QueueBuildup,
 
     # Operational (1 scenario)
-    HighTraffic           # #30: Too many concurrent persons
+    # #30: Too many concurrent persons
+    HighTraffic
   ]
 
   @doc """
@@ -141,6 +165,7 @@ defmodule AveroCommand.Scenarios.Evaluator do
 
   defp do_evaluate(event) do
     Logger.debug("Evaluator: processing event_type=#{event.event_type}")
+
     Enum.each(@scenarios, fn scenario ->
       # Track timing for each scenario evaluation
       start_time = System.monotonic_time(:microsecond)

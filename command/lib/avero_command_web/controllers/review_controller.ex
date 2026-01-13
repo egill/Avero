@@ -51,6 +51,7 @@ defmodule AveroCommandWeb.ReviewController do
 
   # Parse since parameter, default to 1 hour ago
   defp parse_since(nil), do: DateTime.add(DateTime.utc_now(), -3600, :second)
+
   defp parse_since(since_str) do
     case DateTime.from_iso8601(since_str) do
       {:ok, dt, _} -> dt
@@ -59,6 +60,7 @@ defmodule AveroCommandWeb.ReviewController do
   end
 
   defp parse_limit(nil), do: @default_limit
+
   defp parse_limit(limit_str) do
     case Integer.parse(limit_str) do
       {n, ""} when n > 0 and n <= 500 -> n
@@ -95,12 +97,21 @@ defmodule AveroCommandWeb.ReviewController do
   defp has_missing_data?(journey) do
     cond do
       # Paid but no payment zone recorded
-      journey.authorized and is_nil(journey.payment_zone) -> true
+      journey.authorized and is_nil(journey.payment_zone) ->
+        true
+
       # Exited but no gate_opened_by
-      journey.exit_type == "exit_confirmed" and is_nil(journey.gate_opened_by) -> true
+      journey.exit_type == "exit_confirmed" and is_nil(journey.gate_opened_by) ->
+        true
+
       # Had POS dwell but no payment zone
-      journey.total_pos_dwell_ms && journey.total_pos_dwell_ms >= 7000 and is_nil(journey.payment_zone) and not journey.authorized -> false  # This is expected for unpaid
-      true -> false
+      # This is expected for unpaid
+      (journey.total_pos_dwell_ms && journey.total_pos_dwell_ms >= 7000) and
+        is_nil(journey.payment_zone) and not journey.authorized ->
+        false
+
+      true ->
+        false
     end
   end
 
@@ -152,18 +163,38 @@ defmodule AveroCommandWeb.ReviewController do
     issues = []
 
     issues = if not journey.authorized, do: ["unpaid_exit" | issues], else: issues
-    issues = if journey.authorized and is_nil(journey.payment_zone), do: ["paid_no_payment_zone" | issues], else: issues
-    issues = if journey.exit_type == "exit_confirmed" and is_nil(journey.gate_opened_by), do: ["exit_no_gate_opened_by" | issues], else: issues
+
+    issues =
+      if journey.authorized and is_nil(journey.payment_zone),
+        do: ["paid_no_payment_zone" | issues],
+        else: issues
+
+    issues =
+      if journey.exit_type == "exit_confirmed" and is_nil(journey.gate_opened_by),
+        do: ["exit_no_gate_opened_by" | issues],
+        else: issues
+
     issues = if journey.tailgated, do: ["tailgated" | issues], else: issues
-    issues = if journey.exit_type == "tracking_lost_authorized", do: ["paid_but_tracking_lost" | issues], else: issues
+
+    issues =
+      if journey.exit_type == "tracking_lost_authorized",
+        do: ["paid_but_tracking_lost" | issues],
+        else: issues
 
     # Check for missing gate timing in events
     events = journey.events || []
     has_gate_cmd = Enum.any?(events, &(&1["type"] == "gate_open_requested"))
     has_gate_opened = Enum.any?(events, &(&1["type"] == "gate_opened"))
 
-    issues = if journey.exit_type == "exit_confirmed" and not has_gate_cmd and not journey.tailgated, do: ["missing_gate_cmd_event" | issues], else: issues
-    issues = if journey.exit_type == "exit_confirmed" and not has_gate_opened and not journey.tailgated, do: ["missing_gate_opened_event" | issues], else: issues
+    issues =
+      if journey.exit_type == "exit_confirmed" and not has_gate_cmd and not journey.tailgated,
+        do: ["missing_gate_cmd_event" | issues],
+        else: issues
+
+    issues =
+      if journey.exit_type == "exit_confirmed" and not has_gate_opened and not journey.tailgated,
+        do: ["missing_gate_opened_event" | issues],
+        else: issues
 
     Enum.reverse(issues)
   end
@@ -178,8 +209,8 @@ defmodule AveroCommandWeb.ReviewController do
       events
       |> Enum.filter(fn e ->
         e["type"] == "zone_exit" and
-        is_binary(get_in(e, ["data", "zone"])) and
-        String.starts_with?(get_in(e, ["data", "zone"]), "POS")
+          is_binary(get_in(e, ["data", "zone"])) and
+          String.starts_with?(get_in(e, ["data", "zone"]), "POS")
       end)
       |> List.last()
 

@@ -25,7 +25,8 @@ defmodule AveroCommand.Scenarios.UnusualGateOpening do
   alias AveroCommand.Incidents.Incident
   alias AveroCommand.Incidents.Manager
 
-  @threshold_ms 120_000  # 2 minutes
+  # 2 minutes
+  @threshold_ms 120_000
 
   @doc """
   Returns the threshold in milliseconds.
@@ -37,11 +38,12 @@ defmodule AveroCommand.Scenarios.UnusualGateOpening do
   Called by Gate GenServer timer after threshold is exceeded.
   """
   def create_incident(site, gate_id, opened_at) do
-    started_at_ms = case opened_at do
-      %DateTime{} -> DateTime.to_unix(opened_at, :millisecond)
-      ms when is_integer(ms) -> ms
-      _ -> DateTime.to_unix(DateTime.utc_now(), :millisecond) - @threshold_ms
-    end
+    started_at_ms =
+      case opened_at do
+        %DateTime{} -> DateTime.to_unix(opened_at, :millisecond)
+        ms when is_integer(ms) -> ms
+        _ -> DateTime.to_unix(DateTime.utc_now(), :millisecond) - @threshold_ms
+      end
 
     incident_attrs = %{
       type: "unusual_gate_opening",
@@ -110,18 +112,20 @@ defmodule AveroCommand.Scenarios.UnusualGateOpening do
     started_at_ms = context["started_at_ms"]
     closed_at_ms = DateTime.to_unix(DateTime.utc_now(), :millisecond)
 
-    total_duration_ms = if started_at_ms do
-      closed_at_ms - started_at_ms
-    else
-      0
-    end
+    total_duration_ms =
+      if started_at_ms do
+        closed_at_ms - started_at_ms
+      else
+        0
+      end
 
     # Update context with final stats
-    updated_context = Map.merge(context, %{
-      "is_live" => false,
-      "closed_at_ms" => closed_at_ms,
-      "total_duration_ms" => total_duration_ms
-    })
+    updated_context =
+      Map.merge(context, %{
+        "is_live" => false,
+        "closed_at_ms" => closed_at_ms,
+        "total_duration_ms" => total_duration_ms
+      })
 
     # Update the incident context first
     incident
@@ -131,8 +135,11 @@ defmodule AveroCommand.Scenarios.UnusualGateOpening do
     # Then resolve it
     case Incidents.resolve(incident.id, "gate_closed", "system") do
       {:ok, resolved} ->
-        Logger.info("UnusualGateOpening: Auto-resolved incident #{incident.id} " <>
-                   "(duration: #{div(total_duration_ms, 1000)}s)")
+        Logger.info(
+          "UnusualGateOpening: Auto-resolved incident #{incident.id} " <>
+            "(duration: #{div(total_duration_ms, 1000)}s)"
+        )
+
         {:ok, resolved}
 
       {:error, reason} = err ->

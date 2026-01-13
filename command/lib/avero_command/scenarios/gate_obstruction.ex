@@ -59,7 +59,9 @@ defmodule AveroCommand.Scenarios.GateObstruction do
 
     # Log for stats (not an incident)
     if rapid_count > 1 do
-      Logger.info("GateObstruction: gate #{gate_id} has #{rapid_count} empty cycles in #{@rapid_window_seconds}s")
+      Logger.info(
+        "GateObstruction: gate #{gate_id} has #{rapid_count} empty cycles in #{@rapid_window_seconds}s"
+      )
     end
 
     # Only alert on rapid back-to-back cycling
@@ -85,7 +87,8 @@ defmodule AveroCommand.Scenarios.GateObstruction do
         gate_id: gate_id,
         rapid_cycle_count: rapid_count,
         window_seconds: @rapid_window_seconds,
-        message: "Gate #{gate_id} cycling rapidly - #{rapid_count} empty cycles in #{@rapid_window_seconds}s"
+        message:
+          "Gate #{gate_id} cycling rapidly - #{rapid_count} empty cycles in #{@rapid_window_seconds}s"
       },
       suggested_actions: build_actions()
     }
@@ -111,11 +114,13 @@ defmodule AveroCommand.Scenarios.GateObstruction do
 
   defp normalize_count(value) when is_integer(value), do: value
   defp normalize_count(value) when is_float(value), do: trunc(value)
+
   defp normalize_count(value) when is_binary(value) do
     case Integer.parse(value) do
       {int, ""} -> int
       _ -> nil
     end
   end
+
   defp normalize_count(_), do: nil
 end

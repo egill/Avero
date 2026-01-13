@@ -162,7 +162,7 @@ defmodule AveroCommand.Journeys do
     # Hourly breakdown for confirmed exits
     hourly_exits =
       confirmed_exits
-      |> Enum.group_by(&(&1.time.hour))
+      |> Enum.group_by(& &1.time.hour)
       |> Enum.map(fn {hour, exits} -> {hour, length(exits)} end)
       |> Map.new()
 
@@ -187,6 +187,7 @@ defmodule AveroCommand.Journeys do
   rescue
     e ->
       Logger.warning("Failed to get daily stats: #{inspect(e)}")
+
       %{
         total_exits: 0,
         paid_exits: 0,
@@ -208,38 +209,49 @@ defmodule AveroCommand.Journeys do
 
   defp apply_exit_type_filter(query, nil), do: query
   defp apply_exit_type_filter(query, :all), do: query
-  defp apply_exit_type_filter(query, :exits), do: where(query, [j], j.exit_type == "exit_confirmed")
-  defp apply_exit_type_filter(query, :returns), do: where(query, [j], j.exit_type == "returned_to_store")
+
+  defp apply_exit_type_filter(query, :exits),
+    do: where(query, [j], j.exit_type == "exit_confirmed")
+
+  defp apply_exit_type_filter(query, :returns),
+    do: where(query, [j], j.exit_type == "returned_to_store")
+
   defp apply_exit_type_filter(query, :lost), do: where(query, [j], j.exit_type == "tracking_lost")
+
   defp apply_exit_type_filter(query, exit_type) when is_binary(exit_type) do
     where(query, [j], j.exit_type == ^exit_type)
   end
 
   defp apply_person_id_filter(query, nil), do: query
   defp apply_person_id_filter(query, ""), do: query
+
   defp apply_person_id_filter(query, person_id) when is_binary(person_id) do
     case Integer.parse(String.trim(person_id)) do
       {id, ""} -> where(query, [j], j.person_id == ^id)
       _ -> query
     end
   end
+
   defp apply_person_id_filter(query, person_id) when is_integer(person_id) do
     where(query, [j], j.person_id == ^person_id)
   end
 
   defp apply_date_range_filter(query, nil, nil), do: query
+
   defp apply_date_range_filter(query, from_date, nil) do
     case date_to_datetime_start(from_date) do
       nil -> query
       from_dt -> where(query, [j], j.time >= ^from_dt)
     end
   end
+
   defp apply_date_range_filter(query, nil, to_date) do
     case date_to_datetime_end(to_date) do
       nil -> query
       to_dt -> where(query, [j], j.time <= ^to_dt)
     end
   end
+
   defp apply_date_range_filter(query, from_date, to_date) do
     from_dt = date_to_datetime_start(from_date)
     to_dt = date_to_datetime_end(to_date)
@@ -251,50 +263,63 @@ defmodule AveroCommand.Journeys do
 
   # DateTime range filter (more precise than date range)
   defp apply_datetime_range_filter(query, nil, nil), do: query
+
   defp apply_datetime_range_filter(query, %DateTime{} = from_dt, nil) do
     where(query, [j], j.time >= ^from_dt)
   end
+
   defp apply_datetime_range_filter(query, nil, %DateTime{} = to_dt) do
     where(query, [j], j.time <= ^to_dt)
   end
+
   defp apply_datetime_range_filter(query, %DateTime{} = from_dt, %DateTime{} = to_dt) do
     query
     |> where([j], j.time >= ^from_dt)
     |> where([j], j.time <= ^to_dt)
   end
+
   defp apply_datetime_range_filter(query, _, _), do: query
 
   # 7 seconds minimum dwell to count as POS stop
   @min_dwell_ms 7000
 
   defp apply_pos_filter(query, :all, []), do: query
+
   defp apply_pos_filter(query, :all, zones) when is_list(zones) and length(zones) > 0 do
     where(query, [j], j.payment_zone in ^zones)
   end
+
   # "With POS" = had meaningful time at a POS zone (>= 7s dwell)
   defp apply_pos_filter(query, :with_pos, []) do
     where(query, [j], j.total_pos_dwell_ms >= @min_dwell_ms)
   end
+
   defp apply_pos_filter(query, :with_pos, zones) when is_list(zones) and length(zones) > 0 do
     where(query, [j], j.payment_zone in ^zones)
   end
+
   # "No POS" = didn't spend meaningful time at any POS zone
   defp apply_pos_filter(query, :without_pos, _) do
     where(query, [j], is_nil(j.total_pos_dwell_ms) or j.total_pos_dwell_ms < @min_dwell_ms)
   end
+
   # "Unpaid with POS" = unpaid but had meaningful POS stop (potential theft/walkout)
   defp apply_pos_filter(query, :unpaid_with_pos, _) do
     where(query, [j], j.authorized == false and j.total_pos_dwell_ms >= @min_dwell_ms)
   end
+
   defp apply_pos_filter(query, _, _), do: query
 
   # ACC (payment terminal) filter
   defp apply_acc_filter(query, nil), do: query
   defp apply_acc_filter(query, :all), do: query
   defp apply_acc_filter(query, :acc_matched), do: where(query, [j], j.acc_matched == true)
-  defp apply_acc_filter(query, :acc_not_matched), do: where(query, [j], j.acc_matched == false or is_nil(j.acc_matched))
+
+  defp apply_acc_filter(query, :acc_not_matched),
+    do: where(query, [j], j.acc_matched == false or is_nil(j.acc_matched))
 
   defp apply_min_duration_filter(query, nil), do: query
+
   defp apply_min_duration_filter(query, min_ms) do
     where(query, [j], j.duration_ms >= ^min_ms)
   end
@@ -304,12 +329,14 @@ defmodule AveroCommand.Journeys do
     |> order_by([j], desc: j.time, desc: j.id)
     |> limit(^(limit + 1))
   end
+
   defp apply_cursor_pagination(query, cursor, :next, limit) do
     query
     |> where([j], j.time < ^cursor)
     |> order_by([j], desc: j.time, desc: j.id)
     |> limit(^(limit + 1))
   end
+
   defp apply_cursor_pagination(query, cursor, :prev, limit) do
     query
     |> where([j], j.time > ^cursor)
@@ -323,23 +350,27 @@ defmodule AveroCommand.Journeys do
   defp date_to_datetime_start(%Date{} = date) do
     DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
   end
+
   defp date_to_datetime_start(date_string) when is_binary(date_string) do
     case Date.from_iso8601(date_string) do
       {:ok, date} -> date_to_datetime_start(date)
       _ -> nil
     end
   end
+
   defp date_to_datetime_start(_), do: nil
 
   defp date_to_datetime_end(%Date{} = date) do
     DateTime.new!(date, ~T[23:59:59.999999], "Etc/UTC")
   end
+
   defp date_to_datetime_end(date_string) when is_binary(date_string) do
     case Date.from_iso8601(date_string) do
       {:ok, date} -> date_to_datetime_end(date)
       _ -> nil
     end
   end
+
   defp date_to_datetime_end(_), do: nil
 
   @doc """
@@ -371,7 +402,8 @@ defmodule AveroCommand.Journeys do
       select: %{
         total: count(j.id),
         authorized: count(fragment("CASE WHEN ? THEN 1 END", j.authorized)),
-        unauthorized: count(fragment("CASE WHEN NOT ? OR ? IS NULL THEN 1 END", j.authorized, j.authorized))
+        unauthorized:
+          count(fragment("CASE WHEN NOT ? OR ? IS NULL THEN 1 END", j.authorized, j.authorized))
       }
     )
     |> Repo.one()
@@ -406,10 +438,11 @@ defmodule AveroCommand.Journeys do
     ended_at = parse_epoch_ms(data["t1"])
 
     # Get first track ID as person_id (for display)
-    person_id = case data["tids"] do
-      [tid | _] when is_integer(tid) -> tid
-      _ -> nil
-    end
+    person_id =
+      case data["tids"] do
+        [tid | _] when is_integer(tid) -> tid
+        _ -> nil
+      end
 
     # Transform events from short-key to long-key format
     events = transform_gateway_events(data["ev"] || [])
@@ -480,11 +513,14 @@ defmodule AveroCommand.Journeys do
   # Transform gateway-poc short-key events to long-key format
   defp transform_gateway_events(events) when is_list(events) do
     Enum.map(events, fn event ->
-      ts = case event["ts"] do
-        ts when is_integer(ts) ->
-          DateTime.from_unix!(ts, :millisecond) |> DateTime.to_iso8601()
-        _ -> nil
-      end
+      ts =
+        case event["ts"] do
+          ts when is_integer(ts) ->
+            DateTime.from_unix!(ts, :millisecond) |> DateTime.to_iso8601()
+
+          _ ->
+            nil
+        end
 
       base = %{
         "type" => event["t"],
@@ -495,13 +531,14 @@ defmodule AveroCommand.Journeys do
       base = if event["z"], do: Map.put(base, "data", %{"zone" => event["z"]}), else: base
 
       # Parse extra field (x) which contains key=value pairs like "dwell=7500"
-      base = if event["x"] do
-        extra_data = parse_extra_field(event["x"])
-        existing_data = base["data"] || %{}
-        Map.put(base, "data", Map.merge(existing_data, extra_data))
-      else
-        base
-      end
+      base =
+        if event["x"] do
+          extra_data = parse_extra_field(event["x"])
+          existing_data = base["data"] || %{}
+          Map.put(base, "data", Map.merge(existing_data, extra_data))
+        else
+          base
+        end
 
       base
     end)
@@ -518,17 +555,23 @@ defmodule AveroCommand.Journeys do
       case String.split(pair, "=", parts: 2) do
         [key, value] ->
           # Normalize key names
-          normalized_key = case key do
-            "dwell" -> "dwell_ms"
-            other -> other
-          end
+          normalized_key =
+            case key do
+              "dwell" -> "dwell_ms"
+              other -> other
+            end
+
           # Try to parse as integer
-          parsed_value = case Integer.parse(value) do
-            {int, ""} -> int
-            _ -> value
-          end
+          parsed_value =
+            case Integer.parse(value) do
+              {int, ""} -> int
+              _ -> value
+            end
+
           {normalized_key, parsed_value}
-        _ -> nil
+
+        _ ->
+          nil
       end
     end)
     |> Enum.reject(&is_nil/1)
@@ -635,26 +678,31 @@ defmodule AveroCommand.Journeys do
 
   defp extract_pos_info(events) when is_list(events) do
     # Find payment event to get payment zone
-    payment_event = Enum.find(events, fn e ->
-      e["type"] == "payment"
-    end)
+    payment_event =
+      Enum.find(events, fn e ->
+        e["type"] == "payment"
+      end)
+
     payment_zone = get_in(payment_event, ["data", "zone"])
 
     # Find dwell threshold event
     # NOTE: Go sends "dwell_threshold" (not "dwell_met") - see journey.go:RecordDwellThreshold
-    dwell_event = Enum.find(events, fn e ->
-      e["type"] == "dwell_threshold"
-    end)
+    dwell_event =
+      Enum.find(events, fn e ->
+        e["type"] == "dwell_threshold"
+      end)
+
     dwell_zone = get_in(dwell_event, ["data", "zone"])
 
     # Calculate total POS zone dwell time from zone exits
-    total_pos_dwell_ms = events
-    |> Enum.filter(fn e ->
-      e["type"] == "zone_exit" and
-      is_pos_zone?(get_in(e, ["data", "zone"]))
-    end)
-    |> Enum.map(fn e -> get_in(e, ["data", "dwell_ms"]) || 0 end)
-    |> Enum.sum()
+    total_pos_dwell_ms =
+      events
+      |> Enum.filter(fn e ->
+        e["type"] == "zone_exit" and
+          is_pos_zone?(get_in(e, ["data", "zone"]))
+      end)
+      |> Enum.map(fn e -> get_in(e, ["data", "dwell_ms"]) || 0 end)
+      |> Enum.sum()
 
     # Dwell threshold met if: explicit event OR calculated dwell >= 7000ms
     dwell_threshold_met = dwell_event != nil or total_pos_dwell_ms >= 7000
@@ -669,6 +717,7 @@ defmodule AveroCommand.Journeys do
     |> Enum.filter(fn e -> e["type"] in ["zone_entry", "zone_exit"] end)
     |> Enum.reduce(%{}, fn e, acc ->
       zone = get_in(e, ["data", "zone"])
+
       if zone do
         Map.update(acc, zone, %{zone: zone, visits: 1}, fn z ->
           %{z | visits: z.visits + 1}
@@ -699,12 +748,14 @@ defmodule AveroCommand.Journeys do
   end
 
   defp parse_timestamp(nil), do: nil
+
   defp parse_timestamp(ts) when is_binary(ts) do
     case DateTime.from_iso8601(ts) do
       {:ok, dt, _} -> dt
       _ -> nil
     end
   end
+
   defp parse_timestamp(%DateTime{} = dt), do: dt
   defp parse_timestamp(_), do: nil
 

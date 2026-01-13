@@ -14,7 +14,11 @@ defmodule AveroCommand.Scenarios.GateOffline do
   Event comes through as event_type: "gates" with data: %{"type" => "gate.offline", ...}
   """
   def evaluate(%{event_type: "gates", data: %{"type" => "gate.offline"} = data} = event) do
-    Logger.warning("GateOffline: gate #{data["gate_id"]} went offline", error: data["error"], source: data["source"])
+    Logger.warning("GateOffline: gate #{data["gate_id"]} went offline",
+      error: data["error"],
+      source: data["source"]
+    )
+
     {:match, build_incident(event, data)}
   end
 
@@ -25,6 +29,7 @@ defmodule AveroCommand.Scenarios.GateOffline do
 
     source = data["source"] || "rs485"
     error = data["error"]
+
     message =
       if is_binary(error) and error != "" do
         "Gate #{gate_id} is offline (#{String.upcase(source)}): #{error}"

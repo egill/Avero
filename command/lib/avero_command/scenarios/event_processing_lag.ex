@@ -13,8 +13,10 @@ defmodule AveroCommand.Scenarios.EventProcessingLag do
   # Thresholds
   @queue_depth_warning 100
   @queue_depth_critical 500
-  @latency_warning_us 100_000  # 100ms in microseconds
-  @latency_critical_us 500_000 # 500ms in microseconds
+  # 100ms in microseconds
+  @latency_warning_us 100_000
+  # 500ms in microseconds
+  @latency_critical_us 500_000
 
   @doc """
   Evaluate if this event triggers the event-processing-lag scenario.
@@ -51,13 +53,15 @@ defmodule AveroCommand.Scenarios.EventProcessingLag do
           {"high", "Critical queue depth: #{queue_depth} (threshold: #{@queue_depth_critical})"}
 
         :latency_critical ->
-          {"high", "Critical latency: #{div(latency, 1000)}ms (threshold: #{div(@latency_critical_us, 1000)}ms)"}
+          {"high",
+           "Critical latency: #{div(latency, 1000)}ms (threshold: #{div(@latency_critical_us, 1000)}ms)"}
 
         :queue_warning ->
           {"medium", "High queue depth: #{queue_depth} (threshold: #{@queue_depth_warning})"}
 
         :latency_warning ->
-          {"medium", "High latency: #{div(latency, 1000)}ms (threshold: #{div(@latency_warning_us, 1000)}ms)"}
+          {"medium",
+           "High latency: #{div(latency, 1000)}ms (threshold: #{div(@latency_warning_us, 1000)}ms)"}
       end
 
     %{

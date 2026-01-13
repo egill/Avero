@@ -217,6 +217,7 @@ defmodule AveroCommand.Incidents do
   rescue
     e ->
       Logger.warning("Failed to get daily incident stats: #{inspect(e)}")
+
       %{
         total: 0,
         high: 0,

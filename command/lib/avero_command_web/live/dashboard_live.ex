@@ -15,7 +15,8 @@ defmodule AveroCommandWeb.DashboardLive do
       # Subscribe to real-time updates
       Phoenix.PubSub.subscribe(AveroCommand.PubSub, "gates")
       Phoenix.PubSub.subscribe(AveroCommand.PubSub, "journeys")
-      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "zones")
+      # Zone events are broadcast on "gateway:events" channel by EventRouter
+      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "gateway:events")
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
@@ -31,12 +32,13 @@ defmodule AveroCommandWeb.DashboardLive do
       %{id: "1004", occupied: false, count: 0, paid: false}
     ]
 
-    {:ok, assign(socket,
-      gates: gates,
-      journeys: journeys,
-      pos_zones: pos_zones,
-      last_updated: DateTime.utc_now()
-    )}
+    {:ok,
+     assign(socket,
+       gates: gates,
+       journeys: journeys,
+       pos_zones: pos_zones,
+       last_updated: DateTime.utc_now()
+     )}
   end
 
   @impl true
@@ -51,7 +53,7 @@ defmodule AveroCommandWeb.DashboardLive do
     {:noreply, assign(socket, gates: gates, last_updated: DateTime.utc_now())}
   end
 
-  def handle_info({:journey_completed, _journey}, socket) do
+  def handle_info({:journey_created, _journey}, socket) do
     journeys = load_recent_journeys(socket.assigns[:selected_sites] || [])
     {:noreply, assign(socket, journeys: journeys)}
   end
@@ -68,11 +70,12 @@ defmodule AveroCommandWeb.DashboardLive do
     require Logger
 
     # Map site to gateway IP (via Tailscale)
-    gateway_ip = case site do
-      "netto" -> "100.80.187.3"
-      "grandi" -> "100.80.187.4"
-      _ -> nil
-    end
+    gateway_ip =
+      case site do
+        "netto" -> "100.80.187.3"
+        "grandi" -> "100.80.187.4"
+        _ -> nil
+      end
 
     if gateway_ip do
       # Call the gateway's HTTP endpoint to open the gate
@@ -85,9 +88,11 @@ defmodule AveroCommandWeb.DashboardLive do
         case :httpc.request(:post, {url, [], ~c"application/json", ~c""}, [{:timeout, 5000}], []) do
           {:ok, {{_, status, _}, _, body}} ->
             Logger.info("Gate open response for #{site}: status=#{status} body=#{inspect(body)}")
+
             if status == 200 do
               Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_opened, site})
             end
+
           {:error, reason} ->
             Logger.warning("Gate open failed for #{site}: #{inspect(reason)}")
         end
@@ -101,12 +106,24 @@ defmodule AveroCommandWeb.DashboardLive do
     Enum.map(pos_zones, fn zone ->
       if zone.id == zone_id do
         case type do
-          :zone_entry -> %{zone | occupied: true, count: zone.count + 1}
+          :zone_entry ->
+            %{zone | occupied: true, count: zone.count + 1}
+
           :zone_exit ->
             new_count = max(0, zone.count - 1)
-            %{zone | occupied: new_count > 0, count: new_count, paid: if(new_count == 0, do: false, else: zone.paid)}
-          :payment -> %{zone | paid: true}
-          _ -> zone
+
+            %{
+              zone
+              | occupied: new_count > 0,
+                count: new_count,
+                paid: if(new_count == 0, do: false, else: zone.paid)
+            }
+
+          :payment ->
+            %{zone | paid: true}
+
+          _ ->
+            zone
         end
       else
         zone
@@ -217,8 +234,8 @@ defmodule AveroCommandWeb.DashboardLive do
 
   # === Components ===
 
-  attr :title, :string, default: nil
-  slot :inner_block, required: true
+  attr(:title, :string, default: nil)
+  slot(:inner_block, required: true)
 
   defp dash_card(assigns) do
     ~H"""
@@ -231,7 +248,7 @@ defmodule AveroCommandWeb.DashboardLive do
     """
   end
 
-  attr :gate, :map, required: true
+  attr(:gate, :map, required: true)
 
   defp gate_card(assigns) do
     state = assigns.gate.state || %{state: :unknown, persons_in_zone: 0, fault: false}
@@ -240,13 +257,14 @@ defmodule AveroCommandWeb.DashboardLive do
     has_fault = state[:fault] || false
     persons = state[:persons_in_zone] || 0
 
-    assigns = assign(assigns,
-      gate_state: gate_state,
-      is_open: is_open,
-      has_fault: has_fault,
-      persons: persons,
-      state: state
-    )
+    assigns =
+      assign(assigns,
+        gate_state: gate_state,
+        is_open: is_open,
+        has_fault: has_fault,
+        persons: persons,
+        state: state
+      )
 
     ~H"""
     <div class={[
@@ -301,29 +319,34 @@ defmodule AveroCommandWeb.DashboardLive do
     """
   end
 
-  attr :is_open, :boolean, default: false
-  attr :has_fault, :boolean, default: false
+  attr(:is_open, :boolean, default: false)
+  attr(:has_fault, :boolean, default: false)
 
   defp gate_animation(assigns) do
     # Colors from original Go dashboard (dashboard.monitor.js)
     # Open: green rgba(34, 197, 94, 0.3) / rgba(34, 197, 94, 0.5)
     # Closed: indigo rgba(99, 102, 241, 0.2) / #6366f1
     # Fault: red
-    {door_fill, door_stroke, left_transform, right_transform} = cond do
-      assigns.has_fault ->
-        {"rgba(239, 68, 68, 0.3)", "rgba(239, 68, 68, 0.6)", "translateX(0)", "translateX(0)"}
-      assigns.is_open ->
-        {"rgba(34, 197, 94, 0.3)", "rgba(34, 197, 94, 0.5)", "translateX(-105px)", "translateX(105px)"}
-      true ->
-        {"rgba(99, 102, 241, 0.2)", "#6366f1", "translateX(0)", "translateX(0)"}
-    end
+    {door_fill, door_stroke, left_transform, right_transform} =
+      cond do
+        assigns.has_fault ->
+          {"rgba(239, 68, 68, 0.3)", "rgba(239, 68, 68, 0.6)", "translateX(0)", "translateX(0)"}
 
-    assigns = assign(assigns,
-      door_fill: door_fill,
-      door_stroke: door_stroke,
-      left_transform: left_transform,
-      right_transform: right_transform
-    )
+        assigns.is_open ->
+          {"rgba(34, 197, 94, 0.3)", "rgba(34, 197, 94, 0.5)", "translateX(-105px)",
+           "translateX(105px)"}
+
+        true ->
+          {"rgba(99, 102, 241, 0.2)", "#6366f1", "translateX(0)", "translateX(0)"}
+      end
+
+    assigns =
+      assign(assigns,
+        door_fill: door_fill,
+        door_stroke: door_stroke,
+        left_transform: left_transform,
+        right_transform: right_transform
+      )
 
     ~H"""
     <svg id="gate-svg" viewBox="0 0 500 160" class="w-full max-w-md h-auto">
@@ -355,14 +378,16 @@ defmodule AveroCommandWeb.DashboardLive do
     """
   end
 
-  attr :zone, :map, required: true
+  attr(:zone, :map, required: true)
 
   defp pos_zone(assigns) do
     # Extract zone number: "1001" -> "1", "1002" -> "2", etc.
-    zone_num = case assigns.zone.id do
-      "100" <> n -> n
-      id -> id
-    end
+    zone_num =
+      case assigns.zone.id do
+        "100" <> n -> n
+        id -> id
+      end
+
     assigns = assign(assigns, :zone_num, zone_num)
 
     ~H"""
@@ -393,5 +418,4 @@ defmodule AveroCommandWeb.DashboardLive do
     </div>
     """
   end
-
 end

@@ -38,6 +38,7 @@ defmodule AveroCommand.MQTT.EventRouter do
 
         # 2. Transform to scenario-compatible format, persist for reporting, and evaluate
         scenario_event = normalize_for_scenarios(topic_name, event, event_data)
+
         if scenario_event do
           Task.start(fn -> Store.insert_event(scenario_event) end)
           route_to_entities(scenario_event)
@@ -77,6 +78,7 @@ defmodule AveroCommand.MQTT.EventRouter do
     if event_type == "gates" do
       Logger.info("EventRouter: calling Evaluator for gates event type=#{event.data["type"]}")
     end
+
     Evaluator.evaluate(event)
 
     :ok
@@ -95,16 +97,18 @@ defmodule AveroCommand.MQTT.EventRouter do
   # Normalize gateway-poc events (events, gate, acc topics)
   # These use short keys: tid, ts, t, z, etc.
   defp normalize_gateway_event(topic_name, data) do
-    time = case data["ts"] do
-      ts when is_integer(ts) -> DateTime.from_unix!(ts, :millisecond)
-      _ -> DateTime.utc_now()
-    end
+    time =
+      case data["ts"] do
+        ts when is_integer(ts) -> DateTime.from_unix!(ts, :millisecond)
+        _ -> DateTime.utc_now()
+      end
 
     %{
       event_type: "gateway.#{topic_name}",
       time: time,
       site: data["site"] || "unknown",
-      person_id: data["tid"],  # track ID
+      # track ID
+      person_id: data["tid"],
       gate_id: nil,
       sensor_id: nil,
       zone: data["z"],
@@ -208,30 +212,43 @@ defmodule AveroCommand.MQTT.EventRouter do
 
   # gateway/gate: state = cmd_sent | open | closed | moving
   defp normalize_for_scenarios("gate", event, data) do
-    gate_type = case data["state"] do
-      "open" -> "gate.opened"
-      "closed" -> "gate.closed"
-      "cmd_sent" -> "gate.cmd"
-      "moving" -> "gate.moving"
-      _ -> "gate.status"
-    end
+    gate_type =
+      case data["state"] do
+        "open" -> "gate.opened"
+        "closed" -> "gate.closed"
+        "cmd_sent" -> "gate.cmd"
+        "moving" -> "gate.moving"
+        _ -> "gate.status"
+      end
 
     gate_id = data["gate_id"] || 1
+
+    # Broadcast gate event for dashboard real-time updates
+    gate_event = %{
+      site: event.site,
+      gate_id: gate_id,
+      state: data["state"],
+      time: event.time
+    }
+
+    Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_event, gate_event})
 
     # Auto-resolve unusual_gate_opening incidents when gate closes
     if data["state"] == "closed" do
       Task.start(fn -> UnusualGateOpening.maybe_resolve(event.site, gate_id) end)
     end
 
-    %{event |
-      event_type: "gates",
-      gate_id: gate_id,
-      data: Map.merge(event.data, %{
-        "type" => gate_type,
-        "gate_id" => gate_id,
-        "open_duration_ms" => data["duration_ms"],
-        "_source" => "gateway"
-      })
+    %{
+      event
+      | event_type: "gates",
+        gate_id: gate_id,
+        data:
+          Map.merge(event.data, %{
+            "type" => gate_type,
+            "gate_id" => gate_id,
+            "open_duration_ms" => data["duration_ms"],
+            "_source" => "gateway"
+          })
     }
   end
 
@@ -241,30 +258,44 @@ defmodule AveroCommand.MQTT.EventRouter do
       "zone_entry" ->
         # Broadcast zone event for dashboard POS zones
         zone_id = to_string(data["z"])
-        Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gateway:events", {:zone_event, %{zone_id: zone_id, event_type: :zone_entry}})
 
-        %{event |
-          event_type: "sensors",
-          data: Map.merge(event.data, %{
-            "type" => "xovis.zone.entry",
-            "zone" => data["z"],
-            "_source" => "gateway"
-          })
+        Phoenix.PubSub.broadcast(
+          AveroCommand.PubSub,
+          "gateway:events",
+          {:zone_event, %{zone_id: zone_id, event_type: :zone_entry}}
+        )
+
+        %{
+          event
+          | event_type: "sensors",
+            data:
+              Map.merge(event.data, %{
+                "type" => "xovis.zone.entry",
+                "zone" => data["z"],
+                "_source" => "gateway"
+              })
         }
 
       "zone_exit" ->
         # Broadcast zone event for dashboard POS zones
         zone_id = to_string(data["z"])
-        Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gateway:events", {:zone_event, %{zone_id: zone_id, event_type: :zone_exit}})
 
-        %{event |
-          event_type: "sensors",
-          data: Map.merge(event.data, %{
-            "type" => "xovis.zone.exit",
-            "zone" => data["z"],
-            "dwell_ms" => data["dwell_ms"],
-            "_source" => "gateway"
-          })
+        Phoenix.PubSub.broadcast(
+          AveroCommand.PubSub,
+          "gateway:events",
+          {:zone_event, %{zone_id: zone_id, event_type: :zone_exit}}
+        )
+
+        %{
+          event
+          | event_type: "sensors",
+            data:
+              Map.merge(event.data, %{
+                "type" => "xovis.zone.exit",
+                "zone" => data["z"],
+                "dwell_ms" => data["dwell_ms"],
+                "_source" => "gateway"
+              })
         }
 
       "line_cross" ->
@@ -273,23 +304,27 @@ defmodule AveroCommand.MQTT.EventRouter do
         is_exit = String.contains?(String.upcase(zone), "EXIT")
 
         if is_exit do
-          %{event |
-            event_type: "exits",
-            data: Map.merge(event.data, %{
-              "type" => "exit.confirmed",
-              "authorized" => data["auth"] || false,
-              "zone" => zone,
-              "_source" => "gateway"
-            })
+          %{
+            event
+            | event_type: "exits",
+              data:
+                Map.merge(event.data, %{
+                  "type" => "exit.confirmed",
+                  "authorized" => data["auth"] || false,
+                  "zone" => zone,
+                  "_source" => "gateway"
+                })
           }
         else
-          %{event |
-            event_type: "sensors",
-            data: Map.merge(event.data, %{
-              "type" => "xovis.line.cross",
-              "zone" => zone,
-              "_source" => "gateway"
-            })
+          %{
+            event
+            | event_type: "sensors",
+              data:
+                Map.merge(event.data, %{
+                  "type" => "xovis.line.cross",
+                  "zone" => zone,
+                  "_source" => "gateway"
+                })
           }
         end
 
@@ -317,68 +352,85 @@ defmodule AveroCommand.MQTT.EventRouter do
       site: event.site,
       time: event.time
     }
+
     Phoenix.PubSub.broadcast(AveroCommand.PubSub, "acc_events", {:acc_event, acc_event})
 
     case data["t"] do
       "matched" ->
         # Broadcast payment event for dashboard POS zones
         pos_zone = data["pos"]
+
         if pos_zone do
           zone_id = to_string(pos_zone)
-          Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gateway:events", {:zone_event, %{zone_id: zone_id, event_type: :payment}})
+
+          Phoenix.PubSub.broadcast(
+            AveroCommand.PubSub,
+            "gateway:events",
+            {:zone_event, %{zone_id: zone_id, event_type: :payment}}
+          )
         end
 
-        %{event |
-          event_type: "people",
-          data: Map.merge(event.data, %{
-            "type" => "person.payment.received",
-            "person_id" => data["tid"],
-            "pos_zone" => data["pos"],
-            "_source" => "gateway"
-          })
+        %{
+          event
+          | event_type: "people",
+            data:
+              Map.merge(event.data, %{
+                "type" => "person.payment.received",
+                "person_id" => data["tid"],
+                "pos_zone" => data["pos"],
+                "_source" => "gateway"
+              })
         }
 
       "received" ->
-        %{event |
-          event_type: "acc",
-          data: Map.merge(event.data, %{
-            "type" => "acc.received",
-            "pos_zone" => data["pos"],
-            "_source" => "gateway"
-          })
+        %{
+          event
+          | event_type: "acc",
+            data:
+              Map.merge(event.data, %{
+                "type" => "acc.received",
+                "pos_zone" => data["pos"],
+                "_source" => "gateway"
+              })
         }
 
       "unmatched" ->
-        %{event |
-          event_type: "acc",
-          data: Map.merge(event.data, %{
-            "type" => "acc.unmatched",
-            "pos_zone" => data["pos"],
-            "_source" => "gateway"
-          })
+        %{
+          event
+          | event_type: "acc",
+            data:
+              Map.merge(event.data, %{
+                "type" => "acc.unmatched",
+                "pos_zone" => data["pos"],
+                "_source" => "gateway"
+              })
         }
 
       "matched_no_journey" ->
-        %{event |
-          event_type: "acc",
-          data: Map.merge(event.data, %{
-            "type" => "acc.matched_no_journey",
-            "pos_zone" => data["pos"],
-            "person_id" => data["tid"],
-            "_source" => "gateway"
-          })
+        %{
+          event
+          | event_type: "acc",
+            data:
+              Map.merge(event.data, %{
+                "type" => "acc.matched_no_journey",
+                "pos_zone" => data["pos"],
+                "person_id" => data["tid"],
+                "_source" => "gateway"
+              })
         }
 
       "late_after_gate" ->
-        %{event |
-          event_type: "acc",
-          data: Map.merge(event.data, %{
-            "type" => "acc.late_after_gate",
-            "pos_zone" => data["pos"],
-            "person_id" => data["tid"],
-            "delta_ms" => data["delta_ms"],
-            "_source" => "gateway"
-          })
+        %{
+          event
+          | event_type: "acc",
+            data:
+              Map.merge(event.data, %{
+                "type" => "acc.late_after_gate",
+                "pos_zone" => data["pos"],
+                "person_id" => data["tid"],
+                "delta_ms" => data["delta_ms"],
+                "_source" => "gateway"
+              })
         }
 
       _ ->
@@ -391,32 +443,38 @@ defmodule AveroCommand.MQTT.EventRouter do
     case data["t"] do
       "delete" ->
         # Track deletion can be treated as exit for some scenarios
-        %{event |
-          event_type: "exits",
-          data: Map.merge(event.data, %{
-            "type" => "exit.confirmed",
-            "authorized" => data["auth"] || false,
-            "_source" => "gateway"
-          })
+        %{
+          event
+          | event_type: "exits",
+            data:
+              Map.merge(event.data, %{
+                "type" => "exit.confirmed",
+                "authorized" => data["auth"] || false,
+                "_source" => "gateway"
+              })
         }
 
       "create" ->
-        %{event |
-          event_type: "tracking",
-          data: Map.merge(event.data, %{
-            "type" => "track.created",
-            "_source" => "gateway"
-          })
+        %{
+          event
+          | event_type: "tracking",
+            data:
+              Map.merge(event.data, %{
+                "type" => "track.created",
+                "_source" => "gateway"
+              })
         }
 
       "stitch" ->
-        %{event |
-          event_type: "tracking",
-          data: Map.merge(event.data, %{
-            "type" => "track.stitched",
-            "prev_track_id" => data["prev_tid"],
-            "_source" => "gateway"
-          })
+        %{
+          event
+          | event_type: "tracking",
+            data:
+              Map.merge(event.data, %{
+                "type" => "track.stitched",
+                "prev_track_id" => data["prev_tid"],
+                "_source" => "gateway"
+              })
         }
 
       _ ->

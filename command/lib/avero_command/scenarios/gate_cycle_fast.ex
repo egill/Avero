@@ -50,7 +50,8 @@ defmodule AveroCommand.Scenarios.GateCycleFast do
         open_duration_ms: open_duration_ms,
         min_expected_ms: @min_cycle_ms,
         total_crossings: total_crossings,
-        message: "Gate #{gate_id} cycled in #{open_duration_ms}ms (min expected: #{@min_cycle_ms}ms, crossings: #{total_crossings})"
+        message:
+          "Gate #{gate_id} cycled in #{open_duration_ms}ms (min expected: #{@min_cycle_ms}ms, crossings: #{total_crossings})"
       },
       suggested_actions: [
         %{"id" => "check_sensor", "label" => "Check Sensor Signal", "auto" => false},

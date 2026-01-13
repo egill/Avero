@@ -4,5 +4,5 @@ defmodule AveroCommandWeb.Layouts do
   """
   use AveroCommandWeb, :html
 
-  embed_templates "layouts/*"
+  embed_templates("layouts/*")
 end

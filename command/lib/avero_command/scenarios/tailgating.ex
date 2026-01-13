@@ -28,24 +28,36 @@ defmodule AveroCommand.Scenarios.Tailgating do
   # These include enriched context about both persons, POS visits, groups, etc.
   # NOTE: Gateway publishes tailgating.detected to /tracking topic, so event_type = "tracking"
   def evaluate(%{event_type: "tracking", data: %{"type" => "tailgating.detected"} = data} = event) do
-    Logger.info("Tailgating: direct detection from gateway - authorized=#{data["authorized_person_id"]}, unauthorized=#{data["unauthorized_person_id"]}")
+    Logger.info(
+      "Tailgating: direct detection from gateway - authorized=#{data["authorized_person_id"]}, unauthorized=#{data["unauthorized_person_id"]}"
+    )
+
     {:match, build_enriched_incident(event, data)}
   end
 
-  def evaluate(%{event_type: "exits", data: %{"type" => "exit.confirmed", "authorized" => false}} = event) do
+  def evaluate(
+        %{event_type: "exits", data: %{"type" => "exit.confirmed", "authorized" => false}} = event
+      ) do
     Logger.info("Tailgating: checking unauthorized exit for person #{event.person_id}")
     check_for_tailgating(event)
   end
 
-  def evaluate(%{event_type: "exits", data: %{"type" => "exit.confirmed", "tailgated" => true, "authorized" => false}} = event) do
+  def evaluate(
+        %{
+          event_type: "exits",
+          data: %{"type" => "exit.confirmed", "tailgated" => true, "authorized" => false}
+        } = event
+      ) do
     # This exit was flagged as a tailgate by the gateway - find the authorized person
     # NOTE: Must check authorized=false to avoid false positives on authorized tailgaters
     Logger.info("Tailgating: gateway flagged tailgate for unauthorized person #{event.person_id}")
     # Look for recent authorized exit at same gate
     recent_events = get_recent_exits(event.site, event.gate_id)
-    authorized_event = Enum.find(recent_events, fn e ->
-      e.authorized == true and within_window?(e.time, event.time)
-    end)
+
+    authorized_event =
+      Enum.find(recent_events, fn e ->
+        e.authorized == true and within_window?(e.time, event.time)
+      end)
 
     if authorized_event do
       {:match, build_incident(event, authorized_event)}
@@ -177,7 +189,8 @@ defmodule AveroCommand.Scenarios.Tailgating do
         authorized_count: exit_summary["authorized_count"] || 0,
         unauthorized_count: exit_summary["unauthorized_count"] || 0,
         tailgating_count: exit_summary["tailgating_count"] || 0,
-        message: "#{exit_summary["tailgating_count"]} tailgater(s) detected in gate cycle with #{exit_summary["total_crossings"]} total crossings"
+        message:
+          "#{exit_summary["tailgating_count"]} tailgater(s) detected in gate cycle with #{exit_summary["total_crossings"]} total crossings"
       },
       suggested_actions: [
         %{"id" => "notify_security", "label" => "Notify Security", "auto" => true},
@@ -193,21 +206,23 @@ defmodule AveroCommand.Scenarios.Tailgating do
     # Determine severity based on context
     # Same group = lower severity (tagging issue, not theft)
     # Unauthorized paid = lower severity (likely honest mistake)
-    severity = cond do
-      data["same_group"] == true -> "medium"
-      data["unauthorized_paid"] == true -> "medium"
-      true -> "high"
-    end
+    severity =
+      cond do
+        data["same_group"] == true -> "medium"
+        data["unauthorized_paid"] == true -> "medium"
+        true -> "high"
+      end
 
     # Build descriptive message based on context
     message = build_tailgate_message(data)
 
     # Extract follower IDs - gateway may send single ID or array
-    follower_ids = case data["unauthorized_person_ids"] do
-      ids when is_list(ids) -> ids
-      nil -> if data["unauthorized_person_id"], do: [data["unauthorized_person_id"]], else: []
-      _ -> []
-    end
+    follower_ids =
+      case data["unauthorized_person_ids"] do
+        ids when is_list(ids) -> ids
+        nil -> if data["unauthorized_person_id"], do: [data["unauthorized_person_id"]], else: []
+        _ -> []
+      end
 
     %{
       type: "tailgating_detected",
@@ -232,7 +247,6 @@ defmodule AveroCommand.Scenarios.Tailgating do
         follower_last_pos_zone: data["unauthorized_last_pos_zone"],
         follower_paid: data["unauthorized_paid"] || false,
         follower_session_id: data["unauthorized_session_id"],
-
         gate_id: data["gate_id"],
 
         # Relationship context
@@ -288,7 +302,11 @@ defmodule AveroCommand.Scenarios.Tailgating do
       data["unauthorized_paid"] == true ->
         # Person paid but still tailgated - possible tech issue
         [
-          %{"id" => "check_payment_system", "label" => "Check Payment Integration", "auto" => false},
+          %{
+            "id" => "check_payment_system",
+            "label" => "Check Payment Integration",
+            "auto" => false
+          },
           %{"id" => "dismiss", "label" => "Dismiss (Paid Customer)", "auto" => false}
         ] ++ base_actions
 

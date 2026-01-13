@@ -73,6 +73,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
     case Incidents.resolve(id, "dismissed") do
       {:ok, _incident} ->
         incidents = Enum.reject(socket.assigns.incidents, &(&1.id == id))
+
         {:noreply,
          socket
          |> assign(:incidents, incidents)
@@ -136,7 +137,11 @@ defmodule AveroCommandWeb.IncidentFeedLive do
   end
 
   @impl true
-  def handle_event("show-journey", %{"session-id" => session_id, "person-id" => person_id}, socket) do
+  def handle_event(
+        "show-journey",
+        %{"session-id" => session_id, "person-id" => person_id},
+        socket
+      ) do
     # Open modal and start loading journey data
     socket =
       socket
@@ -360,6 +365,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
   defp tailgate_incident_card(assigns) do
     ctx = assigns.incident.context || %{}
     assigns = assign(assigns, :ctx, ctx)
+
     ~H"""
     <div class={[
       "bg-white shadow rounded-lg overflow-hidden border-l-4 dark:bg-gray-800",
@@ -618,12 +624,14 @@ defmodule AveroCommandWeb.IncidentFeedLive do
   defp journey_event_color(_), do: "text-gray-600"
 
   defp format_journey_time(nil), do: ""
+
   defp format_journey_time(ts) when is_binary(ts) do
     case DateTime.from_iso8601(ts) do
       {:ok, dt, _} -> Calendar.strftime(dt, "%H:%M:%S")
       _ -> ts
     end
   end
+
   defp format_journey_time(_), do: ""
 
   defp severity_border("high"), do: "border-red-500"

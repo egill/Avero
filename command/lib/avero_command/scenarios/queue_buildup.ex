@@ -68,7 +68,10 @@ defmodule AveroCommand.Scenarios.QueueBuildup do
 
     # If queue is building but gates aren't cycling fast enough
     if gate_cycles < @min_cycles_per_minute do
-      Logger.warning("QueueBuildup: #{queue_size} people queued at #{zone}, only #{gate_cycles} gate cycles in last minute")
+      Logger.warning(
+        "QueueBuildup: #{queue_size} people queued at #{zone}, only #{gate_cycles} gate cycles in last minute"
+      )
+
       {:match, build_incident(event, data, zone, queue_size, gate_cycles, gate_id)}
     else
       :no_match
@@ -91,6 +94,7 @@ defmodule AveroCommand.Scenarios.QueueBuildup do
 
   defp gate_matches?(zone, gate_id) when is_binary(zone) and is_integer(gate_id) do
     zone_upper = String.upcase(zone)
+
     String.contains?(zone_upper, "GATE") &&
       String.contains?(zone_upper, Integer.to_string(gate_id))
   end
@@ -134,7 +138,8 @@ defmodule AveroCommand.Scenarios.QueueBuildup do
         gate_cycles: gate_cycles,
         expected_min_cycles: @min_cycles_per_minute,
         check_window_seconds: @cycle_check_window_seconds,
-        message: "#{queue_size} people queued at #{zone}, only #{gate_cycles} gate cycles in last #{@cycle_check_window_seconds}s"
+        message:
+          "#{queue_size} people queued at #{zone}, only #{gate_cycles} gate cycles in last #{@cycle_check_window_seconds}s"
       },
       suggested_actions: [
         %{"id" => "open_additional_gate", "label" => "Open Additional Gate", "auto" => false},

@@ -33,7 +33,10 @@ defmodule AveroCommand.Scenarios.MultipleFailedExits do
   end
 
   # Also check on exit.confirmed with authorized=false
-  def evaluate(%{event_type: "exits", data: %{"type" => "exit.confirmed", "authorized" => false} = data} = event) do
+  def evaluate(
+        %{event_type: "exits", data: %{"type" => "exit.confirmed", "authorized" => false} = data} =
+          event
+      ) do
     check_exit_attempts(event, data)
   end
 
@@ -48,17 +51,22 @@ defmodule AveroCommand.Scenarios.MultipleFailedExits do
       attempts = get_exit_attempts(site, person_id, since)
 
       # Count unauthorized attempts
-      unauthorized_attempts = Enum.count(attempts, fn e ->
-        e.data["authorized"] == false || e.data["authorized"] == "false"
-      end)
+      unauthorized_attempts =
+        Enum.count(attempts, fn e ->
+          e.data["authorized"] == false || e.data["authorized"] == "false"
+        end)
 
       # Count any authorizations
-      any_authorized = Enum.any?(attempts, fn e ->
-        e.data["authorized"] == true || e.data["authorized"] == "true"
-      end)
+      any_authorized =
+        Enum.any?(attempts, fn e ->
+          e.data["authorized"] == true || e.data["authorized"] == "true"
+        end)
 
       if unauthorized_attempts >= @failed_attempts_threshold && not any_authorized do
-        Logger.info("MultipleFailedExits: person #{person_id} has #{unauthorized_attempts} failed attempts")
+        Logger.info(
+          "MultipleFailedExits: person #{person_id} has #{unauthorized_attempts} failed attempts"
+        )
+
         {:match, build_incident(event, data, person_id, unauthorized_attempts)}
       else
         :no_match
@@ -71,7 +79,7 @@ defmodule AveroCommand.Scenarios.MultipleFailedExits do
   defp get_exit_attempts(site, person_id, since) do
     Store.recent_events(100, site)
     |> Enum.filter(fn e ->
-      (e.event_type == "exits" && e.data["type"] == "exit.confirmed") &&
+      e.event_type == "exits" && e.data["type"] == "exit.confirmed" &&
         e.person_id == person_id &&
         DateTime.compare(e.time, since) == :gt
     end)
@@ -95,7 +103,8 @@ defmodule AveroCommand.Scenarios.MultipleFailedExits do
         attempt_count: attempt_count,
         threshold: @failed_attempts_threshold,
         time_window_minutes: div(@time_window_seconds, 60),
-        message: "Person has #{attempt_count} failed exit attempts in #{div(@time_window_seconds, 60)} minutes"
+        message:
+          "Person has #{attempt_count} failed exit attempts in #{div(@time_window_seconds, 60)} minutes"
       },
       suggested_actions: [
         %{"id" => "assist_customer", "label" => "Assist Customer", "auto" => false},

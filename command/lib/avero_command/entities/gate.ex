@@ -103,7 +103,10 @@ defmodule AveroCommand.Entities.Gate do
   def handle_info(:unusual_gate_opening_check, state) do
     # Timer fired - check if gate is still open
     if state.state == :open do
-      Logger.info("Gate #{state.site}:#{state.gate_id} has been open for #{div(@unusual_threshold_ms, 1000)}s - creating incident")
+      Logger.info(
+        "Gate #{state.site}:#{state.gate_id} has been open for #{div(@unusual_threshold_ms, 1000)}s - creating incident"
+      )
+
       UnusualGateOpening.create_incident(state.site, state.gate_id, state.last_opened_at)
     end
 
@@ -121,11 +124,12 @@ defmodule AveroCommand.Entities.Gate do
     # Schedule timer for unusual gate opening detection
     timer_ref = Process.send_after(self(), :unusual_gate_opening_check, @unusual_threshold_ms)
 
-    %{state |
-      state: :open,
-      last_opened_at: event.time,
-      unusual_open_timer_ref: timer_ref,
-      events: add_event(state.events, event)
+    %{
+      state
+      | state: :open,
+        last_opened_at: event.time,
+        unusual_open_timer_ref: timer_ref,
+        events: add_event(state.events, event)
     }
   end
 
@@ -133,32 +137,34 @@ defmodule AveroCommand.Entities.Gate do
     # Cancel unusual gate opening timer if set
     if state.unusual_open_timer_ref, do: Process.cancel_timer(state.unusual_open_timer_ref)
 
-    %{state |
-      state: :closed,
-      last_closed_at: event.time,
-      unusual_open_timer_ref: nil,
-      events: add_event(state.events, event)
+    %{
+      state
+      | state: :closed,
+        last_closed_at: event.time,
+        unusual_open_timer_ref: nil,
+        events: add_event(state.events, event)
     }
   end
 
   defp apply_event(state, %{event_type: "gate.fault"} = event) do
-    %{state |
-      fault: true,
-      events: add_event(state.events, event)
+    %{state | fault: true, events: add_event(state.events, event)}
+  end
+
+  defp apply_event(state, %{event_type: "gate.zone_entry", person_id: person_id} = event)
+       when not is_nil(person_id) do
+    %{
+      state
+      | persons_in_zone: [person_id | state.persons_in_zone] |> Enum.uniq(),
+        events: add_event(state.events, event)
     }
   end
 
-  defp apply_event(state, %{event_type: "gate.zone_entry", person_id: person_id} = event) when not is_nil(person_id) do
-    %{state |
-      persons_in_zone: [person_id | state.persons_in_zone] |> Enum.uniq(),
-      events: add_event(state.events, event)
-    }
-  end
-
-  defp apply_event(state, %{event_type: "gate.zone_exit", person_id: person_id} = event) when not is_nil(person_id) do
-    %{state |
-      persons_in_zone: Enum.reject(state.persons_in_zone, &(&1 == person_id)),
-      events: add_event(state.events, event)
+  defp apply_event(state, %{event_type: "gate.zone_exit", person_id: person_id} = event)
+       when not is_nil(person_id) do
+    %{
+      state
+      | persons_in_zone: Enum.reject(state.persons_in_zone, &(&1 == person_id)),
+        events: add_event(state.events, event)
     }
   end
 

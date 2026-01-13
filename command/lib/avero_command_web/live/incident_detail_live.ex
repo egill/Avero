@@ -6,7 +6,8 @@ defmodule AveroCommandWeb.IncidentDetailLive do
   alias AveroCommand.Store
 
   @dashboard_uid "NETTO-GRANDI-timescale"
-  @live_stats_refresh_interval 5_000  # Refresh live stats every 5 seconds
+  # Refresh live stats every 5 seconds
+  @live_stats_refresh_interval 5_000
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -43,15 +44,17 @@ defmodule AveroCommandWeb.IncidentDetailLive do
         grafana_base_url = get_grafana_base_url(socket)
 
         # Check if this is a live unusual_gate_opening incident
-        is_live_incident = incident.type == "unusual_gate_opening" and
-                          get_in(incident.context, ["is_live"]) == true
+        is_live_incident =
+          incident.type == "unusual_gate_opening" and
+            get_in(incident.context, ["is_live"]) == true
 
         # Fetch live stats for unusual_gate_opening incidents
-        live_stats = if is_live_incident or incident.type == "unusual_gate_opening" do
-          fetch_unusual_gate_stats(incident)
-        else
-          nil
-        end
+        live_stats =
+          if is_live_incident or incident.type == "unusual_gate_opening" do
+            fetch_unusual_gate_stats(incident)
+          else
+            nil
+          end
 
         socket =
           socket
@@ -67,12 +70,13 @@ defmodule AveroCommandWeb.IncidentDetailLive do
           |> assign(:live_stats, live_stats)
 
         # Schedule stats refresh for live incidents
-        socket = if is_live_incident and connected?(socket) do
-          Process.send_after(self(), :refresh_live_stats, @live_stats_refresh_interval)
-          socket
-        else
-          socket
-        end
+        socket =
+          if is_live_incident and connected?(socket) do
+            Process.send_after(self(), :refresh_live_stats, @live_stats_refresh_interval)
+            socket
+          else
+            socket
+          end
 
         {:ok, socket}
     end
@@ -118,18 +122,20 @@ defmodule AveroCommandWeb.IncidentDetailLive do
     started_at_ms = context["started_at_ms"]
 
     # Determine time window - from when gate opened to now (or closed_at)
-    from_datetime = if started_at_ms do
-      DateTime.from_unix!(started_at_ms, :millisecond)
-    else
-      incident.created_at
-    end
+    from_datetime =
+      if started_at_ms do
+        DateTime.from_unix!(started_at_ms, :millisecond)
+      else
+        incident.created_at
+      end
 
     # If incident is resolved, use closed_at; otherwise use now
-    to_datetime = if context["closed_at_ms"] do
-      DateTime.from_unix!(context["closed_at_ms"], :millisecond)
-    else
-      DateTime.utc_now()
-    end
+    to_datetime =
+      if context["closed_at_ms"] do
+        DateTime.from_unix!(context["closed_at_ms"], :millisecond)
+      else
+        DateTime.utc_now()
+      end
 
     # Get journey counts by authorization
     journey_counts = Journeys.count_by_authorization(incident.site, from_datetime, to_datetime)
@@ -138,12 +144,13 @@ defmodule AveroCommandWeb.IncidentDetailLive do
     backward_count = Store.count_backward_crossings(incident.site, from_datetime, to_datetime)
 
     # Get list of journeys during this window
-    journeys = Journeys.list_filtered(
-      sites: [incident.site],
-      from_datetime: from_datetime,
-      to_datetime: to_datetime,
-      limit: 20
-    )
+    journeys =
+      Journeys.list_filtered(
+        sites: [incident.site],
+        from_datetime: from_datetime,
+        to_datetime: to_datetime,
+        limit: 20
+      )
 
     %{
       total_exits: journey_counts.total || 0,
@@ -165,13 +172,16 @@ defmodule AveroCommandWeb.IncidentDetailLive do
     gate_opener_id = context["gate_opener_id"]
 
     # Handle follower_ids as array, with fallback to old field name
-    follower_ids = case context["follower_ids"] do
-      ids when is_list(ids) -> ids
-      nil -> if context["person_id"], do: [context["person_id"]], else: []
-      _ -> []
-    end
+    follower_ids =
+      case context["follower_ids"] do
+        ids when is_list(ids) -> ids
+        nil -> if context["person_id"], do: [context["person_id"]], else: []
+        _ -> []
+      end
 
-    Logger.info("Tailgating journey lookup: site=#{site}, gate_opener=#{inspect(gate_opener_id)}, followers=#{inspect(follower_ids)}")
+    Logger.info(
+      "Tailgating journey lookup: site=#{site}, gate_opener=#{inspect(gate_opener_id)}, followers=#{inspect(follower_ids)}"
+    )
 
     gate_opener_journey =
       if gate_opener_id do
@@ -205,7 +215,9 @@ defmodule AveroCommandWeb.IncidentDetailLive do
     # Extract all person_id related fields from context
     person_ids = extract_person_ids(context)
 
-    Logger.info("Person journey lookup for incident #{incident.id}: found #{length(person_ids)} person(s)")
+    Logger.info(
+      "Person journey lookup for incident #{incident.id}: found #{length(person_ids)} person(s)"
+    )
 
     Enum.map(person_ids, fn {label, person_id} ->
       events = Store.events_for_person_extended(site, person_id, 100)
@@ -258,8 +270,9 @@ defmodule AveroCommandWeb.IncidentDetailLive do
   @impl true
   def handle_info({:incident_updated, incident}, socket) do
     # Update is_live status when incident changes
-    is_live = incident.type == "unusual_gate_opening" and
-              get_in(incident.context, ["is_live"]) == true
+    is_live =
+      incident.type == "unusual_gate_opening" and
+        get_in(incident.context, ["is_live"]) == true
 
     socket =
       socket
@@ -267,11 +280,12 @@ defmodule AveroCommandWeb.IncidentDetailLive do
       |> assign(:is_live_incident, is_live)
 
     # Update stats if still live or if it just became not-live (final stats)
-    socket = if incident.type == "unusual_gate_opening" do
-      assign(socket, :live_stats, fetch_unusual_gate_stats(incident))
-    else
-      socket
-    end
+    socket =
+      if incident.type == "unusual_gate_opening" do
+        assign(socket, :live_stats, fetch_unusual_gate_stats(incident))
+      else
+        socket
+      end
 
     {:noreply, socket}
   end
@@ -537,11 +551,12 @@ defmodule AveroCommandWeb.IncidentDetailLive do
     gate_opener_id = context["gate_opener_id"]
 
     # Extract followers (array of tailgaters) - handle both old and new format
-    follower_ids = case context["follower_ids"] do
-      ids when is_list(ids) -> ids
-      nil -> if context["person_id"], do: [context["person_id"]], else: []
-      _ -> []
-    end
+    follower_ids =
+      case context["follower_ids"] do
+        ids when is_list(ids) -> ids
+        nil -> if context["person_id"], do: [context["person_id"]], else: []
+        _ -> []
+      end
 
     assigns =
       assigns
@@ -750,6 +765,7 @@ defmodule AveroCommandWeb.IncidentDetailLive do
   end
 
   defp format_duration_from_ms(nil), do: "--:--"
+
   defp format_duration_from_ms(ms) when is_integer(ms) do
     total_seconds = div(ms, 1000)
     hours = div(total_seconds, 3600)
@@ -762,13 +778,15 @@ defmodule AveroCommandWeb.IncidentDetailLive do
       "#{minutes}:#{String.pad_leading(Integer.to_string(seconds), 2, "0")}"
     end
   end
+
   defp format_duration_from_ms(_), do: "--:--"
 
   defp person_journey(assigns) do
     # Filter out events where format_journey_event returns nil (e.g., heartbeats)
-    filtered_events = Enum.filter(assigns.events, fn event ->
-      format_journey_event(event) != nil
-    end)
+    filtered_events =
+      Enum.filter(assigns.events, fn event ->
+        format_journey_event(event) != nil
+      end)
 
     assigns = assign(assigns, :filtered_events, filtered_events)
 
@@ -865,15 +883,21 @@ defmodule AveroCommandWeb.IncidentDetailLive do
       "gate.opened" ->
         reason = data["reason"] || "unknown"
         person = data["person_id"]
-        reason_emoji = case reason do
-          "payment" -> "💳"
-          "sensor_triggered" -> "🔔"
-          _ -> "🚪"
-        end
-        if person, do: "#{reason_emoji} Gate opened (#{reason}) for ##{person}", else: "#{reason_emoji} Gate opened (#{reason})"
+
+        reason_emoji =
+          case reason do
+            "payment" -> "💳"
+            "sensor_triggered" -> "🔔"
+            _ -> "🚪"
+          end
+
+        if person,
+          do: "#{reason_emoji} Gate opened (#{reason}) for ##{person}",
+          else: "#{reason_emoji} Gate opened (#{reason})"
 
       "gate.closed" ->
         duration = data["open_duration_ms"] || data["duration_ms"]
+
         if duration do
           secs = Float.round(duration / 1000, 1)
           "🚪 Gate closed (#{secs}s cycle)"
@@ -895,6 +919,7 @@ defmodule AveroCommandWeb.IncidentDetailLive do
 
       "journey" ->
         duration = data["duration_ms"] || data["total_dwell_ms"]
+
         if duration do
           secs = Float.round(duration / 1000, 1)
           "🏁 Journey completed (#{secs}s)"
@@ -952,7 +977,7 @@ defmodule AveroCommandWeb.IncidentDetailLive do
   defp event_highlight(event, incident) do
     # Highlight the triggering event
     if event.data["type"] == "gate.closed" and
-       abs(DateTime.diff(event.time, incident.created_at, :second)) < 2 do
+         abs(DateTime.diff(event.time, incident.created_at, :second)) < 2 do
       "bg-yellow-50 border-l-2 border-yellow-400"
     else
       ""
@@ -968,6 +993,7 @@ defmodule AveroCommandWeb.IncidentDetailLive do
   defp format_event_time(event_time, incident_time) do
     diff = DateTime.diff(event_time, incident_time, :millisecond)
     sign = if diff >= 0, do: "+", else: ""
+
     "#{sign}#{div(diff, 1000)}.#{rem(abs(diff), 1000) |> Integer.to_string() |> String.pad_leading(3, "0")}s"
   end
 

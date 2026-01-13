@@ -12,8 +12,10 @@ defmodule AveroCommand.Incidents.Manager do
   alias AveroCommand.Incidents.Incident
   alias AveroCommand.Metrics
 
-  @escalation_check_interval 60_000  # Check every minute
-  @dedup_window_seconds 300  # 5 minute deduplication window
+  # Check every minute
+  @escalation_check_interval 60_000
+  # 5 minute deduplication window
+  @dedup_window_seconds 300
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -49,8 +51,17 @@ defmodule AveroCommand.Incidents.Manager do
       :ok ->
         case Incidents.create(attrs) do
           {:ok, incident} ->
-            Logger.info("Incident created: #{incident.type} (#{incident.severity}) at #{incident.site}")
-            Metrics.inc_incident_created(incident.type, incident.severity, incident.category, incident.site)
+            Logger.info(
+              "Incident created: #{incident.type} (#{incident.severity}) at #{incident.site}"
+            )
+
+            Metrics.inc_incident_created(
+              incident.type,
+              incident.severity,
+              incident.category,
+              incident.site
+            )
+
             update_active_incidents_gauge()
             execute_auto_actions(incident)
             {:reply, {:ok, incident}, state}
@@ -114,7 +125,8 @@ defmodule AveroCommand.Incidents.Manager do
   rescue
     e ->
       Logger.warning("check_duplicate failed: #{Exception.format(:error, e, __STACKTRACE__)}")
-      :ok  # Allow incident creation on error
+      # Allow incident creation on error
+      :ok
   end
 
   defp check_duplicate(_attrs), do: :ok

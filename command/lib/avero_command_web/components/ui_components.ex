@@ -7,8 +7,8 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a card container with dark mode support.
   """
-  attr :class, :string, default: nil
-  slot :inner_block, required: true
+  attr(:class, :string, default: nil)
+  slot(:inner_block, required: true)
 
   def card(assigns) do
     ~H"""
@@ -25,9 +25,9 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a badge/pill for status indicators.
   """
-  attr :variant, :atom, default: :default, values: [:default, :success, :warning, :error, :info]
-  attr :class, :string, default: nil
-  slot :inner_block, required: true
+  attr(:variant, :atom, default: :default, values: [:default, :success, :warning, :error, :info])
+  attr(:class, :string, default: nil)
+  slot(:inner_block, required: true)
 
   def badge(assigns) do
     ~H"""
@@ -41,18 +41,27 @@ defmodule AveroCommandWeb.UIComponents do
     """
   end
 
-  defp badge_variant_class(:default), do: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
-  defp badge_variant_class(:success), do: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-  defp badge_variant_class(:warning), do: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400"
-  defp badge_variant_class(:error), do: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
-  defp badge_variant_class(:info), do: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
+  defp badge_variant_class(:default),
+    do: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+
+  defp badge_variant_class(:success),
+    do: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+
+  defp badge_variant_class(:warning),
+    do: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400"
+
+  defp badge_variant_class(:error),
+    do: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
+
+  defp badge_variant_class(:info),
+    do: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
 
   @doc """
   Renders a page header with optional actions.
   """
-  attr :title, :string, required: true
-  attr :subtitle, :string, default: nil
-  slot :actions
+  attr(:title, :string, required: true)
+  attr(:subtitle, :string, default: nil)
+  slot(:actions)
 
   def page_header(assigns) do
     ~H"""
@@ -75,8 +84,8 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a data table wrapper with dark mode.
   """
-  attr :class, :string, default: nil
-  slot :inner_block, required: true
+  attr(:class, :string, default: nil)
+  slot(:inner_block, required: true)
 
   def data_table(assigns) do
     ~H"""
@@ -96,7 +105,7 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a table header row.
   """
-  slot :inner_block, required: true
+  slot(:inner_block, required: true)
 
   def table_head(assigns) do
     ~H"""
@@ -111,8 +120,8 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a table header cell.
   """
-  attr :class, :string, default: nil
-  slot :inner_block, required: true
+  attr(:class, :string, default: nil)
+  slot(:inner_block, required: true)
 
   def th(assigns) do
     ~H"""
@@ -129,7 +138,7 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a table body.
   """
-  slot :inner_block, required: true
+  slot(:inner_block, required: true)
 
   def table_body(assigns) do
     ~H"""
@@ -142,8 +151,8 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a table cell.
   """
-  attr :class, :string, default: nil
-  slot :inner_block, required: true
+  attr(:class, :string, default: nil)
+  slot(:inner_block, required: true)
 
   def td(assigns) do
     ~H"""
@@ -159,12 +168,12 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a button with variants.
   """
-  attr :type, :string, default: "button"
-  attr :variant, :atom, default: :primary, values: [:primary, :secondary, :danger, :ghost]
-  attr :size, :atom, default: :md, values: [:sm, :md, :lg]
-  attr :class, :string, default: nil
-  attr :rest, :global, include: ~w(disabled phx-click phx-target phx-value-id)
-  slot :inner_block, required: true
+  attr(:type, :string, default: "button")
+  attr(:variant, :atom, default: :primary, values: [:primary, :secondary, :danger, :ghost])
+  attr(:size, :atom, default: :md, values: [:sm, :md, :lg])
+  attr(:class, :string, default: nil)
+  attr(:rest, :global, include: ~w(disabled phx-click phx-target phx-value-id))
+  slot(:inner_block, required: true)
 
   def button(assigns) do
     ~H"""
@@ -192,12 +201,15 @@ defmodule AveroCommandWeb.UIComponents do
   defp button_variant_class(:primary) do
     "bg-brand-500 text-white hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-700"
   end
+
   defp button_variant_class(:secondary) do
     "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
   end
+
   defp button_variant_class(:danger) do
     "bg-red-500 text-white hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700"
   end
+
   defp button_variant_class(:ghost) do
     "bg-transparent text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
   end
@@ -205,13 +217,13 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a text input field with dark mode.
   """
-  attr :id, :string, required: true
-  attr :name, :string, required: true
-  attr :type, :string, default: "text"
-  attr :value, :any, default: nil
-  attr :placeholder, :string, default: nil
-  attr :class, :string, default: nil
-  attr :rest, :global, include: ~w(disabled readonly required autofocus phx-change phx-blur)
+  attr(:id, :string, required: true)
+  attr(:name, :string, required: true)
+  attr(:type, :string, default: "text")
+  attr(:value, :any, default: nil)
+  attr(:placeholder, :string, default: nil)
+  attr(:class, :string, default: nil)
+  attr(:rest, :global, include: ~w(disabled readonly required autofocus phx-change phx-blur))
 
   def input(assigns) do
     ~H"""
@@ -237,13 +249,13 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders a select dropdown with dark mode.
   """
-  attr :id, :string, required: true
-  attr :name, :string, required: true
-  attr :options, :list, required: true
-  attr :value, :any, default: nil
-  attr :prompt, :string, default: nil
-  attr :class, :string, default: nil
-  attr :rest, :global, include: ~w(disabled required phx-change)
+  attr(:id, :string, required: true)
+  attr(:name, :string, required: true)
+  attr(:options, :list, required: true)
+  attr(:value, :any, default: nil)
+  attr(:prompt, :string, default: nil)
+  attr(:class, :string, default: nil)
+  attr(:rest, :global, include: ~w(disabled required phx-change))
 
   def select(assigns) do
     ~H"""
@@ -270,10 +282,10 @@ defmodule AveroCommandWeb.UIComponents do
   @doc """
   Renders an empty state placeholder.
   """
-  attr :title, :string, required: true
-  attr :description, :string, default: nil
-  slot :icon
-  slot :actions
+  attr(:title, :string, required: true)
+  attr(:description, :string, default: nil)
+  slot(:icon)
+  slot(:actions)
 
   def empty_state(assigns) do
     ~H"""

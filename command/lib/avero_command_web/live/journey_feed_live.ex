@@ -4,7 +4,8 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   alias AveroCommand.Journeys
 
   @page_size 25
-  @min_dwell_ms 7000  # 7 seconds minimum dwell to count as POS stop
+  # 7 seconds minimum dwell to count as POS stop
+  @min_dwell_ms 7000
 
   @impl true
   def mount(_params, _session, socket) do
@@ -82,6 +83,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   defp matches_person_id?(_journey, nil), do: true
   defp matches_person_id?(_journey, ""), do: true
+
   defp matches_person_id?(journey, person_id) when is_binary(person_id) do
     case Integer.parse(String.trim(person_id)) do
       {id, ""} -> journey.person_id == id
@@ -90,6 +92,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   end
 
   defp matches_datetime_range?(_journey, nil, nil), do: true
+
   defp matches_datetime_range?(journey, from_datetime, to_datetime) do
     from_ok = is_nil(from_datetime) or DateTime.compare(journey.time, from_datetime) != :lt
     to_ok = is_nil(to_datetime) or DateTime.compare(journey.time, to_datetime) != :gt
@@ -97,29 +100,36 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   end
 
   defp matches_pos_filter?(_journey, :all, []), do: true
+
   defp matches_pos_filter?(journey, :all, zones) when length(zones) > 0 do
     journey.payment_zone in zones
   end
+
   # "With POS" = had meaningful time at a POS zone (>= 7s dwell)
   defp matches_pos_filter?(journey, :with_pos, []) do
     journey.total_pos_dwell_ms != nil and journey.total_pos_dwell_ms >= @min_dwell_ms
   end
+
   defp matches_pos_filter?(journey, :with_pos, zones) when length(zones) > 0 do
     journey.payment_zone in zones
   end
+
   # "No POS" = didn't spend meaningful time at any POS zone
   defp matches_pos_filter?(journey, :without_pos, _) do
     is_nil(journey.total_pos_dwell_ms) or journey.total_pos_dwell_ms < @min_dwell_ms
   end
+
   # "Unpaid with POS" = unpaid but had meaningful POS stop
   defp matches_pos_filter?(journey, :unpaid_with_pos, _) do
     journey.authorized != true and
       journey.total_pos_dwell_ms != nil and
       journey.total_pos_dwell_ms >= @min_dwell_ms
   end
+
   defp matches_pos_filter?(_journey, _, _), do: true
 
   defp matches_min_duration?(_journey, false), do: true
+
   defp matches_min_duration?(journey, true) do
     journey.duration_ms != nil and journey.duration_ms >= @min_dwell_ms
   end
@@ -244,6 +254,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     case parse_date(value) do
       {:ok, date} ->
         socket |> assign(:from_date, date) |> reset_pagination_and_reload()
+
       :error ->
         {:noreply, socket}
     end
@@ -254,6 +265,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     case parse_date(value) do
       {:ok, date} ->
         socket |> assign(:to_date, date) |> reset_pagination_and_reload()
+
       :error ->
         {:noreply, socket}
     end
@@ -274,6 +286,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     case parse_datetime_local(value) do
       {:ok, datetime} ->
         socket |> assign(:from_datetime, datetime) |> reset_pagination_and_reload()
+
       _ ->
         {:noreply, socket}
     end
@@ -284,6 +297,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     case parse_datetime_local(value) do
       {:ok, datetime} ->
         socket |> assign(:to_datetime, datetime) |> reset_pagination_and_reload()
+
       _ ->
         {:noreply, socket}
     end
@@ -735,6 +749,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   defp filter_button_class(active, color) do
     base = "px-2 sm:px-3 py-1 rounded-md text-xs sm:text-sm font-medium"
+
     if active do
       case color do
         "blue" -> "#{base} bg-blue-600 text-white"
@@ -749,8 +764,10 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   end
 
   defp pos_filter_button_class(active, color \\ "blue")
+
   defp pos_filter_button_class(active, color) do
     base = "px-2 py-1 rounded text-xs font-medium"
+
     if active do
       case color do
         "red" -> "#{base} bg-red-600 text-white"
@@ -762,8 +779,10 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   end
 
   defp acc_filter_button_class(active, color \\ "blue")
+
   defp acc_filter_button_class(active, color) do
     base = "px-2 py-1 rounded text-xs font-medium"
+
     if active do
       case color do
         "green" -> "#{base} bg-green-600 text-white"
@@ -777,6 +796,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   defp format_selected_date(date) do
     today = Date.utc_today()
+
     cond do
       date == today -> "Today"
       date == Date.add(today, -1) -> "Yesterday"
@@ -787,6 +807,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   # Date/DateTime helpers for form inputs
   defp parse_date(""), do: {:ok, nil}
+
   defp parse_date(str) when is_binary(str) do
     case Date.from_iso8601(str) do
       {:ok, date} -> {:ok, date}
@@ -797,9 +818,11 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   defp format_datetime_local(%DateTime{} = dt) do
     Calendar.strftime(dt, "%Y-%m-%dT%H:%M")
   end
+
   defp format_datetime_local(_), do: nil
 
   defp parse_datetime_local(""), do: {:ok, nil}
+
   defp parse_datetime_local(str) when is_binary(str) do
     # datetime-local format: "2025-12-29T10:30"
     case NaiveDateTime.from_iso8601(str <> ":00") do
@@ -807,6 +830,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       error -> error
     end
   end
+
   defp parse_datetime_local(_), do: {:error, :invalid}
 
   # POS zone selector component
@@ -863,12 +887,21 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   defp journey_card(assigns) do
     # Determine border accent color based on exit type
-    border_color = case assigns.journey.exit_type do
-      "exit_confirmed" -> if assigns.journey.authorized, do: "border-l-green-500", else: "border-l-gray-300"
-      "returned_to_store" -> "border-l-amber-400"
-      "tracking_lost" -> "border-l-red-400"
-      _ -> "border-l-gray-300"
-    end
+    border_color =
+      case assigns.journey.exit_type do
+        "exit_confirmed" ->
+          if assigns.journey.authorized, do: "border-l-green-500", else: "border-l-gray-300"
+
+        "returned_to_store" ->
+          "border-l-amber-400"
+
+        "tracking_lost" ->
+          "border-l-red-400"
+
+        _ ->
+          "border-l-gray-300"
+      end
+
     assigns = assign(assigns, :border_color, border_color)
 
     ~H"""
@@ -944,12 +977,14 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   end
 
   defp exit_type_badge(assigns) do
-    {bg_class, text} = case assigns.exit_type do
-      "exit_confirmed" -> {"bg-green-100 text-green-700", "EXIT"}
-      "returned_to_store" -> {"bg-amber-100 text-amber-700", "RTN"}
-      "tracking_lost" -> {"bg-red-100 text-red-700", "LOST"}
-      _ -> {"bg-gray-100 text-gray-600", "?"}
-    end
+    {bg_class, text} =
+      case assigns.exit_type do
+        "exit_confirmed" -> {"bg-green-100 text-green-700", "EXIT"}
+        "returned_to_store" -> {"bg-amber-100 text-amber-700", "RTN"}
+        "tracking_lost" -> {"bg-red-100 text-red-700", "LOST"}
+        _ -> {"bg-gray-100 text-gray-600", "?"}
+      end
+
     assigns = assign(assigns, :bg_class, bg_class)
     assigns = assign(assigns, :text, text)
 
@@ -984,7 +1019,9 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   # Quick = went straight from entry to exit without stopping at any POS zone
   defp quick_exit?(journey) do
     # If they spent >= 7s at any POS zone, they stopped at checkout (not quick)
-    has_pos_stop = journey.total_pos_dwell_ms != nil and journey.total_pos_dwell_ms >= @min_dwell_ms
+    has_pos_stop =
+      journey.total_pos_dwell_ms != nil and journey.total_pos_dwell_ms >= @min_dwell_ms
+
     # Quick = no meaningful POS stop AND not authorized
     not has_pos_stop and journey.authorized != true
   end
@@ -1001,8 +1038,12 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     events = assigns.journey.events || []
 
     # Extract timing data from events - support both old and new event type names
-    gate_cmd = find_event_by_type(events, "gate_cmd") || find_event_by_type(events, "gate_open_requested")
-    gate_open = find_event_by_type(events, "gate_open") || find_event_by_type(events, "gate_opened")
+    gate_cmd =
+      find_event_by_type(events, "gate_cmd") || find_event_by_type(events, "gate_open_requested")
+
+    gate_open =
+      find_event_by_type(events, "gate_open") || find_event_by_type(events, "gate_opened")
+
     last_pos_exit = find_last_pos_exit(events)
     exit_event = find_event_by_type(events, "exit_cross") || find_event_by_type(events, "exit")
     entry_event = find_event_by_type(events, "entry_cross") || find_event_by_type(events, "entry")
@@ -1062,8 +1103,8 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       events
       |> Enum.filter(fn e ->
         e["type"] == "zone_exit" and
-        is_binary(get_in(e, ["data", "zone"])) and
-        String.starts_with?(get_in(e, ["data", "zone"]), "POS")
+          is_binary(get_in(e, ["data", "zone"])) and
+          String.starts_with?(get_in(e, ["data", "zone"]), "POS")
       end)
       |> List.last()
 
@@ -1073,12 +1114,14 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   end
 
   defp get_event_timestamp(nil), do: nil
+
   defp get_event_timestamp(%{"ts" => ts}) when is_binary(ts) do
     case DateTime.from_iso8601(ts) do
       {:ok, dt, _} -> dt
       _ -> nil
     end
   end
+
   defp get_event_timestamp(_), do: nil
 
   defp format_event_timestamp(nil), do: "-"
@@ -1086,8 +1129,10 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   defp format_pos_to_exit_time(nil, _), do: "-"
   defp format_pos_to_exit_time(_, nil), do: "-"
+
   defp format_pos_to_exit_time(pos_exit, exit_time) do
     diff_ms = DateTime.diff(exit_time, pos_exit, :millisecond)
+
     if diff_ms >= 0 do
       format_duration(diff_ms)
     else
@@ -1117,7 +1162,8 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
         cond do
           type == "state_change" -> true
-          type == "dwell_threshold" -> true  # We show this info on zone_exit instead
+          # We show this info on zone_exit instead
+          type == "dwell_threshold" -> true
           type == "zone_entry" and is_pos and dwell < @min_dwell_ms -> true
           type == "zone_exit" and is_pos and dwell < @min_dwell_ms -> true
           true -> false
@@ -1167,25 +1213,37 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   # Events come in newest-first order (already reversed), so last = earliest = journey start
   defp calculate_event_timings(events) do
     case events do
-      [] -> []
+      [] ->
+        []
+
       _ ->
         # Get earliest event (last in list since reversed) as journey start
         start_time = events |> List.last() |> parse_event_timestamp()
 
         # Walk through events (newest first), tracking previous event for delta
-        {results, _} = Enum.map_reduce(events, {start_time, nil}, fn event, {start_ts, prev_ts} ->
-          event_ts = parse_event_timestamp(event)
+        {results, _} =
+          Enum.map_reduce(events, {start_time, nil}, fn event, {start_ts, prev_ts} ->
+            event_ts = parse_event_timestamp(event)
 
-          timing = %{
-            absolute: event_ts,
-            # Time since journey START (positive = after start)
-            since_start: if(start_ts && event_ts, do: DateTime.diff(event_ts, start_ts, :millisecond), else: nil),
-            # Time since PREVIOUS event in display order (newest first, so delta = prev - current)
-            delta: if(prev_ts && event_ts, do: DateTime.diff(prev_ts, event_ts, :millisecond), else: nil)
-          }
+            timing = %{
+              absolute: event_ts,
+              # Time since journey START (positive = after start)
+              since_start:
+                if(start_ts && event_ts,
+                  do: DateTime.diff(event_ts, start_ts, :millisecond),
+                  else: nil
+                ),
+              # Time since PREVIOUS event in display order (newest first, so delta = prev - current)
+              delta:
+                if(prev_ts && event_ts,
+                  do: DateTime.diff(prev_ts, event_ts, :millisecond),
+                  else: nil
+                )
+            }
 
-          {{event, timing}, {start_ts, event_ts}}
-        end)
+            {{event, timing}, {start_ts, event_ts}}
+          end)
+
         results
     end
   end
@@ -1196,13 +1254,15 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       _ -> nil
     end
   end
+
   defp parse_event_timestamp(_), do: nil
 
   # Table row for timeline - cleaner columnar layout
   defp timeline_table_row(assigns) do
     {icon, color, description} = format_journey_event(assigns.event)
 
-    assigns = assigns
+    assigns =
+      assigns
       |> assign(:icon, icon)
       |> assign(:color, color)
       |> assign(:description, description)
@@ -1245,7 +1305,6 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     """
   end
 
-
   # Color delta badges based on time - helps spot delays
   defp delta_color(ms) when ms < 100, do: "bg-green-100 text-green-700"
   defp delta_color(ms) when ms < 500, do: "bg-blue-100 text-blue-700"
@@ -1254,6 +1313,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   # Format time with milliseconds: "09:36:11.234"
   defp format_time_with_ms(nil), do: "-"
+
   defp format_time_with_ms(%DateTime{} = dt) do
     ms = div(elem(dt.microsecond, 0), 1000)
     Calendar.strftime(dt, "%H:%M:%S") <> "." <> String.pad_leading("#{ms}", 3, "0")
@@ -1261,14 +1321,17 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   # Format elapsed time: "0.234s" or "1.50s" or "12.5s" or "1m 23s"
   defp format_elapsed_ms(nil), do: "-"
+
   defp format_elapsed_ms(ms) when ms < 10_000 do
     seconds = ms / 1000
     :erlang.float_to_binary(seconds, decimals: 2) <> "s"
   end
+
   defp format_elapsed_ms(ms) when ms < 60_000 do
     seconds = ms / 1000
     :erlang.float_to_binary(seconds, decimals: 1) <> "s"
   end
+
   defp format_elapsed_ms(ms) do
     total_seconds = div(ms, 1000)
     minutes = div(total_seconds, 60)
@@ -1278,25 +1341,31 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
   # Format delta time: "0.15s" or "1.2s"
   defp format_delta_ms(nil), do: "-"
+
   defp format_delta_ms(ms) when ms < 1000 do
     seconds = ms / 1000
     :erlang.float_to_binary(seconds, decimals: 2) <> "s"
   end
+
   defp format_delta_ms(ms) when ms < 10_000 do
     seconds = ms / 1000
     :erlang.float_to_binary(seconds, decimals: 1) <> "s"
   end
+
   defp format_delta_ms(ms) do
     format_elapsed_ms(ms)
   end
 
   defp format_journey_event(%{"type" => "zone_entry"} = event) do
     zone = get_in(event, ["data", "zone"]) || "?"
+
     cond do
       String.starts_with?(zone, "POS") ->
         {"→", "text-blue-600", "#{zone}"}
+
       String.starts_with?(zone, "GATE") ->
         {"→", "text-purple-500", "#{zone}"}
+
       true ->
         {"→", "text-gray-400", "#{zone}"}
     end
@@ -1309,10 +1378,12 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     dwell_str = if dwell && dwell > 0, do: " #{format_duration(dwell)}", else: ""
 
     cond do
-      is_pos and dwell && dwell >= 7000 ->
+      (is_pos and dwell) && dwell >= 7000 ->
         {"←", "text-green-600", "#{zone}#{dwell_str} ✓"}
+
       is_pos ->
         {"←", "text-blue-500", "#{zone}#{dwell_str}"}
+
       true ->
         {"←", "text-gray-400", "#{zone}#{dwell_str}"}
     end
@@ -1354,6 +1425,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   defp format_journey_event(%{"type" => "state_change"} = event) do
     from = get_in(event, ["data", "from_state"])
     to = get_in(event, ["data", "to_state"]) || get_in(event, ["data", "to"]) || "?"
+
     if from do
       {"◆", "text-purple-500", "#{from} → #{to}"}
     else
@@ -1405,18 +1477,24 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     cond do
       tailgated ->
         # Only show person ID if it's a valid positive integer (not 0 or nil)
-        opener_info = cond do
-          is_integer(gate_opener_person) and gate_opener_person > 0 ->
-            " (gate opened by ##{gate_opener_person})"
-          gate_opened_by == "sensor" ->
-            " (sensor-triggered)"
-          true ->
-            ""
-        end
+        opener_info =
+          cond do
+            is_integer(gate_opener_person) and gate_opener_person > 0 ->
+              " (gate opened by ##{gate_opener_person})"
+
+            gate_opened_by == "sensor" ->
+              " (sensor-triggered)"
+
+            true ->
+              ""
+          end
+
         {"⚠", "text-orange-600", "Tailgated exit#{opener_info}"}
+
       authorized ->
         opener = if gate_opened_by, do: " (#{gate_opened_by})", else: ""
         {"✓", "text-green-600", "Exited through gate#{opener}"}
+
       true ->
         {"✗", "text-red-600", "Unauthorized exit"}
     end
@@ -1430,11 +1508,14 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   defp format_journey_event(%{"type" => "gate_cmd"} = event) do
     cmd_us = get_in(event, ["data", "cmd_us"])
     e2e_us = get_in(event, ["data", "e2e_us"])
-    latency_str = cond do
-      e2e_us && e2e_us > 0 -> " (#{e2e_us}µs)"
-      cmd_us && cmd_us > 0 -> " (#{cmd_us}µs)"
-      true -> ""
-    end
+
+    latency_str =
+      cond do
+        e2e_us && e2e_us > 0 -> " (#{e2e_us}µs)"
+        cmd_us && cmd_us > 0 -> " (#{cmd_us}µs)"
+        true -> ""
+      end
+
     {"🚪", "text-indigo-500", "Gate open command sent#{latency_str}"}
   end
 
@@ -1463,29 +1544,36 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   defp format_journey_event(_), do: {"•", "text-gray-400", "Unknown event"}
 
   defp format_time(nil), do: "-"
+
   defp format_time(%DateTime{} = dt) do
     Calendar.strftime(dt, "%H:%M:%S")
   end
+
   defp format_time(_), do: "-"
 
   defp format_duration(nil), do: "-"
+
   defp format_duration(ms) when is_integer(ms) do
     seconds = div(ms, 1000)
+
     cond do
       seconds < 60 -> "#{seconds}s"
       seconds < 3600 -> "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
       true -> "#{div(seconds, 3600)}h #{rem(div(seconds, 60), 60)}m"
     end
   end
+
   defp format_duration(_), do: "-"
 
   # Format zone name for display (removes common prefixes)
   defp format_zone_name(nil), do: "?"
+
   defp format_zone_name(zone) when is_binary(zone) do
     zone
     |> String.replace(~r/^ZONE[-_]?/i, "")
     |> String.replace("_", " ")
   end
+
   defp format_zone_name(zone), do: to_string(zone)
 
   # Site selector component

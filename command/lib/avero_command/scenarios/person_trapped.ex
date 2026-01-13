@@ -78,7 +78,10 @@ defmodule AveroCommand.Scenarios.PersonTrapped do
           dwell_time_ms = data["dwell_time_ms"] || data["time_in_zone_ms"] || 0
 
           if dwell_time_ms >= @trapped_threshold_seconds * 1000 do
-            Logger.error("PersonTrapped: person #{person_id} authorized but trapped in #{zone} for #{div(dwell_time_ms, 1000)}s")
+            Logger.error(
+              "PersonTrapped: person #{person_id} authorized but trapped in #{zone} for #{div(dwell_time_ms, 1000)}s"
+            )
+
             {:match, build_incident(event, data, zone, person_id, dwell_time_ms)}
           else
             :no_match
@@ -105,7 +108,11 @@ defmodule AveroCommand.Scenarios.PersonTrapped do
       # They've been at_gate for longer than threshold
       unless gate_opened_for_person?(site, person_id) do
         elapsed_seconds = DateTime.diff(DateTime.utc_now(), state_time, :second)
-        Logger.error("PersonTrapped: authorized person #{person_id} stuck at gate for #{elapsed_seconds}s")
+
+        Logger.error(
+          "PersonTrapped: authorized person #{person_id} stuck at gate for #{elapsed_seconds}s"
+        )
+
         {:match, build_incident(event, data, "gate_zone", person_id, elapsed_seconds * 1000)}
       else
         :no_match
@@ -171,7 +178,8 @@ defmodule AveroCommand.Scenarios.PersonTrapped do
         zone: zone,
         dwell_time_seconds: dwell_seconds,
         threshold_seconds: @trapped_threshold_seconds,
-        message: "Authorized person #{person_id} trapped in #{zone} for #{dwell_seconds}s - gate not opening"
+        message:
+          "Authorized person #{person_id} trapped in #{zone} for #{dwell_seconds}s - gate not opening"
       },
       suggested_actions: [
         %{"id" => "open_gate", "label" => "Open Gate Manually", "auto" => false},

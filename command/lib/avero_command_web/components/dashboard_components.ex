@@ -8,10 +8,10 @@ defmodule AveroCommandWeb.DashboardComponents do
   @doc """
   Renders the main dashboard layout with sidebar and header.
   """
-  attr :current_path, :string, required: true
-  attr :sidebar_collapsed, :boolean, default: false
-  attr :mobile_sidebar_open, :boolean, default: false
-  slot :inner_block, required: true
+  attr(:current_path, :string, required: true)
+  attr(:sidebar_collapsed, :boolean, default: false)
+  attr(:mobile_sidebar_open, :boolean, default: false)
+  slot(:inner_block, required: true)
 
   def dashboard_layout(assigns) do
     ~H"""
@@ -53,9 +53,9 @@ defmodule AveroCommandWeb.DashboardComponents do
   @doc """
   Renders the sidebar navigation.
   """
-  attr :current_path, :string, required: true
-  attr :collapsed, :boolean, default: false
-  attr :mobile_open, :boolean, default: false
+  attr(:current_path, :string, required: true)
+  attr(:collapsed, :boolean, default: false)
+  attr(:mobile_open, :boolean, default: false)
 
   def sidebar(assigns) do
     ~H"""
@@ -235,16 +235,17 @@ defmodule AveroCommandWeb.DashboardComponents do
   end
 
   # Renders a navigation item in the sidebar.
-  attr :path, :string, required: true
-  attr :label, :string, required: true
-  attr :current_path, :string, required: true
-  attr :collapsed, :boolean, default: false
-  slot :icon, required: true
+  attr(:path, :string, required: true)
+  attr(:label, :string, required: true)
+  attr(:current_path, :string, required: true)
+  attr(:collapsed, :boolean, default: false)
+  slot(:icon, required: true)
 
   defp nav_item(assigns) do
-    is_active = assigns.current_path == assigns.path ||
-      (assigns.path == "/" && assigns.current_path in ["/", "/incidents"]) ||
-      String.starts_with?(assigns.current_path, assigns.path <> "/")
+    is_active =
+      assigns.current_path == assigns.path ||
+        (assigns.path == "/" && assigns.current_path in ["/", "/incidents"]) ||
+        String.starts_with?(assigns.current_path, assigns.path <> "/")
 
     assigns = assign(assigns, :is_active, is_active)
 
@@ -267,10 +268,10 @@ defmodule AveroCommandWeb.DashboardComponents do
   end
 
   # Renders an external navigation item (opens in new tab).
-  attr :href, :string, required: true
-  attr :label, :string, required: true
-  attr :collapsed, :boolean, default: false
-  slot :icon, required: true
+  attr(:href, :string, required: true)
+  attr(:label, :string, required: true)
+  attr(:collapsed, :boolean, default: false)
+  slot(:icon, required: true)
 
   defp external_nav_item(assigns) do
     ~H"""
@@ -298,7 +299,7 @@ defmodule AveroCommandWeb.DashboardComponents do
   @doc """
   Renders the dashboard header with hamburger menu and dark mode toggle.
   """
-  attr :collapsed, :boolean, default: false
+  attr(:collapsed, :boolean, default: false)
 
   def dashboard_header(assigns) do
     ~H"""

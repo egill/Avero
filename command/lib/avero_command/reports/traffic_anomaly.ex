@@ -52,7 +52,7 @@ defmodule AveroCommand.Reports.TrafficAnomaly do
     historical_avg = get_historical_average(site, current_hour, current_dow)
 
     if historical_avg > 0 do
-      deviation = ((current_traffic - historical_avg) / historical_avg) * 100
+      deviation = (current_traffic - historical_avg) / historical_avg * 100
 
       cond do
         deviation >= @high_deviation_threshold ->
@@ -69,7 +69,13 @@ defmodule AveroCommand.Reports.TrafficAnomaly do
 
   defp get_hourly_traffic(site, hours_ago) do
     now = DateTime.utc_now()
-    hour_start = now |> DateTime.add(-hours_ago * 3600, :second) |> Map.put(:minute, 0) |> Map.put(:second, 0)
+
+    hour_start =
+      now
+      |> DateTime.add(-hours_ago * 3600, :second)
+      |> Map.put(:minute, 0)
+      |> Map.put(:second, 0)
+
     hour_end = DateTime.add(hour_start, 3600, :second)
 
     Store.recent_events(1000, site)
@@ -100,10 +106,12 @@ defmodule AveroCommand.Reports.TrafficAnomaly do
     {severity, message} =
       case anomaly_type do
         :high_traffic ->
-          {"low", "Traffic #{round(deviation)}% above normal: #{current} exits vs #{round(historical)} average"}
+          {"low",
+           "Traffic #{round(deviation)}% above normal: #{current} exits vs #{round(historical)} average"}
 
         :low_traffic ->
-          {"medium", "Traffic #{round(abs(deviation))}% below normal: #{current} exits vs #{round(historical)} average"}
+          {"medium",
+           "Traffic #{round(abs(deviation))}% below normal: #{current} exits vs #{round(historical)} average"}
       end
 
     incident_attrs = %{
