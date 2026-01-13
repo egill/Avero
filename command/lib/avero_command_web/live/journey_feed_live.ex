@@ -34,6 +34,8 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       |> assign(:available_pos_zones, available_pos_zones)
       |> assign(:pos_menu_open, false)
       |> assign(:advanced_filters_open, false)
+      # ACC filter (payment terminal match)
+      |> assign(:acc_filter, :all)
       # Duration filter - hide journeys < 7s by default
       |> assign(:hide_short_journeys, true)
       # Pagination
@@ -66,6 +68,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       matches_person_id?(journey, assigns.person_id_search) and
       matches_datetime_range?(journey, assigns.from_datetime, assigns.to_datetime) and
       matches_pos_filter?(journey, assigns.pos_filter, assigns.selected_pos_zones) and
+      matches_acc_filter?(journey, assigns.acc_filter) and
       matches_min_duration?(journey, assigns.hide_short_journeys)
   end
 
@@ -120,6 +123,11 @@ defmodule AveroCommandWeb.JourneyFeedLive do
   defp matches_min_duration?(journey, true) do
     journey.duration_ms != nil and journey.duration_ms >= @min_dwell_ms
   end
+
+  # ACC filter: filter journeys by payment terminal match status
+  defp matches_acc_filter?(_journey, :all), do: true
+  defp matches_acc_filter?(journey, :acc_matched), do: journey.acc_matched == true
+  defp matches_acc_filter?(journey, :acc_not_matched), do: journey.acc_matched != true
 
   @impl true
   def handle_event("filter", %{"filter" => filter}, socket) do
@@ -337,6 +345,16 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     |> reset_pagination_and_reload()
   end
 
+  # ACC filter
+  @impl true
+  def handle_event("acc-filter", %{"filter" => filter}, socket) do
+    acc_filter = String.to_existing_atom(filter)
+
+    socket
+    |> assign(:acc_filter, acc_filter)
+    |> reset_pagination_and_reload()
+  end
+
   # Pagination
   @impl true
   def handle_event("next-page", _params, socket) do
@@ -402,6 +420,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       to_datetime: assigns.to_datetime,
       pos_filter: assigns.pos_filter,
       pos_zones: assigns.selected_pos_zones,
+      acc_filter: assigns.acc_filter,
       min_duration_ms: if(assigns.hide_short_journeys, do: @min_dwell_ms, else: nil),
       cursor: assigns.cursor,
       direction: assigns.direction,
@@ -557,6 +576,34 @@ defmodule AveroCommandWeb.JourneyFeedLive do
             </button>
           </div>
 
+          <%!-- ACC Filter --%>
+          <div class="flex items-center space-x-1 border-l pl-3">
+            <button
+              phx-click="acc-filter"
+              phx-value-filter="all"
+              class={acc_filter_button_class(@acc_filter == :all)}
+              title="Show all journeys"
+            >
+              All
+            </button>
+            <button
+              phx-click="acc-filter"
+              phx-value-filter="acc_matched"
+              class={acc_filter_button_class(@acc_filter == :acc_matched, "green")}
+              title="Only show journeys with ACC payment match"
+            >
+              ACC ✓
+            </button>
+            <button
+              phx-click="acc-filter"
+              phx-value-filter="acc_not_matched"
+              class={acc_filter_button_class(@acc_filter == :acc_not_matched, "red")}
+              title="Only show journeys without ACC payment match"
+            >
+              No ACC
+            </button>
+          </div>
+
           <%!-- Advanced Filters Toggle --%>
           <button
             phx-click="toggle-advanced-filters"
@@ -641,7 +688,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
           <div class="text-center py-12 bg-white rounded-lg shadow">
             <p class="text-gray-500">No customer journeys</p>
             <p class="text-sm text-gray-400 mt-2">
-              <%= if @person_id_search != "" or @from_date != nil or @to_date != nil or @pos_filter != :all or @selected_pos_zones != [] or @hide_short_journeys do %>
+              <%= if @person_id_search != "" or @from_date != nil or @to_date != nil or @pos_filter != :all or @selected_pos_zones != [] or @acc_filter != :all or @hide_short_journeys do %>
                 Try adjusting your filters
               <% else %>
                 Journeys will appear here when customers exit
@@ -706,6 +753,20 @@ defmodule AveroCommandWeb.JourneyFeedLive do
     base = "px-2 py-1 rounded text-xs font-medium"
     if active do
       case color do
+        "red" -> "#{base} bg-red-600 text-white"
+        _ -> "#{base} bg-blue-600 text-white"
+      end
+    else
+      "#{base} bg-gray-100 text-gray-600 hover:bg-gray-200"
+    end
+  end
+
+  defp acc_filter_button_class(active, color \\ "blue")
+  defp acc_filter_button_class(active, color) do
+    base = "px-2 py-1 rounded text-xs font-medium"
+    if active do
+      case color do
+        "green" -> "#{base} bg-green-600 text-white"
         "red" -> "#{base} bg-red-600 text-white"
         _ -> "#{base} bg-blue-600 text-white"
       end

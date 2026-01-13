@@ -66,6 +66,7 @@ defmodule AveroCommand.Journeys do
     - to_date: Date or ISO8601 string for end of range
     - pos_filter: :all | :with_pos | :without_pos
     - pos_zones: list of specific payment zones to include
+    - acc_filter: :all | :acc_matched | :acc_not_matched
     - min_duration_ms: minimum journey duration in milliseconds
     - cursor: DateTime for cursor-based pagination
     - direction: :next | :prev (default: :next)
@@ -81,6 +82,7 @@ defmodule AveroCommand.Journeys do
     to_datetime = Keyword.get(opts, :to_datetime)
     pos_filter = Keyword.get(opts, :pos_filter, :all)
     pos_zones = Keyword.get(opts, :pos_zones, [])
+    acc_filter = Keyword.get(opts, :acc_filter, :all)
     min_duration_ms = Keyword.get(opts, :min_duration_ms)
     cursor = Keyword.get(opts, :cursor)
     direction = Keyword.get(opts, :direction, :next)
@@ -93,6 +95,7 @@ defmodule AveroCommand.Journeys do
     |> apply_date_range_filter(from_date, to_date)
     |> apply_datetime_range_filter(from_datetime, to_datetime)
     |> apply_pos_filter(pos_filter, pos_zones)
+    |> apply_acc_filter(acc_filter)
     |> apply_min_duration_filter(min_duration_ms)
     |> apply_cursor_pagination(cursor, direction, limit)
     |> Repo.all()
@@ -284,6 +287,12 @@ defmodule AveroCommand.Journeys do
     where(query, [j], j.authorized == false and j.total_pos_dwell_ms >= @min_dwell_ms)
   end
   defp apply_pos_filter(query, _, _), do: query
+
+  # ACC (payment terminal) filter
+  defp apply_acc_filter(query, nil), do: query
+  defp apply_acc_filter(query, :all), do: query
+  defp apply_acc_filter(query, :acc_matched), do: where(query, [j], j.acc_matched == true)
+  defp apply_acc_filter(query, :acc_not_matched), do: where(query, [j], j.acc_matched == false or is_nil(j.acc_matched))
 
   defp apply_min_duration_filter(query, nil), do: query
   defp apply_min_duration_filter(query, min_ms) do
