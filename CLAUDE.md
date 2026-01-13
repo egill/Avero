@@ -66,6 +66,9 @@ ssh avero@HOST "cd ~/gateway-poc && cargo build --release"
 # Deploy main service to Netto
 ./scripts/deploy-netto.sh
 
+# Deploy command app (Phoenix dashboard)
+./scripts/deploy-command.sh
+
 # Deploy TUI
 ./scripts/deploy-tui-netto.sh
 ./scripts/deploy-tui-avero.sh
@@ -74,6 +77,9 @@ ssh avero@HOST "cd ~/gateway-poc && cargo build --release"
 ssh avero@HOST "sudo systemctl stop gateway-poc"
 ssh avero@HOST "sudo systemctl start gateway-poc"
 ssh avero@HOST "sudo journalctl -u gateway-poc -f"  # Live logs
+
+# Command app logs
+ssh root@e18n.net "docker logs avero-command -f"
 ```
 
 ### Grafana Dashboard
@@ -113,8 +119,10 @@ Processing (Tracker - central orchestrator):
   - AccCollector: payment event correlation
 
 Egress:
-  - Completed journeys → JSONL file
+  - Completed journeys → JSONL file + MQTT (gateway/journeys)
+  - Events → MQTT (gateway/events, gateway/gate, gateway/acc)
   - Metrics → Prometheus HTTP endpoint
+  - MQTT → command/ app (TimescaleDB, dashboards, anomaly detection)
 ```
 
 ### Module Structure
@@ -156,6 +164,103 @@ src/
 - **Person**: Active customer state (track_id, dwell_ms, authorized flag)
 - **ParsedEvent**: Xovis sensor event (TrackCreate, TrackDelete, ZoneEntry, ZoneExit)
 - **Stitching**: Reconnecting track identity when sensor temporarily loses a person
+
+## Command App (Phoenix Dashboard)
+
+The `command/` directory contains the Phoenix/Elixir web application for monitoring and analytics.
+
+### Build and Run
+
+```bash
+cd command
+
+# Install dependencies
+mix deps.get
+
+# Setup database (requires PostgreSQL/TimescaleDB)
+mix ecto.setup
+
+# Run development server
+mix phx.server
+# Or: iex -S mix phx.server (with IEx shell)
+
+# Run tests
+mix test
+
+# Format code
+mix format
+```
+
+### Deployment
+
+```bash
+# Deploy to e18n.net (Docker)
+./scripts/deploy-command.sh
+```
+
+- **Host**: `root@e18n.net`
+- **Remote dir**: `/opt/avero/command`
+- **Container**: `avero-command`
+- **URL**: https://command.e18n.net
+
+### Architecture
+
+```
+command/lib/
+├── avero_command/
+│   ├── application.ex       # OTP application supervisor
+│   ├── mqtt/
+│   │   ├── client.ex        # MQTT subscriber (tortoise311)
+│   │   └── event_router.ex  # Routes events to handlers
+│   ├── entities/
+│   │   ├── person.ex        # Person GenServer (tracks active customers)
+│   │   └── gate.ex          # Gate GenServer (tracks gate state)
+│   ├── store.ex             # TimescaleDB persistence
+│   ├── journeys.ex          # Journey CRUD and queries
+│   ├── incidents.ex         # Incident management
+│   ├── scenarios/           # Anomaly detection scenarios
+│   │   ├── evaluator.ex     # Runs scenarios against events
+│   │   ├── backward_entry.ex
+│   │   ├── gate_alarm.ex
+│   │   └── ...
+│   └── reports/             # Scheduled reports
+│       ├── daily_summary.ex
+│       ├── hourly_summary.ex
+│       └── ...
+└── avero_command_web/
+    ├── router.ex            # Route definitions
+    ├── live/
+    │   ├── dashboard_live.ex      # Real-time gate status
+    │   ├── incident_feed_live.ex  # Live incident stream
+    │   ├── journey_feed_live.ex   # Customer journey feed
+    │   └── explorer_live.ex       # Debug event explorer
+    └── controllers/
+        ├── gate_controller.ex     # API: gate open (Grafana button)
+        └── journey_controller.ex  # API: journey queries
+```
+
+### Data Flow
+
+```
+gateway-poc (Rust) → MQTT → command/MQTT.Client → EventRouter
+                                                       ↓
+                                    ┌──────────────────┼──────────────────┐
+                                    ↓                  ↓                  ↓
+                               Store.insert      PersonRegistry     Evaluator.evaluate
+                             (TimescaleDB)        GateRegistry       (scenarios)
+                                                       ↓                  ↓
+                                                 LiveView PubSub    Incidents.create
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | - | TimescaleDB connection (prod) |
+| `MQTT_HOST` | localhost | MQTT broker host |
+| `MQTT_PORT` | 1883 | MQTT broker port |
+| `MQTT_TOPICS` | gateway/journeys,gateway/events,... | Topics to subscribe |
+| `GATEWAY_SITE` | netto | Default site ID for journeys |
 
 ### Configuration
 

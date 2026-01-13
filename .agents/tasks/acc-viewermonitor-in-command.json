@@ -1,0 +1,80 @@
+{
+  "projectName": "ACC viewer/monitor in command",
+  "branchName": "feature/acc-viewermonitor-in-command",
+  "overview": "Build a new feature from scratch",
+  "audience": "End users of the application",
+  "scope": "Single component or module",
+  "successCriteria": "Feature works as specified in acceptance criteria",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "See ACC received",
+      "category": "feat",
+      "priority": 1,
+      "acceptanceCriteria": [
+        "See ACC received is implemented",
+        "Tests pass",
+        "Documentation updated"
+      ],
+      "files": [],
+      "instructions": "Implement See ACC received according to the specifications.",
+      "passes": false
+    },
+    {
+      "id": "US-002",
+      "title": "See ACC matched",
+      "category": "feat",
+      "priority": 2,
+      "acceptanceCriteria": [
+        "See ACC matched is implemented",
+        "Tests pass",
+        "Documentation updated"
+      ],
+      "files": [],
+      "instructions": "Implement See ACC matched according to the specifications.",
+      "passes": false
+    },
+    {
+      "id": "US-003",
+      "title": "See ACC not matched",
+      "category": "feat",
+      "priority": 3,
+      "acceptanceCriteria": [
+        "See ACC not matched is implemented",
+        "Tests pass",
+        "Documentation updated"
+      ],
+      "files": [],
+      "instructions": "Implement See ACC not matched according to the specifications.",
+      "passes": false
+    },
+    {
+      "id": "US-004",
+      "title": "See ACC exits vs non-exits",
+      "category": "feat",
+      "priority": 3,
+      "acceptanceCriteria": [
+        "See ACC exits vs non-exits is implemented",
+        "Tests pass",
+        "Documentation updated"
+      ],
+      "files": [],
+      "instructions": "Implement See ACC exits vs non-exits according to the specifications.",
+      "passes": false
+    },
+    {
+      "id": "US-005",
+      "title": "See ACC lost tracks",
+      "category": "feat",
+      "priority": 3,
+      "acceptanceCriteria": [
+        "See ACC lost tracks is implemented",
+        "Tests pass",
+        "Documentation updated"
+      ],
+      "files": [],
+      "instructions": "Implement See ACC lost tracks according to the specifications.",
+      "passes": false
+    }
+  ]
+}

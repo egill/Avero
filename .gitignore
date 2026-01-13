@@ -5,3 +5,8 @@
 
 # Ralph state (auto-generated)
 .ralph/
+/gateway-analysis/acc
+/gateway-analysis/mqtt
+/gateway-analysis/rs485
+/scripts/__pycache__
+/gateway-analysis/__pycache__
