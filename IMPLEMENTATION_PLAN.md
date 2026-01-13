@@ -4,7 +4,7 @@
 
 All POS per-zone dwell tracking user stories have been implemented and tested.
 
-### Version: v0.0.1
+### Version: v0.0.2
 
 Tagged: 2026-01-13
 
