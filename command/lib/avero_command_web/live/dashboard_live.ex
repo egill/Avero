@@ -8,8 +8,6 @@ defmodule AveroCommandWeb.DashboardLive do
   alias AveroCommand.Journeys
 
   @refresh_interval 1000
-  # Zone IDs as used by the gateway (Xovis camera zone IDs)
-  @pos_zone_ids ["1001", "1002", "1003", "1004", "1005"]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -73,12 +71,6 @@ defmodule AveroCommandWeb.DashboardLive do
     end
 
     {:noreply, socket}
-  end
-
-  defp init_pos_zones do
-    Enum.map(@pos_zone_ids, fn id ->
-      %{id: id, occupied: false, count: 0, paid: false}
-    end)
   end
 
   defp update_pos_zone(pos_zones, zone_id, type) do
@@ -303,23 +295,4 @@ defmodule AveroCommandWeb.DashboardLive do
     """
   end
 
-  # === Helpers ===
-
-  defp format_time(datetime) do
-    Calendar.strftime(datetime, "%H:%M:%S")
-  end
-
-  defp format_journey_time(nil), do: "-"
-  defp format_journey_time(%DateTime{} = dt) do
-    diff = DateTime.diff(DateTime.utc_now(), dt, :second)
-    cond do
-      diff < 60 -> "#{diff}s ago"
-      diff < 3600 -> "#{div(diff, 60)}m ago"
-      true -> Calendar.strftime(dt, "%H:%M")
-    end
-  end
-  defp format_journey_time(%NaiveDateTime{} = ndt) do
-    ndt |> DateTime.from_naive!("Etc/UTC") |> format_journey_time()
-  end
-  defp format_journey_time(_), do: "-"
 end

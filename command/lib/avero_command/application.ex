@@ -20,9 +20,10 @@ defmodule AveroCommand.Application do
       # PubSub for LiveView
       {Phoenix.PubSub, name: AveroCommand.PubSub},
 
-      # Entity Supervisors (dynamic supervisors for Person/Gate GenServers)
+      # Entity Supervisors (dynamic supervisors for Person/Gate/ACC GenServers)
       {DynamicSupervisor, name: AveroCommand.PersonSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: AveroCommand.GateSupervisor, strategy: :one_for_one},
+      {DynamicSupervisor, name: AveroCommand.AccSupervisor, strategy: :one_for_one},
 
       # Entity Registry (track active persons/gates by ID)
       {Registry, keys: :unique, name: AveroCommand.EntityRegistry},

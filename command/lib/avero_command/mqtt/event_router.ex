@@ -8,7 +8,7 @@ defmodule AveroCommand.MQTT.EventRouter do
   require Logger
 
   alias AveroCommand.Store
-  alias AveroCommand.Entities.{PersonRegistry, GateRegistry}
+  alias AveroCommand.Entities.{PersonRegistry, GateRegistry, AccRegistry}
   alias AveroCommand.Scenarios.Evaluator
   alias AveroCommand.Scenarios.UnusualGateOpening
   alias AveroCommand.Journeys
@@ -185,8 +185,13 @@ defmodule AveroCommand.MQTT.EventRouter do
     route_to_gate(event)
   end
 
+  defp route_to_entities(%{event_type: event_type, data: %{"pos_zone" => pos_zone}} = event)
+       when event_type in ["acc", "people"] and not is_nil(pos_zone) do
+    route_to_acc(event)
+  end
+
   defp route_to_entities(_event) do
-    # Event doesn't have person_id or gate_id, skip entity routing
+    # Event doesn't have person_id, gate_id, or pos_zone, skip entity routing
     :ok
   end
 
@@ -199,6 +204,19 @@ defmodule AveroCommand.MQTT.EventRouter do
         Logger.warning("Failed to route to gate #{gate_id}: #{inspect(reason)}")
     end
   end
+
+  # Route ACC events to ACC GenServer by POS zone
+  defp route_to_acc(%{site: site, data: %{"pos_zone" => pos_zone}} = event) when not is_nil(pos_zone) do
+    case AccRegistry.get_or_create(site, pos_zone) do
+      {:ok, pid} ->
+        GenServer.cast(pid, {:event, event})
+
+      {:error, reason} ->
+        Logger.warning("Failed to route to ACC #{site}:#{pos_zone}: #{inspect(reason)}")
+    end
+  end
+
+  defp route_to_acc(_event), do: :ok
 
   # =============================================================================
   # Gateway-PoC to Scenario Event Normalization
