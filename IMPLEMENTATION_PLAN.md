@@ -43,7 +43,7 @@ Add ACC (payment terminal) monitoring to the command app. This creates an ACC en
 
 ### Phase 4: Quality Gates - DONE
 - [x] Verify build (`mix compile --warnings-as-errors`)
-- [x] Rust tests pass (145 tests)
+- [x] Rust tests pass (154 tests)
 
 ## Learnings
 - Elixir underscore prefix on function names does NOT suppress unused warnings (unlike variables)
