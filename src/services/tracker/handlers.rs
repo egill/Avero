@@ -595,10 +595,7 @@ impl Tracker {
                 track_id,
                 JourneyEvent::new(JourneyEventType::Acc, ts)
                     .with_zone(&pos_zone)
-                    .with_extra(&format!(
-                        "kiosk={ip},count={},dwell={dwell_ms}",
-                        qualified.len()
-                    )),
+                    .with_extra(&format!("kiosk={ip},count={},dwell={dwell_ms}", qualified.len())),
             );
         }
 

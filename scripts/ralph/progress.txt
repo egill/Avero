@@ -12,9 +12,9 @@ Status legend: [ ] not started, [~] in progress, [x] done
 [x] POS-005 Simplify AccCollector
 [x] POS-006 Simplify Person struct
 [x] POS-007 Verify journey logging captures POS events
-[ ] POS-008 Unit tests for PosOccupancyState
-[ ] POS-009 Update tracker tests for per-zone semantics
-[ ] POS-010 Add group track tests
+[x] POS-008 Unit tests for PosOccupancyState
+[x] POS-009 Update tracker tests for per-zone semantics
+[x] POS-010 Add group track tests
 
 ---
 
@@ -96,5 +96,40 @@ Key files:
   - Verified authorization flag set correctly on ACC match
   - Verified journey persistence on track delete and exit line cross
 - **Learnings:** When iterating over tuples `Vec<(TrackId, u64)>`, use `for &(track_id, dwell_ms) in &vec` to destructure while borrowing. The `qualified` vector already had the dwell info needed - just needed to access it in the loop.
+---
+
+## 2026-01-13 - POS-008 - Unit tests for PosOccupancyState
+- Files changed: None (tests already existed)
+- What was done:
+  - Verified all 15 unit tests already exist in src/services/pos_occupancy.rs
+  - Tests cover: entry creates state, exit accumulates dwell, re-entry within grace reopens, re-entry after grace creates new session, get_candidates ordering (present first by dwell, then recent exits by dwell), prune_expired removes only expired
+  - Boundary tests: grace window 4999ms (pass) vs 5001ms (fail), min_dwell 6999ms (fail) vs 7001ms (pass)
+  - Additional tests: multiple zones isolated, same track multiple zones, accumulated dwell across sessions
+- **Learnings:** Always check if acceptance criteria are already satisfied before implementing. The POS-001 story included comprehensive test coverage that satisfied POS-008.
+---
+
+## 2026-01-13 - POS-009 - Update tracker tests for per-zone semantics
+- Files changed: src/services/tracker/tests.rs
+- What was done:
+  - Added 6 new tests validating per-zone dwell semantics
+  - test_per_zone_dwell_does_not_combine_across_zones: verifies 3s at POS_1 + 5s at POS_2 doesn't qualify (neither reaches 7s threshold alone)
+  - test_per_zone_dwell_qualifies_at_correct_zone_only: 8s at POS_1 qualifies for ACC at POS_1, opens gate
+  - test_per_zone_acc_from_wrong_zone_does_not_match: dwell at POS_1 doesn't help ACC from POS_2
+  - test_acc_within_grace_window_matches: ACC 4s after exit matches (within 5s grace)
+  - test_acc_beyond_grace_window_does_not_match: ACC 6s after exit fails (beyond grace)
+  - test_acc_picks_highest_dwell_as_primary: all tracks in zone authorized on ACC
+  - Added helper functions: visit_pos_zone(), is_authorized(), send_acc_event(), enter_gate_zone()
+  - Added acc_ip_mapping_multi_zone() for tests needing multiple POS zones
+- **Learnings:** Helper functions reduce test boilerplate significantly - visit_pos_zone() encapsulates the entry/sleep/exit pattern. Use map_or(false, ...) for Option<T> boolean checks.
+---
+
+## 2026-01-13 - POS-010 - Add group track tests
+- Files changed: src/services/tracker/tests.rs
+- What was done:
+  - Added 2 tests verifying group tracks (0x80000000 bit set) are now processed like regular tracks
+  - test_group_track_is_tracked: verifies group track is tracked as a person
+  - test_group_track_full_journey: verifies full journey flow (dwell, ACC match, gate open, journey state)
+  - Added XOVIS_GROUP_BIT constant and group_track_id() helper function
+- **Learnings:** Tests that progressively build on each other can often be consolidated into a single comprehensive test. The original 4 tests (basic tracking, dwell+ACC, gate open, journey logging) were combined into 2 focused tests with clear purposes.
 ---
 

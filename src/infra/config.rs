@@ -76,9 +76,10 @@ pub struct ZonesConfig {
     pub names: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct AuthorizationConfig {
-    pub min_dwell_ms: u64,
+    pub min_dwell_ms: Option<u64>,
 }
 
 /// POS tracking configuration (new canonical location for dwell settings)
@@ -273,6 +274,7 @@ pub struct TomlConfig {
     pub gate: GateConfig,
     pub rs485: Rs485Config,
     pub zones: ZonesConfig,
+    #[serde(default)]
     pub authorization: AuthorizationConfig,
     pub metrics: MetricsConfig,
     #[serde(default)]
@@ -516,25 +518,27 @@ impl Config {
         }
 
         // Resolve min_dwell_ms: prefer [pos_tracking].min_dwell_ms, fall back to [authorization]
-        let auth_min_dwell = toml_config.authorization.min_dwell_ms;
-        let min_dwell_ms = if let Some(pos_val) = toml_config.pos_tracking.min_dwell_ms {
-            // New location is set - validate it doesn't conflict with old location
-            if pos_val != auth_min_dwell {
+        let min_dwell_ms = match (
+            toml_config.pos_tracking.min_dwell_ms,
+            toml_config.authorization.min_dwell_ms,
+        ) {
+            (Some(pos_val), Some(auth_val)) if pos_val != auth_val => {
                 anyhow::bail!(
                     "Config conflict: [pos_tracking].min_dwell_ms ({}) differs from \
                      [authorization].min_dwell_ms ({}). Please use only [pos_tracking].min_dwell_ms.",
                     pos_val,
-                    auth_min_dwell
+                    auth_val
                 );
             }
-            pos_val
-        } else {
-            // New location not set - use old location with deprecation warning
-            eprintln!(
-                "Warning: [authorization].min_dwell_ms is deprecated. \
-                 Please move to [pos_tracking].min_dwell_ms"
-            );
-            auth_min_dwell
+            (Some(pos_val), _) => pos_val,
+            (None, Some(auth_val)) => {
+                eprintln!(
+                    "Warning: [authorization].min_dwell_ms is deprecated. \
+                     Please move to [pos_tracking].min_dwell_ms"
+                );
+                auth_val
+            }
+            (None, None) => 7000, // Default min dwell time
         };
 
         Ok(Self {

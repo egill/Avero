@@ -2,3 +2,6 @@
 /bench/rust/target
 /command/_build
 /command/deps/*/_build
+
+# Ralph state (auto-generated)
+.ralph/

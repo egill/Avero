@@ -172,7 +172,7 @@
         "src/services/pos_occupancy.rs"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Critical time boundaries must be tested. See CLAUDE.md testing guidelines."
     },
     {
@@ -192,7 +192,7 @@
         "src/services/tracker/tests.rs"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "These tests validate the core behavioral change."
     },
     {
@@ -210,7 +210,7 @@
         "src/services/tracker/tests.rs"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "New behavior - group tracks were previously filtered. Need test coverage."
     }
   ]

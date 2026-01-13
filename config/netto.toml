@@ -42,7 +42,7 @@ store_zone = 1009
 1009 = "STORE"
 1010 = "APPROACH_1"
 
-[authorization]
+[pos_tracking]
 min_dwell_ms = 7000
 
 [metrics]
