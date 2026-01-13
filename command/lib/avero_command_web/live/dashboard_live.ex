@@ -13,8 +13,32 @@ defmodule AveroCommandWeb.DashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    # Redirect to Grafana dashboard
-    {:ok, redirect(socket, external: "https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s")}
+    if connected?(socket) do
+      # Subscribe to real-time updates
+      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "gates")
+      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "journeys")
+      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "zones")
+      Process.send_after(self(), :refresh, @refresh_interval)
+    end
+
+    gates = load_gates()
+    selected_sites = socket.assigns[:selected_sites] || []
+    journeys = load_recent_journeys(selected_sites)
+
+    # Initialize POS zones (hardcoded for now, could come from config)
+    pos_zones = [
+      %{id: "1001", occupied: false, count: 0, paid: false},
+      %{id: "1002", occupied: false, count: 0, paid: false},
+      %{id: "1003", occupied: false, count: 0, paid: false},
+      %{id: "1004", occupied: false, count: 0, paid: false}
+    ]
+
+    {:ok, assign(socket,
+      gates: gates,
+      journeys: journeys,
+      pos_zones: pos_zones,
+      last_updated: DateTime.utc_now()
+    )}
   end
 
   @impl true
@@ -114,12 +138,87 @@ defmodule AveroCommandWeb.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div id="grafana-fullscreen" phx-update="ignore" class="fixed inset-0 -m-4 lg:-m-8">
-      <iframe
-        src="https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s"
-        class="w-full h-full border-0"
-        title="Command Live Dashboard"
-      ></iframe>
+    <div class="space-y-6">
+      <!-- Header -->
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Gate Dashboard</h1>
+        <div class="text-sm text-gray-500 dark:text-gray-400">
+          Last updated: <%= Calendar.strftime(@last_updated, "%H:%M:%S") %>
+        </div>
+      </div>
+
+      <!-- Gates Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        <%= for gate <- @gates do %>
+          <.gate_card gate={gate} />
+        <% end %>
+        <%= if @gates == [] do %>
+          <div class="col-span-full text-center py-12 text-gray-500 dark:text-gray-400">
+            No gates registered yet. Waiting for gateway connections...
+          </div>
+        <% end %>
+      </div>
+
+      <!-- POS Zones -->
+      <.dash_card title="POS Zones">
+        <div class="p-4">
+          <div class="grid grid-cols-4 gap-3">
+            <%= for zone <- @pos_zones do %>
+              <.pos_zone zone={zone} />
+            <% end %>
+          </div>
+          <div class="mt-4 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+            <div class="flex items-center gap-1">
+              <div class="w-3 h-3 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600"></div>
+              <span>Empty</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <div class="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30 border-2 border-amber-400"></div>
+              <span>Occupied</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <div class="w-3 h-3 rounded bg-green-100 dark:bg-green-900/30 border-2 border-green-400"></div>
+              <span>Paid</span>
+            </div>
+          </div>
+        </div>
+      </.dash_card>
+
+      <!-- Recent Journeys -->
+      <.dash_card title="Recent Journeys">
+        <div class="divide-y divide-gray-100 dark:divide-gray-700">
+          <%= for journey <- @journeys do %>
+            <div class="px-4 py-3 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class={[
+                  "w-2 h-2 rounded-full",
+                  journey.outcome == "authorized" && "bg-green-500",
+                  journey.outcome == "blocked" && "bg-red-500",
+                  journey.outcome not in ["authorized", "blocked"] && "bg-gray-400"
+                ]}></div>
+                <div>
+                  <div class="text-sm font-medium text-gray-900 dark:text-white">
+                    <%= journey.outcome || "unknown" %>
+                  </div>
+                  <div class="text-xs text-gray-500 dark:text-gray-400">
+                    <%= if journey.dwell_ms, do: "#{div(journey.dwell_ms, 1000)}s dwell", else: "no dwell" %>
+                  </div>
+                </div>
+              </div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">
+                <%= if journey.completed_at do %>
+                  <%= Calendar.strftime(journey.completed_at, "%H:%M:%S") %>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+          <%= if @journeys == [] do %>
+            <div class="px-4 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+              No recent journeys
+            </div>
+          <% end %>
+        </div>
+      </.dash_card>
     </div>
     """
   end

@@ -120,6 +120,18 @@ defmodule AveroCommandWeb.DashboardComponents do
           </:icon>
         </.nav_item>
 
+        <.external_nav_item
+          href="https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s"
+          label="Grafana"
+          collapsed={@collapsed}
+        >
+          <:icon>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </:icon>
+        </.external_nav_item>
+
         <.nav_item
           path={~p"/"}
           label="Incidents"
@@ -238,6 +250,35 @@ defmodule AveroCommandWeb.DashboardComponents do
       </span>
       <span class={[@collapsed && "lg:hidden"]}><%= @label %></span>
     </.link>
+    """
+  end
+
+  # Renders an external navigation item (opens in new tab).
+  attr :href, :string, required: true
+  attr :label, :string, required: true
+  attr :collapsed, :boolean, default: false
+  slot :icon, required: true
+
+  defp external_nav_item(assigns) do
+    ~H"""
+    <a
+      href={@href}
+      target="_blank"
+      rel="noopener noreferrer"
+      class={[
+        "flex items-center gap-3 rounded-lg px-3 py-2.5",
+        "transition-colors duration-200",
+        "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+      ]}
+    >
+      <span class="text-gray-500 dark:text-gray-400">
+        <%= render_slot(@icon) %>
+      </span>
+      <span class={[@collapsed && "lg:hidden"]}><%= @label %></span>
+      <svg class={["w-3 h-3 text-gray-400", @collapsed && "lg:hidden"]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+      </svg>
+    </a>
     """
   end
 
