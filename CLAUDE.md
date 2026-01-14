@@ -66,6 +66,9 @@ ssh avero@HOST "cd ~/gateway-poc && cargo build --release"
 # Deploy main service to Netto
 ./scripts/deploy-netto.sh
 
+# Deploy main service to Avero HQ
+./scripts/deploy-avero.sh
+
 # Deploy command app (Phoenix dashboard)
 ./scripts/deploy-command.sh
 

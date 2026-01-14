@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-HOST="avero@100.80.187.4"
+HOST="avero@100.65.110.63"
 SITE="avero"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
