@@ -64,6 +64,9 @@ pub struct Rs485Config {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ZonesConfig {
     pub pos_zones: Vec<i32>,
+    /// Dwell zones auto-authorize after min_dwell_ms (no ACC needed)
+    #[serde(default)]
+    pub dwell_zones: Vec<i32>,
     pub gate_zone: i32,
     pub exit_line: i32,
     #[serde(default)]
@@ -150,6 +153,10 @@ pub struct MqttEgressConfig {
     pub enabled: bool,
     pub host: Option<String>,
     pub port: Option<u16>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
     #[serde(default = "Defaults::journeys_topic")]
     pub journeys_topic: String,
     #[serde(default = "Defaults::events_topic")]
@@ -172,6 +179,8 @@ impl Default for MqttEgressConfig {
             enabled: true,
             host: None,
             port: None,
+            username: None,
+            password: None,
             journeys_topic: "gateway/journeys".to_string(),
             events_topic: "gateway/events".to_string(),
             metrics_topic: "gateway/metrics".to_string(),
@@ -320,6 +329,7 @@ pub struct Config {
 
     // Zone definitions
     pos_zones: Vec<i32>,
+    dwell_zones: Vec<i32>,
     gate_zone: i32,
     exit_line: i32,
     entry_line: Option<i32>,
@@ -353,6 +363,8 @@ pub struct Config {
     mqtt_egress_enabled: bool,
     mqtt_egress_host: Option<String>,
     mqtt_egress_port: Option<u16>,
+    mqtt_egress_username: Option<String>,
+    mqtt_egress_password: Option<String>,
     mqtt_egress_journeys_topic: String,
     mqtt_egress_events_topic: String,
     mqtt_egress_metrics_topic: String,
@@ -412,6 +424,7 @@ impl Default for Config {
             rs485_baud: 19200,
             rs485_poll_interval_ms: 250,
             pos_zones: vec![1001, 1002, 1003, 1004, 1005],
+            dwell_zones: vec![],
             gate_zone: 1007,
             exit_line: 1006,
             entry_line: None,
@@ -433,6 +446,8 @@ impl Default for Config {
             mqtt_egress_enabled: mqtt_egress.enabled,
             mqtt_egress_host: mqtt_egress.host,
             mqtt_egress_port: mqtt_egress.port,
+            mqtt_egress_username: mqtt_egress.username,
+            mqtt_egress_password: mqtt_egress.password,
             mqtt_egress_journeys_topic: mqtt_egress.journeys_topic,
             mqtt_egress_events_topic: mqtt_egress.events_topic,
             mqtt_egress_metrics_topic: mqtt_egress.metrics_topic,
@@ -556,6 +571,7 @@ impl Config {
             rs485_baud: toml_config.rs485.baud,
             rs485_poll_interval_ms: toml_config.rs485.poll_interval_ms,
             pos_zones: toml_config.zones.pos_zones,
+            dwell_zones: toml_config.zones.dwell_zones,
             gate_zone: toml_config.zones.gate_zone,
             exit_line: toml_config.zones.exit_line,
             entry_line: toml_config.zones.entry_line,
@@ -578,6 +594,8 @@ impl Config {
             mqtt_egress_enabled: toml_config.mqtt_egress.enabled,
             mqtt_egress_host: toml_config.mqtt_egress.host,
             mqtt_egress_port: toml_config.mqtt_egress.port,
+            mqtt_egress_username: toml_config.mqtt_egress.username,
+            mqtt_egress_password: toml_config.mqtt_egress.password,
             mqtt_egress_journeys_topic: toml_config.mqtt_egress.journeys_topic,
             mqtt_egress_events_topic: toml_config.mqtt_egress.events_topic,
             mqtt_egress_metrics_topic: toml_config.mqtt_egress.metrics_topic,
@@ -719,6 +737,16 @@ impl Config {
     }
 
     #[inline]
+    pub fn dwell_zones(&self) -> &[i32] {
+        &self.dwell_zones
+    }
+
+    /// Check if a geometry_id is a dwell zone (auto-authorizes on dwell threshold).
+    pub fn is_dwell_zone(&self, geometry_id: i32) -> bool {
+        self.dwell_zones.contains(&geometry_id)
+    }
+
+    #[inline]
     pub fn gate_zone(&self) -> GeometryId {
         GeometryId(self.gate_zone)
     }
@@ -738,6 +766,22 @@ impl Config {
     #[inline]
     pub fn mqtt_egress_port(&self) -> u16 {
         self.mqtt_egress_port.unwrap_or(self.mqtt_port)
+    }
+
+    /// Get MQTT egress username, falling back to main mqtt username if not set
+    #[inline]
+    pub fn mqtt_egress_username(&self) -> Option<&str> {
+        self.mqtt_egress_username
+            .as_deref()
+            .or(self.mqtt_username.as_deref())
+    }
+
+    /// Get MQTT egress password, falling back to main mqtt password if not set
+    #[inline]
+    pub fn mqtt_egress_password(&self) -> Option<&str> {
+        self.mqtt_egress_password
+            .as_deref()
+            .or(self.mqtt_password.as_deref())
     }
 
     /// Builder method for tests to set min_dwell_ms

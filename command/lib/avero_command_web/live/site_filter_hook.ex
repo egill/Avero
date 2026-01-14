@@ -38,7 +38,7 @@ defmodule AveroCommandWeb.SiteFilterHook do
      |> assign(:selected_site, selected_site)
      |> assign(:site_config, site_config)
      |> assign(:selected_sites, selected_sites)
-     |> assign(:available_sites, Sites.keys())
+     |> assign(:available_sites, Sites.all())
      |> assign(:site_menu_open, false)}
   end
 end

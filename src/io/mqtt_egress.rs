@@ -42,8 +42,10 @@ impl MqttPublisher {
         mqttoptions.set_keep_alive(Duration::from_secs(30));
         mqttoptions.set_clean_session(true);
 
-        // Set credentials if configured
-        if let (Some(username), Some(password)) = (config.mqtt_username(), config.mqtt_password()) {
+        // Set credentials if configured (uses egress-specific or falls back to main mqtt creds)
+        if let (Some(username), Some(password)) =
+            (config.mqtt_egress_username(), config.mqtt_egress_password())
+        {
             mqttoptions.set_credentials(username, password);
         }
 

@@ -243,8 +243,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
         // Start metrics egress publisher (separate from logging)
+        // Clone door_rx to get current gate state for heartbeat
         let metrics_egress = sender.clone();
         let metrics_for_egress = metrics.clone();
+        let metrics_door_rx = door_rx.clone();
         let egress_interval = config.mqtt_egress_metrics_interval_secs();
         tokio::spawn(async move {
             let mut interval =
@@ -252,7 +254,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 interval.tick().await;
                 let summary = metrics_for_egress.report(0, 0);
-                metrics_egress.send_metrics(summary);
+                let door_status = *metrics_door_rx.borrow();
+                metrics_egress.send_metrics(summary, door_status.as_str());
             }
         });
     }

@@ -12,6 +12,7 @@ defmodule AveroCommand.MQTT.EventRouter do
   alias AveroCommand.Scenarios.Evaluator
   alias AveroCommand.Scenarios.UnusualGateOpening
   alias AveroCommand.Journeys
+  alias AveroCommand.Sites
 
   @doc """
   Route an event from MQTT to the appropriate handlers.
@@ -257,13 +258,16 @@ defmodule AveroCommand.MQTT.EventRouter do
     case data["t"] do
       "zone_entry" ->
         # Broadcast zone event for dashboard POS zones
-        zone_id = to_string(data["z"])
+        # Map numeric zone ID to zone name (e.g., 1007 -> "POS_1")
+        zone_name = Sites.zone_name(event.site, data["z"])
 
-        Phoenix.PubSub.broadcast(
-          AveroCommand.PubSub,
-          "gateway:events",
-          {:zone_event, %{zone_id: zone_id, event_type: :zone_entry}}
-        )
+        if zone_name do
+          Phoenix.PubSub.broadcast(
+            AveroCommand.PubSub,
+            "gateway:events",
+            {:zone_event, %{site: event.site, zone_id: zone_name, event_type: :zone_entry}}
+          )
+        end
 
         %{
           event
@@ -278,13 +282,16 @@ defmodule AveroCommand.MQTT.EventRouter do
 
       "zone_exit" ->
         # Broadcast zone event for dashboard POS zones
-        zone_id = to_string(data["z"])
+        # Map numeric zone ID to zone name (e.g., 1007 -> "POS_1")
+        zone_name = Sites.zone_name(event.site, data["z"])
 
-        Phoenix.PubSub.broadcast(
-          AveroCommand.PubSub,
-          "gateway:events",
-          {:zone_event, %{zone_id: zone_id, event_type: :zone_exit}}
-        )
+        if zone_name do
+          Phoenix.PubSub.broadcast(
+            AveroCommand.PubSub,
+            "gateway:events",
+            {:zone_event, %{site: event.site, zone_id: zone_name, event_type: :zone_exit}}
+          )
+        end
 
         %{
           event
@@ -366,7 +373,7 @@ defmodule AveroCommand.MQTT.EventRouter do
           Phoenix.PubSub.broadcast(
             AveroCommand.PubSub,
             "gateway:events",
-            {:zone_event, %{zone_id: zone_id, event_type: :payment}}
+            {:zone_event, %{site: event.site, zone_id: zone_id, event_type: :payment}}
           )
         end
 
@@ -483,8 +490,45 @@ defmodule AveroCommand.MQTT.EventRouter do
     end
   end
 
-  # gateway/metrics: metrics snapshots - no scenario evaluation needed
-  defp normalize_for_scenarios("metrics", _event, _data), do: nil
+  # gateway/metrics: metrics snapshots with gate heartbeat
+  # Register gate from heartbeat so dashboard shows gates without user activity
+  defp normalize_for_scenarios("metrics", event, data) do
+    site = data["site"]
+    gate_id = data["gate_id"] || 1
+    gate_state = data["gate_state"] || "unknown"
+
+    if site do
+      # Register gate in GateRegistry - dashboard refreshes every 1s so no need to broadcast
+      case GateRegistry.get_or_create(site, gate_id) do
+        {:ok, pid} ->
+          # Send a synthetic gate event to update state
+          # Map gate_state to expected event types: open->opened, closed->closed, etc.
+          gate_type =
+            case gate_state do
+              "open" -> "gate.opened"
+              "closed" -> "gate.closed"
+              "moving" -> "gate.moving"
+              _ -> "gate.#{gate_state}"
+            end
+
+          synthetic_event = %{
+            event_type: "gates",
+            site: site,
+            gate_id: gate_id,
+            time: event.time,
+            data: %{"type" => gate_type}
+          }
+
+          GenServer.cast(pid, {:event, synthetic_event})
+
+        {:error, _reason} ->
+          :ok
+      end
+    end
+
+    # Don't return a scenario event - metrics don't need scenario evaluation
+    nil
+  end
 
   # Unknown topic - skip
   defp normalize_for_scenarios(_topic, _event, _data), do: nil

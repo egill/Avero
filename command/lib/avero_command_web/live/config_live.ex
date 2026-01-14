@@ -8,7 +8,7 @@ defmodule AveroCommandWeb.ConfigLive do
     {:ok,
      socket
      |> assign(:sites, sites)
-     |> assign(:page_title, "Configuration")}
+     |> assign(:page_title, "Config")}
   end
 
   @impl true
@@ -16,7 +16,7 @@ defmodule AveroCommandWeb.ConfigLive do
     ~H"""
     <div class="config">
       <.header>
-        Configuration
+        Config
         <:subtitle>Manage site settings and scenario thresholds</:subtitle>
       </.header>
 

@@ -32,7 +32,10 @@ defmodule AveroCommand.Entities.Gate do
     persons_in_zone: [],
     events: [],
     fault: false,
-    exits_this_cycle: 0
+    exits_this_cycle: 0,
+    last_open_duration_ms: nil,
+    max_open_duration_ms: nil,
+    min_open_duration_ms: nil
   ]
 
   # ============================================
@@ -83,7 +86,10 @@ defmodule AveroCommand.Entities.Gate do
       last_closed_at: state.last_closed_at,
       fault: state.fault,
       started_at: state.started_at,
-      exits_this_cycle: state.exits_this_cycle
+      exits_this_cycle: state.exits_this_cycle,
+      last_open_duration_ms: state.last_open_duration_ms,
+      max_open_duration_ms: state.max_open_duration_ms,
+      min_open_duration_ms: state.min_open_duration_ms
     }
 
     {:reply, reply, state, @idle_timeout}
@@ -119,36 +125,72 @@ defmodule AveroCommand.Entities.Gate do
   # Event Handlers
   # ============================================
 
-  defp apply_event(state, %{event_type: "gate.opened"} = event) do
-    # Cancel any existing timer
-    if state.unusual_open_timer_ref, do: Process.cancel_timer(state.unusual_open_timer_ref)
+  defp apply_event(state, %{data: %{"type" => "gate.opened"}} = event) do
+    # Only update last_opened_at if transitioning from non-open state
+    # This prevents metrics heartbeats from resetting the timer
+    if state.state == :open do
+      # Already open - don't reset the timer, just update events
+      %{state | events: add_event(state.events, event)}
+    else
+      # Transitioning to open - start timer and set last_opened_at
+      if state.unusual_open_timer_ref, do: Process.cancel_timer(state.unusual_open_timer_ref)
+      timer_ref = Process.send_after(self(), :unusual_gate_opening_check, @unusual_threshold_ms)
 
-    # Schedule timer for unusual gate opening detection
-    timer_ref = Process.send_after(self(), :unusual_gate_opening_check, @unusual_threshold_ms)
-
-    %{
-      state
-      | state: :open,
-        last_opened_at: event.time,
-        unusual_open_timer_ref: timer_ref,
-        exits_this_cycle: 0,
-        events: add_event(state.events, event)
-    }
+      %{
+        state
+        | state: :open,
+          last_opened_at: event.time,
+          unusual_open_timer_ref: timer_ref,
+          exits_this_cycle: 0,
+          events: add_event(state.events, event)
+      }
+    end
   end
 
-  defp apply_event(state, %{event_type: "gate.closed"} = event) do
+  defp apply_event(state, %{data: %{"type" => "gate.closed"}} = event) do
     # Cancel unusual gate opening timer if set
     if state.unusual_open_timer_ref, do: Process.cancel_timer(state.unusual_open_timer_ref)
+
+    # Calculate duration if we have last_opened_at
+    duration_ms =
+      if state.last_opened_at do
+        DateTime.diff(event.time, state.last_opened_at, :millisecond)
+      else
+        nil
+      end
+
+    # Update min/max only if we have a valid duration
+    {new_max, new_min} =
+      if duration_ms do
+        {
+          max(state.max_open_duration_ms || 0, duration_ms),
+          min(state.min_open_duration_ms || duration_ms, duration_ms)
+        }
+      else
+        {state.max_open_duration_ms, state.min_open_duration_ms}
+      end
 
     %{
       state
       | state: :closed,
         last_closed_at: event.time,
+        last_open_duration_ms: duration_ms,
+        max_open_duration_ms: new_max,
+        min_open_duration_ms: new_min,
         unusual_open_timer_ref: nil,
         events: add_event(state.events, event)
     }
   end
 
+  defp apply_event(state, %{data: %{"type" => "gate.moving"}} = event) do
+    %{state | state: :moving, events: add_event(state.events, event)}
+  end
+
+  defp apply_event(state, %{data: %{"type" => "gate.fault"}} = event) do
+    %{state | fault: true, events: add_event(state.events, event)}
+  end
+
+  # Legacy format (direct event_type)
   defp apply_event(state, %{event_type: "gate.fault"} = event) do
     %{state | fault: true, events: add_event(state.events, event)}
   end

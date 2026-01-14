@@ -19,7 +19,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
 
     socket =
       socket
-      |> assign(:page_title, "Customer Journeys")
+      |> assign(:page_title, "Journeys")
       |> assign(:expanded_journey_ids, MapSet.new())
       # Existing filter
       |> assign(:filter, :all)
@@ -471,7 +471,7 @@ defmodule AveroCommandWeb.JourneyFeedLive do
       <%!-- Header with title, site selector, and exit type filters --%>
       <div class="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div class="flex items-center justify-between sm:justify-start space-x-4">
-          <h2 class="text-base sm:text-lg font-semibold text-gray-900">Customer Journeys</h2>
+          <h2 class="text-base sm:text-lg font-semibold text-gray-900">Journeys</h2>
           <.site_selector
             available_sites={@available_sites}
             selected_sites={@selected_sites}

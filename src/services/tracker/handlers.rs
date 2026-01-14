@@ -295,8 +295,6 @@ impl Tracker {
         let journey_authorized =
             self.journey_manager.get_any(track_id).map(|j| j.authorized).unwrap_or(false);
         let authorized = person.authorized || journey_authorized;
-        let gate_already_opened =
-            self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
 
         // Add to journey manager
         self.journey_manager.add_event(
@@ -321,15 +319,37 @@ impl Tracker {
             });
         }
 
-        if self.config.is_pos_zone(geometry_id.0) {
-            // Record POS entry in per-zone occupancy state
+        if self.config.is_pos_zone(geometry_id.0) || self.config.is_dwell_zone(geometry_id.0) {
+            // Record POS/DWELL entry in per-zone occupancy state
             self.pos_occupancy.record_entry(&zone, track_id, event.received_at);
-            // Update POS occupancy metric
+            // Update POS occupancy metric (for both POS and DWELL zones)
             self.metrics.pos_zone_enter(geometry_id.0);
         } else if geometry_id == self.config.gate_zone() {
-            // Gate zone - check authorization and send command or blocked event
-            if authorized && !gate_already_opened {
+            // Gate zone - check authorization and whether gate can open
+            // "Second chance" logic: allow up to 2 gate opens per journey
+            // - First open: always allowed if authorized
+            // - Second open: only if they exited gate zone without exiting store
+            let (gate_open_count, gate_zone_exited) = self
+                .journey_manager
+                .get_any(track_id)
+                .map(|j| (j.gate_open_count, j.gate_zone_exited))
+                .unwrap_or((0, false));
+
+            let can_open = if gate_open_count == 0 {
+                true // First chance
+            } else if gate_open_count == 1 && gate_zone_exited {
+                true // Second (last) chance - they went back and returned
+            } else {
+                false // Already used 2 chances, or still in gate zone from first open
+            };
+
+            if authorized && can_open {
                 self.send_gate_open_command(track_id, ts, "tracker", event.received_at);
+                // Update gate_open_count and reset gate_zone_exited
+                if let Some(journey) = self.journey_manager.get_mut(track_id) {
+                    journey.gate_open_count += 1;
+                    journey.gate_zone_exited = false;
+                }
             } else if !authorized {
                 // Emit gate blocked event for TUI visibility
                 info!(
@@ -345,6 +365,13 @@ impl Tracker {
                         "tracker",
                     ));
                 }
+            } else {
+                // authorized but can't open (used both chances)
+                debug!(
+                    track_id = %track_id,
+                    gate_open_count = %gate_open_count,
+                    "gate_entry_max_opens_reached"
+                );
             }
         }
     }
@@ -369,11 +396,13 @@ impl Tracker {
             return;
         };
 
-        // Calculate dwell time if exiting a POS zone (from PosOccupancyState)
-        let zone_dwell_ms = if self.config.is_pos_zone(geometry_id.0) {
-            // Record POS exit in per-zone occupancy state and get dwell
+        // Calculate dwell time if exiting a POS or DWELL zone (from PosOccupancyState)
+        let is_pos = self.config.is_pos_zone(geometry_id.0);
+        let is_dwell = self.config.is_dwell_zone(geometry_id.0);
+        let zone_dwell_ms = if is_pos || is_dwell {
+            // Record zone exit in per-zone occupancy state and get dwell
             let dwell_result = self.pos_occupancy.record_exit(&zone, track_id, Instant::now());
-            // Update POS occupancy metric
+            // Update POS occupancy metric (for both POS and DWELL zones)
             self.metrics.pos_zone_exit(geometry_id.0);
 
             if let Some((session_dwell_ms, _zone_total_dwell_ms)) = dwell_result {
@@ -392,8 +421,20 @@ impl Tracker {
                     0
                 };
 
-                // Log when dwell threshold met (authorization comes from ACC match)
-                if journey_total >= self.config.min_dwell_ms() {
+                // Auto-authorize if exiting a DWELL zone with sufficient dwell time
+                if is_dwell && journey_total >= self.config.min_dwell_ms() {
+                    info!(
+                        track_id = %track_id,
+                        zone = %zone,
+                        dwell_ms = %journey_total,
+                        "dwell_zone_auto_authorized"
+                    );
+                    person.authorized = true;
+                    if let Some(journey) = self.journey_manager.get_mut(track_id) {
+                        journey.authorized = true;
+                    }
+                } else if journey_total >= self.config.min_dwell_ms() {
+                    // POS zone: Log threshold met (authorization requires ACC)
                     debug!(
                         track_id = %track_id,
                         zone = %zone,
@@ -428,6 +469,21 @@ impl Tracker {
                 total_dwell_ms: Some(journey_dwell),
                 event_time: Some(event.event_time),
             });
+        }
+
+        // Track gate zone exits for "second chance" logic
+        // If they exit the gate zone without exiting the store, they get one more try
+        if geometry_id == self.config.gate_zone() {
+            if let Some(journey) = self.journey_manager.get_mut(track_id) {
+                if journey.gate_open_count > 0 && !journey.gate_zone_exited {
+                    journey.gate_zone_exited = true;
+                    debug!(
+                        track_id = %track_id,
+                        gate_open_count = %journey.gate_open_count,
+                        "gate_zone_exited_without_exit"
+                    );
+                }
+            }
         }
 
         person.current_zone = None;
@@ -540,12 +596,15 @@ impl Tracker {
 
         // Publish gate state change to MQTT
         if let Some(ref sender) = self.egress_sender {
+            info!(door_status = %status.as_str(), "door_state_publishing_to_egress");
             sender.send_gate_state(GateStatePayload::new(
                 epoch_ms(),
                 status.as_str(),
                 self.door_correlator.last_gate_cmd_track_id().map(|t| t.0),
                 "rs485",
             ));
+        } else {
+            warn!("door_state_egress_sender_none");
         }
 
         // Correlate door state with recent gate commands
@@ -637,19 +696,10 @@ impl Tracker {
             }
         }
 
-        // Check for late ACC (customer already entered gate zone before ACC arrived)
+        // Open gate for any authorized track already waiting at gate
         let gate_zone = self.config.gate_zone();
-        let gate_zone_name = self.config.zone_name(gate_zone);
         for &track_id in &authorized_tracks {
-            self.check_late_acc_and_open_gate(
-                track_id,
-                ip,
-                &pos_zone,
-                &gate_zone_name,
-                gate_zone,
-                ts,
-                received_at,
-            );
+            self.open_gate_if_waiting(track_id, gate_zone, ts, received_at);
         }
 
         info!(
@@ -682,75 +732,41 @@ impl Tracker {
         }
     }
 
-    /// Check if ACC arrived late (after customer entered gate zone) and open gate if needed
-    fn check_late_acc_and_open_gate(
-        &mut self,
-        track_id: TrackId,
-        ip: &str,
-        pos_zone: &str,
-        gate_zone_name: &Arc<str>,
-        gate_zone: GeometryId,
-        ts: u64,
-        received_at: Instant,
-    ) {
-        // Check for late ACC (customer entered gate zone before ACC)
-        if let Some(journey) = self.journey_manager.get_any(track_id) {
-            let gate_entry_ts = journey
-                .events
-                .iter()
-                .rev()
-                .find(|e| {
-                    e.t == JourneyEventType::ZoneEntry && e.z.as_deref() == Some(&**gate_zone_name)
-                })
-                .map(|e| e.ts);
-
-            if let Some(entry_ts) = gate_entry_ts {
-                let delta_ms = ts.saturating_sub(entry_ts);
-                if delta_ms > 0 {
-                    self.metrics.record_acc_late();
-                    info!(
-                        track_id = %track_id,
-                        ip = %ip,
-                        pos = %pos_zone,
-                        gate_zone = %gate_zone_name,
-                        gate_entry_ts = %entry_ts,
-                        acc_ts = %ts,
-                        delta_ms = %delta_ms,
-                        gate_cmd_at = ?journey.gate_cmd_at,
-                        "late_acc_after_gate_entry"
-                    );
-                    if let Some(ref sender) = self.egress_sender {
-                        sender.send_acc_event(AccEventPayload {
-                            site: None,
-                            ts,
-                            t: "late_after_gate".to_string(),
-                            ip: ip.to_string(),
-                            pos: Some(pos_zone.to_string()),
-                            tid: Some(track_id.0),
-                            dwell_ms: Some(journey.total_dwell_ms),
-                            gate_zone: Some(gate_zone_name.to_string()),
-                            gate_entry_ts: Some(entry_ts),
-                            delta_ms: Some(delta_ms),
-                            gate_cmd_at: journey.gate_cmd_at,
-                            debug_active: None,
-                            debug_pending: None,
-                        });
-                    }
-                }
-            }
-        }
-
-        // Open gate if customer is currently in gate zone and gate hasn't opened yet
+    /// Open gate if customer is in gate zone after ACC authorization
+    /// Uses "second chance" logic: allows up to 2 gate opens per journey
+    fn open_gate_if_waiting(&mut self, track_id: TrackId, gate_zone: GeometryId, ts: u64, received_at: Instant) {
         let in_gate_zone = self
             .persons
             .get(&track_id)
             .and_then(|p| p.current_zone)
             .is_some_and(|z| z == gate_zone);
-        let gate_already_opened =
-            self.journey_manager.get_any(track_id).and_then(|j| j.gate_cmd_at).is_some();
 
-        if in_gate_zone && !gate_already_opened {
+        if !in_gate_zone {
+            return;
+        }
+
+        // Check if gate can open using "second chance" logic
+        let (gate_open_count, gate_zone_exited) = self
+            .journey_manager
+            .get_any(track_id)
+            .map(|j| (j.gate_open_count, j.gate_zone_exited))
+            .unwrap_or((0, false));
+
+        let can_open = if gate_open_count == 0 {
+            true // First chance
+        } else if gate_open_count == 1 && gate_zone_exited {
+            true // Second (last) chance
+        } else {
+            false // Already used 2 chances
+        };
+
+        if can_open {
             self.send_gate_open_command(track_id, ts, "acc", received_at);
+            // Update gate_open_count and reset gate_zone_exited
+            if let Some(journey) = self.journey_manager.get_mut(track_id) {
+                journey.gate_open_count += 1;
+                journey.gate_zone_exited = false;
+            }
         }
     }
 
@@ -869,19 +885,10 @@ impl Tracker {
             }
         }
 
-        // Check for late ACC (customer already entered gate zone before ACC arrived)
+        // Open gate for any authorized track already waiting at gate
         let gate_zone = self.config.gate_zone();
-        let gate_zone_name = self.config.zone_name(gate_zone);
         for &track_id in &authorized_tracks {
-            self.check_late_acc_and_open_gate(
-                track_id,
-                "simulated",
-                pos_zone,
-                &gate_zone_name,
-                gate_zone,
-                ts,
-                received_at,
-            );
+            self.open_gate_if_waiting(track_id, gate_zone, ts, received_at);
         }
 
         info!(

@@ -619,6 +619,9 @@ async fn handle_request<G: GateCommand>(
         (&Method::POST, "/gate/open") => {
             if let Some(gate) = gate {
                 let latency_us = gate.send_open_command(TrackId(0)).await;
+                // Record manual gate open in metrics (same as automatic opens)
+                metrics.record_gate_command();
+                metrics.record_gate_latency(latency_us);
                 info!(latency_us = %latency_us, "manual_gate_open");
                 Ok(Response::builder()
                     .status(StatusCode::OK)

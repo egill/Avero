@@ -933,6 +933,7 @@
             "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
+            "axisSoftMin": 0,
             "drawStyle": "points",
             "fillOpacity": 0,
             "lineWidth": 0,

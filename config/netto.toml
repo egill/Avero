@@ -66,3 +66,5 @@ recent_exit_window_ms = 3000
 enabled = true
 host = "100.112.14.22"  # VerneMQ on e18n.net via Tailscale
 port = 1883
+username = "avero"
+password = "avero"

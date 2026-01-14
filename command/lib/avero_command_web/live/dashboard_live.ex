@@ -27,30 +27,31 @@ defmodule AveroCommandWeb.DashboardLive do
     site_config = socket.assigns[:site_config] || Sites.get(selected_site)
     selected_sites = socket.assigns[:selected_sites] || []
 
-    gates = load_gates(site_config)
+    gates = load_gates(selected_site)
     journeys = load_recent_journeys(selected_sites)
     pos_zones = build_pos_zones(site_config)
 
     {:ok,
-     assign(socket,
-       gates: gates,
-       journeys: journeys,
-       pos_zones: pos_zones,
-       last_updated: DateTime.utc_now()
-     )}
+     socket
+     |> assign(:page_title, "Dashboard")
+     |> assign(:gates, gates)
+     |> assign(:journeys, journeys)
+     |> assign(:pos_zones, pos_zones)
+     |> assign(:authorized_at_gate, 0)
+     |> assign(:last_updated, DateTime.utc_now())}
   end
 
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_interval)
-    site_config = socket.assigns[:site_config]
-    gates = load_gates(site_config)
+    selected_site = socket.assigns[:selected_site]
+    gates = load_gates(selected_site)
     {:noreply, assign(socket, gates: gates, last_updated: DateTime.utc_now())}
   end
 
   def handle_info({:gate_event, _event}, socket) do
-    site_config = socket.assigns[:site_config]
-    gates = load_gates(site_config)
+    selected_site = socket.assigns[:selected_site]
+    gates = load_gates(selected_site)
     {:noreply, assign(socket, gates: gates, last_updated: DateTime.utc_now())}
   end
 
@@ -59,9 +60,14 @@ defmodule AveroCommandWeb.DashboardLive do
     {:noreply, assign(socket, journeys: journeys)}
   end
 
-  def handle_info({:zone_event, %{zone_id: zone_id, event_type: type}}, socket) do
-    pos_zones = update_pos_zone(socket.assigns.pos_zones, zone_id, type)
-    {:noreply, assign(socket, pos_zones: pos_zones)}
+  def handle_info({:zone_event, %{site: event_site, zone_id: zone_id, event_type: type}}, socket) do
+    # Only process events for the currently selected site
+    if event_site == socket.assigns[:selected_site] do
+      pos_zones = update_pos_zone(socket.assigns.pos_zones, zone_id, type)
+      {:noreply, assign(socket, pos_zones: pos_zones)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -96,6 +102,42 @@ defmodule AveroCommandWeb.DashboardLive do
     {:noreply, socket}
   end
 
+  def handle_event("simulate_acc", %{"pos" => pos}, socket) do
+    require Logger
+
+    selected_site = socket.assigns[:selected_site]
+
+    # Call the ACC simulate API
+    Task.start(fn ->
+      url = "http://localhost:4000/api/acc/simulate"
+
+      body =
+        Jason.encode!(%{
+          "pos" => pos,
+          "site" => selected_site
+        })
+
+      :inets.start()
+      :ssl.start()
+
+      case :httpc.request(
+             :post,
+             {String.to_charlist(url), [{'content-type', 'application/json'}], 'application/json',
+              String.to_charlist(body)},
+             [{:timeout, 5000}],
+             []
+           ) do
+        {:ok, {{_, status, _}, _, resp_body}} ->
+          Logger.info("ACC simulate response for #{selected_site}/#{pos}: status=#{status} body=#{inspect(resp_body)}")
+
+        {:error, reason} ->
+          Logger.warning("ACC simulate failed for #{selected_site}/#{pos}: #{inspect(reason)}")
+      end
+    end)
+
+    {:noreply, put_flash(socket, :info, "ACC triggered for #{pos}")}
+  end
+
   # Handle site switching - reload data for new site
   def handle_event("switch_site", %{"site" => site_key}, socket) do
     # The SiteFilterHook handles updating the assigns, but we need to reload data
@@ -103,7 +145,7 @@ defmodule AveroCommandWeb.DashboardLive do
     # Use site key ("netto") not site ID ("AP-NETTO-GR-01") - database uses key
     selected_sites = [site_key]
 
-    gates = load_gates(site_config)
+    gates = load_gates(site_key)
     journeys = load_recent_journeys(selected_sites)
     pos_zones = build_pos_zones(site_config)
 
@@ -165,10 +207,16 @@ defmodule AveroCommandWeb.DashboardLive do
 
   defp load_gates(nil), do: []
 
-  defp load_gates(site_config) do
+  defp load_gates(site_key) when is_binary(site_key) do
+    # Filter by site key (e.g., "netto", "avero") which matches what the gateway sends
     GateRegistry.list_all()
-    |> Enum.filter(fn g -> g.site == site_config.id end)
+    |> Enum.filter(fn g -> g.site == site_key end)
     |> Enum.sort_by(fn g -> {g.site, g.gate_id} end)
+  end
+
+  defp load_gates(_site_config) do
+    # Fallback for old calls passing site_config struct
+    []
   end
 
   defp load_recent_journeys(sites) do
@@ -197,6 +245,10 @@ defmodule AveroCommandWeb.DashboardLive do
     end)
   end
 
+  defp pos_zone_total_count(pos_zones) do
+    Enum.reduce(pos_zones, 0, fn zone, acc -> acc + (zone.count || 0) end)
+  end
+
   defp format_duration(seconds) when seconds < 60 do
     "#{seconds}s"
   end
@@ -212,10 +264,31 @@ defmodule AveroCommandWeb.DashboardLive do
     end
   end
 
+  defp format_duration_ms(nil), do: "--:--"
+
+  defp format_duration_ms(ms) when is_integer(ms) do
+    total_seconds = div(ms, 1000)
+    minutes = div(total_seconds, 60)
+    seconds = rem(total_seconds, 60)
+
+    if minutes > 0 do
+      "#{minutes}:#{String.pad_leading(Integer.to_string(seconds), 2, "0")}"
+    else
+      "0:#{String.pad_leading(Integer.to_string(seconds), 2, "0")}"
+    end
+  end
+
   # Get Grafana panel URL for current site
   defp grafana_panel(site_key, panel_id, opts \\ []) do
-    Sites.grafana_panel_url(site_key, panel_id, opts) ||
-      "https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=#{panel_id}&theme=dark"
+    base_url =
+      Sites.grafana_panel_url(site_key, panel_id, opts) ||
+        "https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=#{panel_id}&theme=dark"
+
+    # Add refresh parameter if specified
+    case Keyword.get(opts, :refresh) do
+      nil -> base_url
+      refresh -> base_url <> "&refresh=#{refresh}"
+    end
   end
 
   @impl true
@@ -225,9 +298,9 @@ defmodule AveroCommandWeb.DashboardLive do
       <!-- Header -->
       <div class="flex items-center justify-between">
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
-          Gate Dashboard
+          Dashboard
           <span class="text-lg font-normal text-gray-500 dark:text-gray-400">
-            - <%= @site_config && @site_config.name || "Unknown" %>
+            · <%= @site_config && @site_config.name || "Unknown" %>
           </span>
         </h1>
         <div class="text-sm text-gray-500 dark:text-gray-400">
@@ -242,7 +315,7 @@ defmodule AveroCommandWeb.DashboardLive do
           <.gate_card gate={gate} />
 
           <!-- Grafana Stats Grid -->
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-3 gap-3">
             <.grafana_panel
               title="Gate Opens"
               src={grafana_panel(@selected_site, 4)}
@@ -252,8 +325,12 @@ defmodule AveroCommandWeb.DashboardLive do
               src={grafana_panel(@selected_site, 5)}
             />
             <.grafana_panel
+              title="Active Tracks"
+              src={grafana_panel(@selected_site, 2)}
+            />
+            <.grafana_panel
               title="Current Open"
-              src={grafana_panel(@selected_site, 50)}
+              src={grafana_panel(@selected_site, 50, refresh: "1s")}
             />
             <.grafana_panel
               title="Authorized"
@@ -264,8 +341,21 @@ defmodule AveroCommandWeb.DashboardLive do
       <% end %>
 
       <%= if @gates == [] do %>
-        <div class="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-          No gates registered for <%= @site_config && @site_config.name || "this site" %>. Waiting for gateway connections...
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+          <div class="text-center text-gray-500 dark:text-gray-400 mb-4">
+            No gates registered for <%= @site_config && @site_config.name || "this site" %>. Waiting for gateway connections...
+          </div>
+          <div class="flex justify-center">
+            <button
+              phx-click="open_gate"
+              class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+              </svg>
+              Open Gate
+            </button>
+          </div>
         </div>
       <% end %>
 
@@ -289,19 +379,35 @@ defmodule AveroCommandWeb.DashboardLive do
                 <.pos_zone zone={zone} />
               <% end %>
             </div>
-            <div class="mt-4 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-              <div class="flex items-center gap-1">
-                <div class="w-3 h-3 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600"></div>
-                <span>Empty</span>
+            <div class="mt-4 flex items-center justify-between">
+              <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <div class="flex items-center gap-1">
+                  <div class="w-3 h-3 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600"></div>
+                  <span>Empty</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <div class="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30 border-2 border-amber-400"></div>
+                  <span>Occupied</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <div class="w-3 h-3 rounded bg-green-100 dark:bg-green-900/30 border-2 border-green-400"></div>
+                  <span>Paid</span>
+                </div>
               </div>
-              <div class="flex items-center gap-1">
-                <div class="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30 border-2 border-amber-400"></div>
-                <span>Occupied</span>
-              </div>
-              <div class="flex items-center gap-1">
-                <div class="w-3 h-3 rounded bg-green-100 dark:bg-green-900/30 border-2 border-green-400"></div>
-                <span>Paid</span>
-              </div>
+              <%= if @selected_site == "avero" do %>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-500 dark:text-gray-400">
+                    <%= pos_zone_total_count(@pos_zones) %> in POS · <%= @authorized_at_gate %> auth
+                  </span>
+                  <button
+                    phx-click="simulate_acc"
+                    phx-value-pos="POS_1"
+                    class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded transition-colors"
+                  >
+                    ACC POS_1
+                  </button>
+                </div>
+              <% end %>
             </div>
           <% else %>
             <div class="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
@@ -326,35 +432,67 @@ defmodule AveroCommandWeb.DashboardLive do
       <.dash_card title="Recent Journeys">
         <div class="divide-y divide-gray-100 dark:divide-gray-700">
           <%= for journey <- @journeys do %>
-            <div class="px-4 py-3 flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <div class={[
-                  "w-2 h-2 rounded-full",
-                  journey.outcome == "authorized" && "bg-green-500",
-                  journey.outcome == "blocked" && "bg-red-500",
-                  journey.outcome not in ["authorized", "blocked"] && "bg-gray-400"
-                ]}></div>
-                <div>
-                  <div class="text-sm font-medium text-gray-900 dark:text-white">
-                    <%= journey.outcome || "unknown" %>
-                  </div>
-                  <div class="text-xs text-gray-500 dark:text-gray-400">
-                    <%= if journey.total_pos_dwell_ms && journey.total_pos_dwell_ms > 0, do: "#{div(journey.total_pos_dwell_ms, 1000)}s dwell", else: "no dwell" %>
+            <.link
+              navigate={~p"/journeys"}
+              class="block px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+            >
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <div class={[
+                    "w-2 h-2 rounded-full shrink-0",
+                    journey.outcome == "authorized" && "bg-green-500",
+                    journey.outcome == "blocked" && "bg-red-500",
+                    journey.outcome not in ["authorized", "blocked"] && "bg-gray-400"
+                  ]}></div>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium text-gray-900 dark:text-white">
+                        #<%= journey.person_id %>
+                      </span>
+                      <span class={[
+                        "px-1.5 py-0.5 text-xs font-medium rounded",
+                        journey.outcome == "authorized" && "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                        journey.outcome == "blocked" && "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                        journey.outcome not in ["authorized", "blocked"] && "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400"
+                      ]}>
+                        <%= journey.outcome || "unknown" %>
+                      </span>
+                      <%= if journey.acc_matched do %>
+                        <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                          ACC
+                        </span>
+                      <% end %>
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      <%= if journey.payment_zone do %>
+                        <%= journey.payment_zone %> ·
+                      <% end %>
+                      <%= if journey.total_pos_dwell_ms && journey.total_pos_dwell_ms > 0 do %>
+                        <%= div(journey.total_pos_dwell_ms, 1000) %>s dwell
+                      <% else %>
+                        no dwell
+                      <% end %>
+                    </div>
                   </div>
                 </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 shrink-0 ml-3">
+                  <%= if journey.ended_at do %>
+                    <%= Calendar.strftime(journey.ended_at, "%H:%M:%S") %>
+                  <% end %>
+                </div>
               </div>
-              <div class="text-xs text-gray-500 dark:text-gray-400">
-                <%= if journey.ended_at do %>
-                  <%= Calendar.strftime(journey.ended_at, "%H:%M:%S") %>
-                <% end %>
-              </div>
-            </div>
+            </.link>
           <% end %>
           <%= if @journeys == [] do %>
             <div class="px-4 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
               No recent journeys
             </div>
           <% end %>
+        </div>
+        <div class="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
+          <.link navigate={~p"/journeys"} class="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+            View all journeys →
+          </.link>
         </div>
       </.dash_card>
     </div>
@@ -403,15 +541,17 @@ defmodule AveroCommandWeb.DashboardLive do
     is_open = gate_state == :open
     has_fault = state[:fault] || false
     persons = state[:persons_in_zone] || 0
-    exits_this_cycle = state[:exits_this_cycle] || 0
     last_opened_at = state[:last_opened_at]
+    last_open_duration_ms = state[:last_open_duration_ms]
+    max_open_duration_ms = state[:max_open_duration_ms]
+    min_open_duration_ms = state[:min_open_duration_ms]
 
-    # Calculate how long gate has been open
-    open_duration_seconds =
+    # Convert DateTime to unix ms for JS hook
+    opened_at_ms =
       if is_open && last_opened_at do
-        DateTime.diff(DateTime.utc_now(), last_opened_at, :second)
+        DateTime.to_unix(last_opened_at, :millisecond)
       else
-        0
+        nil
       end
 
     assigns =
@@ -420,29 +560,20 @@ defmodule AveroCommandWeb.DashboardLive do
         is_open: is_open,
         has_fault: has_fault,
         persons: persons,
-        exits_this_cycle: exits_this_cycle,
-        open_duration_seconds: open_duration_seconds,
-        state: state
+        opened_at_ms: opened_at_ms,
+        last_open_duration_ms: last_open_duration_ms,
+        max_open_duration_ms: max_open_duration_ms,
+        min_open_duration_ms: min_open_duration_ms
       )
 
     ~H"""
-    <div class={[
-      "rounded-lg border p-6 transition-all duration-300",
-      @has_fault && "border-red-500 bg-red-50 dark:bg-red-900/20",
-      !@has_fault && @is_open && "border-green-500 bg-green-50 dark:bg-green-900/20",
-      !@has_fault && !@is_open && "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
-    ]}>
+    <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
       <div class="flex items-center justify-between mb-4">
         <div>
           <h3 class="font-semibold text-gray-900 dark:text-white">Gate <%= @gate.gate_id %></h3>
           <p class="text-xs text-gray-500 dark:text-gray-400"><%= @gate.site %></p>
         </div>
-        <div class={[
-          "px-3 py-1 rounded-full text-xs font-medium",
-          @has_fault && "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300",
-          !@has_fault && @is_open && "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
-          !@has_fault && !@is_open && "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
-        ]}>
+        <div class="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
           <%= if @has_fault, do: "FAULT", else: String.upcase(to_string(@gate_state)) %>
         </div>
       </div>
@@ -451,38 +582,45 @@ defmodule AveroCommandWeb.DashboardLive do
         <.gate_animation is_open={@is_open} has_fault={@has_fault} />
       </div>
 
-      <div class="flex items-center justify-between text-sm">
-        <span class="text-gray-500 dark:text-gray-400">Persons in zone</span>
-        <span class={[
-          "font-semibold",
-          @persons > 0 && "text-brand-600 dark:text-brand-400",
-          @persons == 0 && "text-gray-700 dark:text-gray-300"
-        ]}>
-          <%= @persons %>
-        </span>
-      </div>
-
-      <%= if @is_open do %>
-        <div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
-          <div class="flex items-center justify-between text-sm">
-            <span class="text-green-700 dark:text-green-300">Open for</span>
-            <span class="font-bold text-green-800 dark:text-green-200 tabular-nums">
-              <%= format_duration(@open_duration_seconds) %>
-            </span>
-          </div>
-          <div class="flex items-center justify-between text-sm mt-1">
-            <span class="text-green-700 dark:text-green-300">Exits this cycle</span>
-            <span class="font-bold text-green-800 dark:text-green-200">
-              <%= @exits_this_cycle %>
-            </span>
-          </div>
+      <div class="space-y-2 text-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-gray-500 dark:text-gray-400">Persons in zone</span>
+          <span class="font-medium text-gray-900 dark:text-white tabular-nums"><%= @persons %></span>
         </div>
-      <% end %>
+
+        <%= if @is_open && @opened_at_ms do %>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Open for</span>
+            <span
+              id={"gate-timer-#{@gate.site}-#{@gate.gate_id}"}
+              phx-hook="LiveTimer"
+              data-started-at={@opened_at_ms}
+              class="font-medium text-gray-900 dark:text-white tabular-nums"
+            >--:--</span>
+          </div>
+        <% end %>
+
+        <%= if @last_open_duration_ms do %>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Last open</span>
+            <span class="font-medium text-gray-900 dark:text-white tabular-nums"><%= format_duration_ms(@last_open_duration_ms) %></span>
+          </div>
+        <% end %>
+
+        <%= if @max_open_duration_ms && @min_open_duration_ms do %>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Max / Min</span>
+            <span class="font-medium text-gray-900 dark:text-white tabular-nums">
+              <%= format_duration_ms(@max_open_duration_ms) %> / <%= format_duration_ms(@min_open_duration_ms) %>
+            </span>
+          </div>
+        <% end %>
+      </div>
 
       <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
         <button
           phx-click="open_gate"
-          class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
+          class="w-full px-4 py-2 bg-gray-900 hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
@@ -502,48 +640,49 @@ defmodule AveroCommandWeb.DashboardLive do
     # Open: green rgba(34, 197, 94, 0.3) / rgba(34, 197, 94, 0.5)
     # Closed: indigo rgba(99, 102, 241, 0.2) / #6366f1
     # Fault: red
-    {door_fill, door_stroke, left_transform, right_transform} =
+    {door_fill, door_stroke} =
       cond do
         assigns.has_fault ->
-          {"rgba(239, 68, 68, 0.3)", "rgba(239, 68, 68, 0.6)", "translateX(0)", "translateX(0)"}
+          {"rgba(239, 68, 68, 0.3)", "rgba(239, 68, 68, 0.6)"}
 
         assigns.is_open ->
-          {"rgba(34, 197, 94, 0.3)", "rgba(34, 197, 94, 0.5)", "translateX(-105px)",
-           "translateX(105px)"}
+          {"rgba(34, 197, 94, 0.3)", "rgba(34, 197, 94, 0.5)"}
 
         true ->
-          {"rgba(99, 102, 241, 0.2)", "#6366f1", "translateX(0)", "translateX(0)"}
+          {"rgba(99, 102, 241, 0.2)", "#6366f1"}
       end
+
+    # Position based on state
+    {left_x, right_x} = if assigns.is_open, do: {36, 356}, else: {141, 251}
+    state_key = if assigns.is_open, do: "open", else: "closed"
 
     assigns =
       assign(assigns,
         door_fill: door_fill,
         door_stroke: door_stroke,
-        left_transform: left_transform,
-        right_transform: right_transform
+        left_x: left_x,
+        right_x: right_x,
+        state_key: state_key
       )
 
+    # Use inline style with CSS variable to force browser to animate
     ~H"""
-    <svg id="gate-svg" viewBox="0 0 500 160" class="w-full max-w-md h-auto">
+    <svg id={"gate-svg-#{@state_key}"} viewBox="0 0 500 160" class="w-full max-w-md h-auto">
       <!-- LEFT DOOR -->
       <rect
-        id="gate-left-door"
-        x="141" y="30" width="110" height="100"
+        x={@left_x} y="30" width="110" height="100"
         fill={@door_fill}
         stroke={@door_stroke}
         stroke-width="2"
         rx="4"
-        style={"transform: #{@left_transform}; transition: transform 2.5s ease, fill 0.3s ease, stroke 0.3s ease;"}
       />
       <!-- RIGHT DOOR -->
       <rect
-        id="gate-right-door"
-        x="251" y="30" width="110" height="100"
+        x={@right_x} y="30" width="110" height="100"
         fill={@door_fill}
         stroke={@door_stroke}
         stroke-width="2"
         rx="4"
-        style={"transform: #{@right_transform}; transition: transform 2.5s ease, fill 0.3s ease, stroke 0.3s ease;"}
       />
       <!-- LEFT PILLAR -->
       <rect x="30" y="15" width="110" height="130" rx="8" fill="#334155" stroke="#1e293b" stroke-width="0" />

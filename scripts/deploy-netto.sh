@@ -38,6 +38,7 @@ ssh "$HOST" "\
     sudo cp /tmp/gateway /opt/avero/gateway-bin && \
     sudo mkdir -p /opt/avero/config && \
     sudo cp /tmp/netto.toml /opt/avero/config/netto.toml && \
+    sudo chown avero:avero /opt/avero/config/netto.toml && \
     sudo systemctl start gateway"
 
 echo "Verifying status..."

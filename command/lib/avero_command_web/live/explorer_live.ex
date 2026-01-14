@@ -10,7 +10,7 @@ defmodule AveroCommandWeb.ExplorerLive do
      |> assign(:events, [])
      |> assign(:query, "")
      |> assign(:limit, 100)
-     |> assign(:page_title, "Explorer")}
+     |> assign(:page_title, "Debug")}
   end
 
   @impl true
@@ -37,8 +37,8 @@ defmodule AveroCommandWeb.ExplorerLive do
     ~H"""
     <div class="explorer">
       <.header>
-        Historical Explorer
-        <:subtitle>Search and analyze past events</:subtitle>
+        Debug
+        <:subtitle>Search and analyze raw events</:subtitle>
       </.header>
 
       <div class="mt-6 bg-white shadow rounded-lg p-6">

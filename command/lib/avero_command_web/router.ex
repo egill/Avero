@@ -61,6 +61,9 @@ defmodule AveroCommandWeb.Router do
 
       # Configuration
       live("/config", ConfigLive, :index)
+
+      # POS Test (simple ACC simulation page)
+      live("/pos-test", PosTestLive, :index)
     end
   end
 

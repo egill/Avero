@@ -63,8 +63,14 @@ pub struct ZoneEventPayload {
 /// Payload for metrics snapshot
 #[derive(Debug, Serialize)]
 pub struct MetricsPayload {
+    /// Site identifier
+    pub site: String,
     /// Timestamp (epoch ms)
     pub ts: u64,
+    /// Current gate state (open, closed, moving, unknown)
+    pub gate_state: String,
+    /// Gate ID (default 1)
+    pub gate_id: u32,
     /// Total events processed
     pub events_total: u64,
     /// Events per second
@@ -108,10 +114,14 @@ pub struct MetricsPayload {
     pub gate_queue_utilization_pct: u64,
 }
 
-impl From<MetricsSummary> for MetricsPayload {
-    fn from(summary: MetricsSummary) -> Self {
+impl MetricsPayload {
+    /// Create a metrics payload from a summary with site and gate info
+    pub fn from_summary(summary: MetricsSummary, site: String, gate_state: &str) -> Self {
         Self {
+            site,
             ts: epoch_ms(),
+            gate_state: gate_state.to_string(),
+            gate_id: 1,
             events_total: summary.events_total,
             events_per_sec: summary.events_per_sec,
             avg_latency_us: summary.avg_process_latency_us,
@@ -318,9 +328,9 @@ impl EgressSender {
         let _ = self.tx.try_send(EgressMessage::ZoneEvent(payload));
     }
 
-    /// Send a metrics snapshot
-    pub fn send_metrics(&self, summary: MetricsSummary) {
-        let payload = MetricsPayload::from(summary);
+    /// Send a metrics snapshot with current gate state
+    pub fn send_metrics(&self, summary: MetricsSummary, gate_state: &str) {
+        let payload = MetricsPayload::from_summary(summary, self.site_id.clone(), gate_state);
         let _ = self.tx.try_send(EgressMessage::Metrics(payload));
     }
 

@@ -23,44 +23,69 @@ defmodule AveroCommandWeb.AccController do
   - message: human-readable result
   """
   def simulate(conn, params) do
-    receipt_id = params["receipt_id"] || generate_receipt_id()
     pos = params["pos"] || "POS_1"
     site = params["site"] || "avero"
 
-    Logger.info("ACC simulate: receipt_id=#{receipt_id} pos=#{pos} site=#{site}")
+    Logger.info("ACC simulate: pos=#{pos} site=#{site}")
 
-    # Find active persons in the requested POS zone
-    case find_person_in_zone(site, pos) do
-      {:ok, person} ->
-        # Broadcast ACC matched event
-        broadcast_acc_event(site, receipt_id, pos, person)
+    # Call the gateway's /acc/simulate endpoint
+    gateway_url = AveroCommand.Sites.gateway_url(site, "/acc/simulate?pos=#{pos}")
 
-        Logger.info("ACC matched: person_id=#{person.person_id} pos=#{pos}")
+    if gateway_url do
+      :inets.start()
+      :ssl.start()
 
-        conn
-        |> put_resp_header("access-control-allow-origin", "*")
-        |> json(%{
-          matched: true,
-          person_id: person.person_id,
-          receipt_id: receipt_id,
-          pos: pos,
-          message: "Payment matched to person #{person.person_id}"
-        })
+      case :httpc.request(:post, {String.to_charlist(gateway_url), [], ~c"application/json", ~c""}, [{:timeout, 5000}], []) do
+        {:ok, {{_, status, _}, _, body}} when status in [200, 201] ->
+          Logger.info("ACC simulate sent to gateway: status=#{status} body=#{inspect(body)}")
 
-      :not_found ->
-        # Broadcast ACC unmatched event
-        broadcast_acc_unmatched(site, receipt_id, pos)
+          conn
+          |> put_resp_header("access-control-allow-origin", "*")
+          |> json(%{
+            ok: true,
+            pos: pos,
+            site: site,
+            message: "ACC event sent to gateway"
+          })
 
-        Logger.info("ACC unmatched: no person in #{pos}")
+        {:ok, {{_, status, _}, _, body}} ->
+          Logger.warning("ACC simulate failed: status=#{status} body=#{inspect(body)}")
 
-        conn
-        |> put_resp_header("access-control-allow-origin", "*")
-        |> json(%{
-          matched: false,
-          receipt_id: receipt_id,
-          pos: pos,
-          message: "No person found in #{pos} - use barcode to authorize"
-        })
+          conn
+          |> put_resp_header("access-control-allow-origin", "*")
+          |> put_status(502)
+          |> json(%{
+            ok: false,
+            pos: pos,
+            site: site,
+            error: "Gateway returned status #{status}"
+          })
+
+        {:error, reason} ->
+          Logger.warning("ACC simulate error: #{inspect(reason)}")
+
+          conn
+          |> put_resp_header("access-control-allow-origin", "*")
+          |> put_status(502)
+          |> json(%{
+            ok: false,
+            pos: pos,
+            site: site,
+            error: "Failed to contact gateway: #{inspect(reason)}"
+          })
+      end
+    else
+      Logger.warning("ACC simulate: no gateway URL for site #{site}")
+
+      conn
+      |> put_resp_header("access-control-allow-origin", "*")
+      |> put_status(400)
+      |> json(%{
+        ok: false,
+        pos: pos,
+        site: site,
+        error: "Unknown site: #{site}"
+      })
     end
   end
 

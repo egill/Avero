@@ -16,7 +16,15 @@ defmodule AveroCommand.Sites do
       gateway_ip: "100.80.187.3",
       grafana_dashboard: "command-live",
       grafana_site: "netto",
-      pos_zones: ["POS_1", "POS_2", "POS_3", "POS_4", "POS_5"]
+      pos_zones: ["POS_1", "POS_2", "POS_3", "POS_4", "POS_5"],
+      # Zone ID -> name mappings (from netto.toml)
+      zone_names: %{
+        1001 => "POS_3",
+        1002 => "POS_4",
+        1003 => "POS_5",
+        1004 => "POS_1",
+        1005 => "POS_2"
+      }
     },
     "avero" => %{
       id: "AP-AVERO-GR-01",
@@ -24,7 +32,12 @@ defmodule AveroCommand.Sites do
       gateway_ip: "100.65.110.63",
       grafana_dashboard: "command-live",
       grafana_site: "avero",
-      pos_zones: ["POS_1"]
+      pos_zones: ["POS_1", "DWELL_1"],
+      # Zone ID -> name mappings (from avero.toml)
+      zone_names: %{
+        1007 => "POS_1",
+        1010 => "DWELL_1"
+      }
     }
   }
 
@@ -146,4 +159,24 @@ defmodule AveroCommand.Sites do
   """
   def valid?(site_key) when is_binary(site_key), do: Map.has_key?(@sites, site_key)
   def valid?(_), do: false
+
+  @doc """
+  Get the zone name from a numeric zone ID for a site.
+  Returns the name (e.g., "POS_1") or nil if not found.
+  """
+  def zone_name(site_key, zone_id) when is_binary(site_key) and is_integer(zone_id) do
+    case get(site_key) do
+      %{zone_names: names} -> Map.get(names, zone_id)
+      _ -> nil
+    end
+  end
+
+  def zone_name(site_key, zone_id) when is_binary(site_key) and is_binary(zone_id) do
+    case Integer.parse(zone_id) do
+      {id, ""} -> zone_name(site_key, id)
+      _ -> nil
+    end
+  end
+
+  def zone_name(_, _), do: nil
 end

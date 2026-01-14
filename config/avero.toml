@@ -24,6 +24,7 @@ poll_interval_ms = 250
 
 [zones]
 pos_zones = [1007]
+dwell_zones = [1010]
 gate_zone = 1008
 exit_line = 1006
 entry_line = 1005
@@ -35,6 +36,7 @@ approach_line = 1009
 1007 = "POS_1"
 1008 = "GATE_1"
 1009 = "APPROACH_1"
+1010 = "DWELL_1"
 
 [pos_tracking]
 min_dwell_ms = 7000
@@ -53,3 +55,5 @@ recent_exit_window_ms = 3000
 enabled = true
 host = "100.112.14.22"  # VerneMQ on e18n.net via Tailscale
 port = 1883
+username = "avero"
+password = "avero"
