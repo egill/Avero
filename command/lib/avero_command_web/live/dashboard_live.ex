@@ -24,12 +24,14 @@ defmodule AveroCommandWeb.DashboardLive do
     selected_sites = socket.assigns[:selected_sites] || []
     journeys = load_recent_journeys(selected_sites)
 
-    # Initialize POS zones (hardcoded for now, could come from config)
+    # POS zones using zone names from gateway config
+    # Netto: POS_1, POS_2, POS_3, POS_4, POS_5
     pos_zones = [
-      %{id: "1001", occupied: false, count: 0, paid: false},
-      %{id: "1002", occupied: false, count: 0, paid: false},
-      %{id: "1003", occupied: false, count: 0, paid: false},
-      %{id: "1004", occupied: false, count: 0, paid: false}
+      %{id: "POS_1", occupied: false, count: 0, paid: false},
+      %{id: "POS_2", occupied: false, count: 0, paid: false},
+      %{id: "POS_3", occupied: false, count: 0, paid: false},
+      %{id: "POS_4", occupied: false, count: 0, paid: false},
+      %{id: "POS_5", occupied: false, count: 0, paid: false}
     ]
 
     {:ok,
@@ -144,6 +146,21 @@ defmodule AveroCommandWeb.DashboardLive do
     end
   end
 
+  defp format_duration(seconds) when seconds < 60 do
+    "#{seconds}s"
+  end
+
+  defp format_duration(seconds) do
+    minutes = div(seconds, 60)
+    secs = rem(seconds, 60)
+
+    if secs == 0 do
+      "#{minutes}m"
+    else
+      "#{minutes}m #{secs}s"
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -156,22 +173,55 @@ defmodule AveroCommandWeb.DashboardLive do
         </div>
       </div>
 
-      <!-- Gates Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        <%= for gate <- @gates do %>
+      <!-- Gates with Stats -->
+      <%= for gate <- @gates do %>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Gate Card -->
           <.gate_card gate={gate} />
-        <% end %>
-        <%= if @gates == [] do %>
-          <div class="col-span-full text-center py-12 text-gray-500 dark:text-gray-400">
-            No gates registered yet. Waiting for gateway connections...
+
+          <!-- Grafana Stats Grid -->
+          <div class="grid grid-cols-2 gap-3">
+            <.grafana_panel
+              title="Gate Opens"
+              src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=4&theme=dark&from=now-30m&to=now&refresh=30s"
+            />
+            <.grafana_panel
+              title="Exits"
+              src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=5&theme=dark&from=now-30m&to=now&refresh=30s"
+            />
+            <.grafana_panel
+              title="Current Open"
+              src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=50&theme=dark&from=now-30m&to=now&refresh=30s"
+            />
+            <.grafana_panel
+              title="Authorized"
+              src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=3&theme=dark&from=now-30m&to=now&refresh=30s"
+            />
           </div>
-        <% end %>
-      </div>
+        </div>
+      <% end %>
+
+      <%= if @gates == [] do %>
+        <div class="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          No gates registered yet. Waiting for gateway connections...
+        </div>
+      <% end %>
+
+      <!-- Gate Open Duration (1h) -->
+      <.dash_card title="Gate Openings (1h)">
+        <div class="h-48">
+          <iframe
+            src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=51&theme=dark&from=now-1h&to=now&refresh=30s"
+            class="w-full h-full border-0"
+            title="Gate Open Duration"
+          ></iframe>
+        </div>
+      </.dash_card>
 
       <!-- POS Zones -->
       <.dash_card title="POS Zones">
         <div class="p-4">
-          <div class="grid grid-cols-4 gap-3">
+          <div class="grid grid-cols-5 gap-3">
             <%= for zone <- @pos_zones do %>
               <.pos_zone zone={zone} />
             <% end %>
@@ -193,6 +243,17 @@ defmodule AveroCommandWeb.DashboardLive do
         </div>
       </.dash_card>
 
+      <!-- POS Zone Occupancy Graph (60m) -->
+      <.dash_card title="POS Zone Occupancy (60m)">
+        <div class="h-48">
+          <iframe
+            src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=10&theme=dark&from=now-60m&to=now&refresh=30s"
+            class="w-full h-full border-0"
+            title="POS Zone Occupancy"
+          ></iframe>
+        </div>
+      </.dash_card>
+
       <!-- Recent Journeys -->
       <.dash_card title="Recent Journeys">
         <div class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -210,13 +271,13 @@ defmodule AveroCommandWeb.DashboardLive do
                     <%= journey.outcome || "unknown" %>
                   </div>
                   <div class="text-xs text-gray-500 dark:text-gray-400">
-                    <%= if journey.dwell_ms, do: "#{div(journey.dwell_ms, 1000)}s dwell", else: "no dwell" %>
+                    <%= if journey.total_pos_dwell_ms && journey.total_pos_dwell_ms > 0, do: "#{div(journey.total_pos_dwell_ms, 1000)}s dwell", else: "no dwell" %>
                   </div>
                 </div>
               </div>
               <div class="text-xs text-gray-500 dark:text-gray-400">
-                <%= if journey.completed_at do %>
-                  <%= Calendar.strftime(journey.completed_at, "%H:%M:%S") %>
+                <%= if journey.ended_at do %>
+                  <%= Calendar.strftime(journey.ended_at, "%H:%M:%S") %>
                 <% end %>
               </div>
             </div>
@@ -228,6 +289,24 @@ defmodule AveroCommandWeb.DashboardLive do
           <% end %>
         </div>
       </.dash_card>
+    </div>
+    """
+  end
+
+  # Grafana embedded panel component
+  attr :title, :string, required: true
+  attr :src, :string, required: true
+
+  defp grafana_panel(assigns) do
+    ~H"""
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div class="h-24">
+        <iframe
+          src={@src}
+          class="w-full h-full border-0"
+          title={@title}
+        ></iframe>
+      </div>
     </div>
     """
   end
@@ -256,6 +335,16 @@ defmodule AveroCommandWeb.DashboardLive do
     is_open = gate_state == :open
     has_fault = state[:fault] || false
     persons = state[:persons_in_zone] || 0
+    exits_this_cycle = state[:exits_this_cycle] || 0
+    last_opened_at = state[:last_opened_at]
+
+    # Calculate how long gate has been open
+    open_duration_seconds =
+      if is_open && last_opened_at do
+        DateTime.diff(DateTime.utc_now(), last_opened_at, :second)
+      else
+        0
+      end
 
     assigns =
       assign(assigns,
@@ -263,6 +352,8 @@ defmodule AveroCommandWeb.DashboardLive do
         is_open: is_open,
         has_fault: has_fault,
         persons: persons,
+        exits_this_cycle: exits_this_cycle,
+        open_duration_seconds: open_duration_seconds,
         state: state
       )
 
@@ -302,6 +393,23 @@ defmodule AveroCommandWeb.DashboardLive do
           <%= @persons %>
         </span>
       </div>
+
+      <%= if @is_open do %>
+        <div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-green-700 dark:text-green-300">Open for</span>
+            <span class="font-bold text-green-800 dark:text-green-200 tabular-nums">
+              <%= format_duration(@open_duration_seconds) %>
+            </span>
+          </div>
+          <div class="flex items-center justify-between text-sm mt-1">
+            <span class="text-green-700 dark:text-green-300">Exits this cycle</span>
+            <span class="font-bold text-green-800 dark:text-green-200">
+              <%= @exits_this_cycle %>
+            </span>
+          </div>
+        </div>
+      <% end %>
 
       <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
         <button
@@ -381,9 +489,10 @@ defmodule AveroCommandWeb.DashboardLive do
   attr(:zone, :map, required: true)
 
   defp pos_zone(assigns) do
-    # Extract zone number: "1001" -> "1", "1002" -> "2", etc.
+    # Extract zone number: "POS_1" -> "1", "POS_2" -> "2", etc.
     zone_num =
       case assigns.zone.id do
+        "POS_" <> n -> n
         "100" <> n -> n
         id -> id
       end

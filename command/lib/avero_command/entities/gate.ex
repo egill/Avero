@@ -31,7 +31,8 @@ defmodule AveroCommand.Entities.Gate do
     :unusual_open_timer_ref,
     persons_in_zone: [],
     events: [],
-    fault: false
+    fault: false,
+    exits_this_cycle: 0
   ]
 
   # ============================================
@@ -81,7 +82,8 @@ defmodule AveroCommand.Entities.Gate do
       last_opened_at: state.last_opened_at,
       last_closed_at: state.last_closed_at,
       fault: state.fault,
-      started_at: state.started_at
+      started_at: state.started_at,
+      exits_this_cycle: state.exits_this_cycle
     }
 
     {:reply, reply, state, @idle_timeout}
@@ -129,6 +131,7 @@ defmodule AveroCommand.Entities.Gate do
       | state: :open,
         last_opened_at: event.time,
         unusual_open_timer_ref: timer_ref,
+        exits_this_cycle: 0,
         events: add_event(state.events, event)
     }
   end
@@ -161,9 +164,16 @@ defmodule AveroCommand.Entities.Gate do
 
   defp apply_event(state, %{event_type: "gate.zone_exit", person_id: person_id} = event)
        when not is_nil(person_id) do
+    # Increment exit count if gate is currently open (person went through)
+    new_exit_count =
+      if state.state == :open,
+        do: state.exits_this_cycle + 1,
+        else: state.exits_this_cycle
+
     %{
       state
       | persons_in_zone: Enum.reject(state.persons_in_zone, &(&1 == person_id)),
+        exits_this_cycle: new_exit_count,
         events: add_event(state.events, event)
     }
   end
