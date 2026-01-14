@@ -1,0 +1,1068 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+        "enable": true,
+        "hide": false,
+        "iconColor": "red",
+        "name": "Long Gate Open (>30s)",
+        "rawQuery": "WITH gate_cycles AS (SELECT time as open_time, data->>'state' as state, LEAD(time) OVER (ORDER BY time) as close_time, LEAD(data->>'state') OVER (ORDER BY time) as next_state FROM events WHERE site = '$site' AND event_type = 'gates' AND data->>'src' = 'rs485' AND data->>'state' IN ('open', 'closed') AND $__timeFilter(time)) SELECT open_time as time, 'Gate open ' || ROUND(EXTRACT(EPOCH FROM (close_time - open_time)))::text || 's' as text FROM gate_cycles WHERE state = 'open' AND next_state = 'closed' AND EXTRACT(EPOCH FROM (close_time - open_time)) > 30;",
+        "showIn": 0
+      }
+    ]
+  },
+  "description": "Explore available data and visualization possibilities. Not for operational use - for data discovery and analysis.",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "🔬 Journey Analytics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "pieType": "donut",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/^count$/", "values": true },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT outcome, COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '7 days' AND outcome IS NOT NULL GROUP BY outcome ORDER BY count DESC;",
+          "refId": "A"
+        }
+      ],
+      "title": "Journey Outcomes Distribution (7d)",
+      "transformations": [
+        { "id": "renameByRegex", "options": { "regex": "outcome", "renamePattern": "" } }
+      ],
+      "type": "piechart"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "id": 2,
+      "options": {
+        "barRadius": 0.1,
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN total_pos_dwell_ms < 10000 THEN '0-10s' WHEN total_pos_dwell_ms < 20000 THEN '10-20s' WHEN total_pos_dwell_ms < 30000 THEN '20-30s' WHEN total_pos_dwell_ms < 60000 THEN '30-60s' WHEN total_pos_dwell_ms < 120000 THEN '60-120s' ELSE '>120s' END as bucket, COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '7 days' AND total_pos_dwell_ms > 0 GROUP BY 1 ORDER BY MIN(total_pos_dwell_ms);",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Dwell Time Distribution (7d)",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "continuous-GrYlRd" },
+          "custom": {
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "id": 3,
+      "options": {
+        "calculate": false,
+        "cellGap": 2,
+        "color": { "exponent": 0.5, "fill": "dark-orange", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Oranges", "steps": 64 },
+        "exemplars": { "color": "rgba(255,0,255,0.7)" },
+        "filterValues": { "le": 1e-9 },
+        "legend": { "show": true },
+        "rowsFrame": { "layout": "auto" },
+        "tooltip": { "show": true, "yHistogram": false },
+        "yAxis": { "axisPlacement": "left", "reverse": false }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT EXTRACT(DOW FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int as day_of_week, EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int as hour, COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '30 days' AND outcome IN ('paid_exit', 'unpaid_exit') GROUP BY 1, 2 ORDER BY 1, 2;",
+          "refId": "A"
+        }
+      ],
+      "title": "Traffic Heatmap (Day × Hour)",
+      "type": "heatmap"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "mode": "none" }
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', time) as time, AVG(total_pos_dwell_ms) / 1000.0 as avg_dwell, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY total_pos_dwell_ms) / 1000.0 as median_dwell, PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY total_pos_dwell_ms) / 1000.0 as p90_dwell FROM person_journeys WHERE site = '$site' AND $__timeFilter(time) AND total_pos_dwell_ms > 0 GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Dwell Time Over Time (avg, median, p90)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 120 }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "id": 5,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik')::text || ':00' as hour, AVG(total_pos_dwell_ms) / 1000.0 as avg_dwell FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '7 days' AND total_pos_dwell_ms > 0 GROUP BY EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik') ORDER BY EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik');",
+          "refId": "A"
+        }
+      ],
+      "title": "Average Dwell by Hour of Day",
+      "transformations": [
+        { "id": "rowsToFields", "options": { "mappings": [{ "fieldName": "hour", "handlerKey": "field.name" }, { "fieldName": "avg_dwell", "handlerKey": "field.value" }] } }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "id": 200,
+      "title": "💳 ACC & Payment Analysis",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "matched" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "unmatched" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "late" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('15 minutes', time) as time, COUNT(*) FILTER (WHERE data->>'type' = 'acc.matched' OR data->>'type' = 'person.payment.received') as matched, COUNT(*) FILTER (WHERE data->>'type' = 'acc.unmatched') as unmatched, COUNT(*) FILTER (WHERE data->>'type' = 'acc.late_after_gate') as late FROM events WHERE site = '$site' AND event_type IN ('acc', 'people') AND $__timeFilter(time) GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "ACC Events (Matched vs Unmatched vs Late)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": { "mode": "none" }
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "id": 7,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', time) as time, AVG((data->>'delta_ms')::numeric) as avg_delta_ms FROM events WHERE site = '$site' AND data->>'type' = 'acc.late_after_gate' AND $__timeFilter(time) AND (data->>'delta_ms')::numeric BETWEEN 5000 AND 60000 GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Late ACC Delta (>5s after gate)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "id": 300,
+      "title": "🚪 Gate Performance Deep Dive",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": { "mode": "none" }
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "id": 8,
+      "options": {
+        "legend": { "calcs": ["mean", "max", "min"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "WITH gate_cycles AS (SELECT time, data->>'state' as state, LEAD(time) OVER (ORDER BY time) as next_time, LEAD(data->>'state') OVER (ORDER BY time) as next_state FROM events WHERE site = '$site' AND event_type = 'gates' AND data->>'src' = 'rs485' AND data->>'state' IN ('open', 'closed') AND $__timeFilter(time)) SELECT time_bucket('30 minutes', time) as time, AVG(EXTRACT(EPOCH FROM (next_time - time)) * 1000)::numeric as avg_open_ms, MAX(EXTRACT(EPOCH FROM (next_time - time)) * 1000)::numeric as max_open_ms FROM gate_cycles WHERE state = 'open' AND next_state = 'closed' AND next_time IS NOT NULL GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Open Duration (avg vs max)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "drawStyle": "points",
+            "fillOpacity": 0,
+            "lineWidth": 0,
+            "pointSize": 10,
+            "showPoints": "always"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 30 }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "id": 9,
+      "options": {
+        "legend": { "calcs": ["max", "mean"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "WITH gate_cycles AS (SELECT time as open_time, data->>'state' as state, LEAD(time) OVER (ORDER BY time) as close_time, LEAD(data->>'state') OVER (ORDER BY time) as next_state FROM events WHERE site = '$site' AND event_type = 'gates' AND data->>'src' = 'rs485' AND data->>'state' IN ('open', 'closed') AND $__timeFilter(time)) SELECT open_time as time, EXTRACT(EPOCH FROM (close_time - open_time)) as open_duration_sec FROM gate_cycles WHERE state = 'open' AND next_state = 'closed' ORDER BY open_time;",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Open Duration (per cycle)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "id": 400,
+      "title": "⚠️ Anomaly Detection",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "displayMode": "auto", "inspect": false },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "duration_sec" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "open_time" }, "properties": [{ "id": "custom.width", "value": 180 }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "id": 10,
+      "options": {
+        "footer": { "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "duration_sec" }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "WITH gate_cycles AS (SELECT time as open_time, data->>'state' as state, LEAD(time) OVER (ORDER BY time) as close_time, LEAD(data->>'state') OVER (ORDER BY time) as next_state FROM events WHERE site = '$site' AND event_type = 'gates' AND data->>'src' = 'rs485' AND data->>'state' IN ('open', 'closed') AND $__timeFilter(time)) SELECT open_time, close_time, EXTRACT(EPOCH FROM (close_time - open_time)) as duration_sec FROM gate_cycles WHERE state = 'open' AND next_state = 'closed' AND EXTRACT(EPOCH FROM (close_time - open_time)) > 60 ORDER BY duration_sec DESC LIMIT 20;",
+          "refId": "A"
+        }
+      ],
+      "title": "Long Gate Openings (>60s)",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "displayMode": "auto", "inspect": false },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "dwell_sec" }, "properties": [{ "id": "unit", "value": "s" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "id": 11,
+      "options": {
+        "footer": { "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "dwell_sec" }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT time, outcome, total_pos_dwell_ms / 1000.0 as dwell_sec, authorized, tailgated FROM person_journeys WHERE site = '$site' AND total_pos_dwell_ms > 180000 AND $__timeFilter(time) ORDER BY total_pos_dwell_ms DESC LIMIT 20;",
+          "refId": "A"
+        }
+      ],
+      "title": "Very Long Dwell (>3 min) - Stuck?",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "points",
+            "fillOpacity": 0,
+            "lineWidth": 0,
+            "pointSize": 8,
+            "showPoints": "always"
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "tailgated" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "normal" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "id": 12,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT time, CASE WHEN tailgated THEN 1 ELSE NULL END as tailgated, CASE WHEN NOT tailgated THEN 1 ELSE NULL END as normal FROM person_journeys WHERE site = '$site' AND $__timeFilter(time) AND outcome IN ('paid_exit', 'unpaid_exit');",
+          "refId": "A"
+        }
+      ],
+      "title": "Tailgating Events Scatter",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 52 },
+      "id": 500,
+      "title": "📊 Comparative Analysis",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "always",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "this_week" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "last_week" }, "properties": [{ "id": "color", "value": { "fixedColor": "gray", "mode": "fixed" } }, { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 53 },
+      "id": 13,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "WITH days AS (SELECT generate_series(0, 6) as day_offset), this_week AS (SELECT EXTRACT(DOW FROM time)::int as dow, COUNT(*) as cnt FROM person_journeys WHERE site = '$site' AND time >= date_trunc('week', NOW()) AND outcome IN ('paid_exit', 'unpaid_exit') GROUP BY 1), last_week AS (SELECT EXTRACT(DOW FROM time)::int as dow, COUNT(*) as cnt FROM person_journeys WHERE site = '$site' AND time >= date_trunc('week', NOW()) - INTERVAL '7 days' AND time < date_trunc('week', NOW()) AND outcome IN ('paid_exit', 'unpaid_exit') GROUP BY 1) SELECT date_trunc('week', NOW()) + (d.day_offset || ' days')::interval as time, COALESCE(tw.cnt, 0) as this_week, COALESCE(lw.cnt, 0) as last_week FROM days d LEFT JOIN this_week tw ON d.day_offset = tw.dow LEFT JOIN last_week lw ON d.day_offset = lw.dow ORDER BY d.day_offset;",
+          "refId": "A"
+        }
+      ],
+      "title": "This Week vs Last Week",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "paid" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "unpaid" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 53 },
+      "id": 14,
+      "options": {
+        "barRadius": 0.1,
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "normal",
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT CASE EXTRACT(DOW FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int WHEN 0 THEN 'Sun' WHEN 1 THEN 'Mon' WHEN 2 THEN 'Tue' WHEN 3 THEN 'Wed' WHEN 4 THEN 'Thu' WHEN 5 THEN 'Fri' WHEN 6 THEN 'Sat' END as day, COUNT(*) FILTER (WHERE outcome = 'paid_exit') as paid, COUNT(*) FILTER (WHERE outcome = 'unpaid_exit') as unpaid FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '30 days' AND outcome IS NOT NULL GROUP BY EXTRACT(DOW FROM time AT TIME ZONE 'Atlantic/Reykjavik') ORDER BY EXTRACT(DOW FROM time AT TIME ZONE 'Atlantic/Reykjavik');",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits by Day of Week (30d)",
+      "type": "barchart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 61 },
+      "id": 600,
+      "title": "🔧 System & Event Diagnostics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" }
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 62 },
+      "id": 15,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('5 minutes', time) as time, COUNT(*) FILTER (WHERE event_type LIKE 'gateway.%') as gateway, COUNT(*) FILTER (WHERE event_type = 'sensors') as sensors, COUNT(*) FILTER (WHERE event_type = 'gates') as gates, COUNT(*) FILTER (WHERE event_type = 'exits') as exits FROM events WHERE site = '$site' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Event Volume by Type",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 70 },
+      "id": 700,
+      "title": "📋 Additional Insights",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "stacking": { "mode": "none" }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "returned" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "lost_authorized" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 71 },
+      "id": 17,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', time) as time, COUNT(*) FILTER (WHERE outcome = 'returned') as returned, COUNT(*) FILTER (WHERE outcome = 'lost_authorized') as lost_authorized FROM person_journeys WHERE site = '$site' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Returned & Lost Authorized Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "displayMode": "auto", "inspect": false },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "severity" }, "properties": [{ "id": "custom.displayMode", "value": "color-background" }, { "id": "mappings", "value": [{ "options": { "high": { "color": "red", "index": 0 }, "info": { "color": "blue", "index": 2 }, "medium": { "color": "orange", "index": 1 } }, "type": "value" }] }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 71 },
+      "id": 18,
+      "options": {
+        "footer": { "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "created_at" }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT created_at, type, severity, category, status, context->>'message' as message FROM incidents WHERE site = '$site' AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC LIMIT 20;",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Incidents (7d)",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": { "mode": "normal" }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "group_journeys" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "solo_journeys" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 79 },
+      "id": 19,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', time) as time, COUNT(*) FILTER (WHERE is_group = true) as group_journeys, COUNT(*) FILTER (WHERE is_group = false OR is_group IS NULL) as solo_journeys FROM person_journeys WHERE site = '$site' AND $__timeFilter(time) AND outcome IN ('paid_exit', 'unpaid_exit') GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Group vs Solo Journeys",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 79 },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND outcome = 'returned';",
+          "refId": "A"
+        }
+      ],
+      "title": "Returned (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 10 }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 79 },
+      "id": 21,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND outcome = 'lost_authorized';",
+          "refId": "A"
+        }
+      ],
+      "title": "Lost Authorized (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 79 },
+      "id": 22,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND is_group = true;",
+          "refId": "A"
+        }
+      ],
+      "title": "Group Journeys (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 83 },
+      "id": 23,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND tailgated = true;",
+          "refId": "A"
+        }
+      ],
+      "title": "Tailgated (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 83 },
+      "id": 24,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND acc_matched = true;",
+          "refId": "A"
+        }
+      ],
+      "title": "ACC Matched (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 83 },
+      "id": 25,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT ARRAY_LENGTH(track_ids, 1)) as unique_track_counts, AVG(ARRAY_LENGTH(track_ids, 1))::numeric(3,1) as avg_tracks_per_journey FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND ARRAY_LENGTH(track_ids, 1) > 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg Tracks/Stitched Journey",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 87 },
+      "id": 800,
+      "title": "🔍 Deep Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "drawStyle": "points",
+            "fillOpacity": 0,
+            "lineWidth": 0,
+            "pointSize": 8,
+            "showPoints": "always"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 3000 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 88 },
+      "id": 26,
+      "options": {
+        "legend": { "calcs": ["mean", "max", "p99"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT time, EXTRACT(EPOCH FROM (gate_opened_at - gate_cmd_at)) * 1000 as response_ms FROM person_journeys WHERE site = '$site' AND gate_cmd_at IS NOT NULL AND gate_opened_at IS NOT NULL AND $__timeFilter(time) ORDER BY time;",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Response Time (cmd → open)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 88 },
+      "id": 27,
+      "options": {
+        "barRadius": 0.1,
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN duration_ms < 60000 THEN '< 1 min' WHEN duration_ms < 120000 THEN '1-2 min' WHEN duration_ms < 180000 THEN '2-3 min' WHEN duration_ms < 300000 THEN '3-5 min' WHEN duration_ms < 600000 THEN '5-10 min' ELSE '> 10 min' END as bucket, COUNT(*) as count FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '7 days' AND duration_ms IS NOT NULL AND outcome IN ('paid_exit', 'unpaid_exit') GROUP BY 1 ORDER BY MIN(duration_ms);",
+          "refId": "A"
+        }
+      ],
+      "title": "Journey Duration Distribution (7d)",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 96 },
+      "id": 28,
+      "options": {
+        "barRadius": 0.1,
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "table",
+          "rawSql": "SELECT z->>'zone' as zone, SUM((z->>'visits')::int) as total_visits FROM person_journeys, jsonb_array_elements(zones_visited) as z WHERE site = '$site' AND time > NOW() - INTERVAL '7 days' AND jsonb_array_length(zones_visited) > 0 GROUP BY 1 ORDER BY total_visits DESC LIMIT 10;",
+          "refId": "A"
+        }
+      ],
+      "title": "Most Visited Zones (7d)",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "stacking": { "mode": "none" }
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 96 },
+      "id": 29,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', time) as time, AVG(duration_ms) / 1000.0 as avg_duration, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms) / 1000.0 as median_duration, PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY duration_ms) / 1000.0 as p90_duration FROM person_journeys WHERE site = '$site' AND $__timeFilter(time) AND duration_ms IS NOT NULL AND outcome IN ('paid_exit', 'unpaid_exit') GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Journey Duration Over Time (avg, median, p90)",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["explorer", "data", "analysis"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "netto", "value": "netto" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Site",
+        "multi": false,
+        "name": "site",
+        "options": [
+          { "selected": true, "text": "netto", "value": "netto" },
+          { "selected": false, "text": "grandi", "value": "grandi" }
+        ],
+        "query": "netto,grandi",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": { "refresh_intervals": ["30s", "1m", "5m", "15m"] },
+  "timezone": "Atlantic/Reykjavik",
+  "title": "Data Explorer",
+  "uid": "data-explorer",
+  "version": 1,
+  "refresh": ""
+}
