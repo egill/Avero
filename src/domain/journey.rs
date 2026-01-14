@@ -146,8 +146,8 @@ impl Journey {
     /// # Example
     ///
     /// ```
-    /// use gateway_poc::domain::journey::Journey;
-    /// use gateway_poc::domain::types::TrackId;
+    /// use gateway::domain::journey::Journey;
+    /// use gateway::domain::types::TrackId;
     ///
     /// let journey = Journey::new(TrackId(100));
     /// assert_eq!(journey.current_track_id(), TrackId(100));

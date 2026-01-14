@@ -5,6 +5,7 @@ defmodule AveroCommandWeb.GateController do
 
   @gateway_ips %{
     "netto" => "100.80.187.3",
+    "avero" => "100.65.110.63",
     "grandi" => "100.80.187.4"
   }
 

@@ -17,12 +17,12 @@ use tracing::info;
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::EnvFilter;
 
-use gateway_poc::infra::{Config, Metrics};
-use gateway_poc::io::{
+use gateway::infra::{Config, Metrics};
+use gateway::io::{
     create_egress_channel, create_egress_writer, start_acc_listener, AccListenerConfig,
     MqttPublisher, Rs485Monitor,
 };
-use gateway_poc::services::{create_gate_worker, GateController};
+use gateway::services::{create_gate_worker, GateController};
 
 /// Gateway PoC - Automated retail gate control system
 #[derive(Parser, Debug)]
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(
         version = env!("CARGO_PKG_VERSION"),
         git_hash = option_env!("GIT_HASH").unwrap_or("unknown"),
-        "gateway_poc_starting"
+        "gateway_starting"
     );
 
     // Parse command line arguments using clap
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load_from_path(&args.config);
 
     // Start embedded MQTT broker with config
-    gateway_poc::infra::broker::start_embedded_broker(&config);
+    gateway::infra::broker::start_embedded_broker(&config);
 
     info!(
         config_file = %config.config_file(),
@@ -132,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_tx_sampler = event_tx.clone();
 
     // Create watch channel for door state (lossless - latest value always available)
-    let (door_tx, door_rx) = watch::channel(gateway_poc::domain::types::DoorStatus::Unknown);
+    let (door_tx, door_rx) = watch::channel(gateway::domain::types::DoorStatus::Unknown);
 
     // Start RS485 monitor (with watch channel for door state changes)
     let rs485_monitor = Rs485Monitor::new(&config).with_door_tx(door_tx);
@@ -147,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mqtt_metrics = metrics.clone();
     let mqtt_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
-        if let Err(e) = gateway_poc::io::mqtt::start_mqtt_client(
+        if let Err(e) = gateway::io::mqtt::start_mqtt_client(
             &mqtt_config,
             mqtt_tx,
             mqtt_metrics,
@@ -158,6 +158,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::error!(error = %e, "MQTT client error");
         }
     });
+
+    // Clone event_tx for the HTTP server's ACC simulation endpoint
+    let prom_event_tx = event_tx.clone();
 
     // Start ACC TCP listener (with metrics for drop tracking)
     let acc_config = AccListenerConfig {
@@ -181,11 +184,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let prom_gate = gate.clone();
         let prom_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
-            if let Err(e) = gateway_poc::io::prometheus::start_metrics_server(
+            if let Err(e) = gateway::io::prometheus::start_metrics_server(
                 prometheus_port,
                 prom_metrics,
                 prom_site_id,
                 Some(prom_gate),
+                Some(prom_event_tx),
                 prom_shutdown,
             )
             .await
@@ -254,7 +258,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Start tracker (main event processing loop)
-    let mut tracker = gateway_poc::services::Tracker::new(
+    let mut tracker = gateway::services::Tracker::new(
         config,
         gate_cmd_tx,
         journey_tx,

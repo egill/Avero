@@ -809,6 +809,110 @@ impl Tracker {
         });
     }
 
+    /// Handle simulated ACC event (from HTTP /acc/simulate endpoint)
+    ///
+    /// Unlike handle_acc_event, this receives the POS zone name directly
+    /// instead of looking it up from an IP address.
+    pub(crate) fn handle_acc_event_simulated(&mut self, pos_zone: &str, received_at: Instant) {
+        let ts = epoch_ms();
+        let now = Instant::now();
+
+        // Get candidates sorted by: present first (dwell desc), then recent exits (dwell desc)
+        let candidates = self.pos_occupancy.get_candidates(pos_zone, now);
+        self.pos_occupancy.prune_expired(pos_zone, now);
+
+        // Filter by min_dwell_ms
+        let min_dwell = self.pos_occupancy.min_dwell_ms();
+        let qualified: Vec<(TrackId, u64)> =
+            candidates.into_iter().filter(|(_, dwell)| *dwell >= min_dwell).collect();
+
+        if qualified.is_empty() {
+            self.metrics.record_acc_event(false);
+            self.publish_unmatched_acc_event("simulated", Some(pos_zone), ts);
+            return;
+        }
+
+        // Primary is first (highest dwell among present, or highest dwell among recent exits)
+        let primary = qualified[0].0;
+        let authorized_tracks: Vec<TrackId> = qualified.iter().map(|(tid, _)| *tid).collect();
+
+        // Record ACC match on all authorized journeys
+        for &(track_id, dwell_ms) in &qualified {
+            if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+                journey.acc_matched = true;
+            }
+            self.journey_manager.add_event(
+                track_id,
+                JourneyEvent::new(JourneyEventType::Acc, ts)
+                    .with_zone(pos_zone)
+                    .with_extra(&format!("simulated,count={},dwell={dwell_ms}", qualified.len())),
+            );
+        }
+
+        // Record ACC metric
+        self.metrics.record_acc_event(true);
+
+        // Authorize all matched tracks
+        for &track_id in &authorized_tracks {
+            if let Some(person) = self.persons.get_mut(&track_id) {
+                person.authorized = true;
+            }
+            if let Some(journey) = self.journey_manager.get_mut_any(track_id) {
+                journey.authorized = true;
+            } else {
+                self.metrics.record_acc_no_journey();
+                warn!(
+                    track_id = %track_id,
+                    pos = %pos_zone,
+                    "acc_simulated_matched_no_journey"
+                );
+            }
+        }
+
+        // Check for late ACC (customer already entered gate zone before ACC arrived)
+        let gate_zone = self.config.gate_zone();
+        let gate_zone_name = self.config.zone_name(gate_zone);
+        for &track_id in &authorized_tracks {
+            self.check_late_acc_and_open_gate(
+                track_id,
+                "simulated",
+                pos_zone,
+                &gate_zone_name,
+                gate_zone,
+                ts,
+                received_at,
+            );
+        }
+
+        info!(
+            pos = %pos_zone,
+            authorized_count = %authorized_tracks.len(),
+            tracks = ?authorized_tracks,
+            primary = %primary,
+            "acc_simulated_matched"
+        );
+
+        // Publish matched ACC event to MQTT
+        if let Some(ref sender) = self.egress_sender {
+            let dwell_ms = self.journey_manager.get_dwell(primary);
+            sender.send_acc_event(AccEventPayload {
+                site: None,
+                ts,
+                t: "matched".to_string(),
+                ip: "simulated".to_string(),
+                pos: Some(pos_zone.to_string()),
+                tid: Some(primary.0),
+                dwell_ms: Some(dwell_ms),
+                gate_zone: None,
+                gate_entry_ts: None,
+                delta_ms: None,
+                gate_cmd_at: None,
+                debug_active: None,
+                debug_pending: None,
+            });
+        }
+    }
+
     /// Enqueue gate open command to worker and record E2E latency
     ///
     /// `received_at` is when the triggering event was received (zone entry or ACC).

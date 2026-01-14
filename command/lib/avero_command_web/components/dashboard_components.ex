@@ -11,6 +11,8 @@ defmodule AveroCommandWeb.DashboardComponents do
   attr(:current_path, :string, required: true)
   attr(:sidebar_collapsed, :boolean, default: false)
   attr(:mobile_sidebar_open, :boolean, default: false)
+  attr(:selected_site, :string, default: "netto")
+  attr(:available_sites, :list, default: [])
   slot(:inner_block, required: true)
 
   def dashboard_layout(assigns) do
@@ -29,6 +31,7 @@ defmodule AveroCommandWeb.DashboardComponents do
         current_path={@current_path}
         collapsed={@sidebar_collapsed}
         mobile_open={@mobile_sidebar_open}
+        selected_site={@selected_site}
       />
 
       <!-- Main content area -->
@@ -38,7 +41,11 @@ defmodule AveroCommandWeb.DashboardComponents do
         !@sidebar_collapsed && "lg:ml-[290px]",
         @sidebar_collapsed && "lg:ml-[90px]"
       ]}>
-        <.dashboard_header collapsed={@sidebar_collapsed} />
+        <.dashboard_header
+          collapsed={@sidebar_collapsed}
+          selected_site={@selected_site}
+          available_sites={@available_sites}
+        />
 
         <main class="flex-1">
           <div class="mx-auto max-w-screen-2xl p-4 md:p-6">
@@ -56,8 +63,14 @@ defmodule AveroCommandWeb.DashboardComponents do
   attr(:current_path, :string, required: true)
   attr(:collapsed, :boolean, default: false)
   attr(:mobile_open, :boolean, default: false)
+  attr(:selected_site, :string, default: "netto")
 
   def sidebar(assigns) do
+    # Get Grafana URL for selected site
+    grafana_url = AveroCommand.Sites.grafana_dashboard_url(assigns.selected_site) ||
+      "https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s"
+
+    assigns = assign(assigns, :grafana_url, grafana_url)
     ~H"""
     <aside
       id="sidebar"
@@ -121,7 +134,7 @@ defmodule AveroCommandWeb.DashboardComponents do
         </.nav_item>
 
         <.external_nav_item
-          href="https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s"
+          href={@grafana_url}
           label="Grafana"
           collapsed={@collapsed}
         >
@@ -297,9 +310,11 @@ defmodule AveroCommandWeb.DashboardComponents do
   end
 
   @doc """
-  Renders the dashboard header with hamburger menu and dark mode toggle.
+  Renders the dashboard header with hamburger menu, site selector, and dark mode toggle.
   """
   attr(:collapsed, :boolean, default: false)
+  attr(:selected_site, :string, default: "netto")
+  attr(:available_sites, :list, default: [])
 
   def dashboard_header(assigns) do
     ~H"""
@@ -328,6 +343,11 @@ defmodule AveroCommandWeb.DashboardComponents do
           </button>
         </div>
 
+        <!-- Center: Site selector -->
+        <div class="flex items-center gap-2">
+          <.global_site_selector selected_site={@selected_site} available_sites={@available_sites} />
+        </div>
+
         <!-- Right side: dark mode toggle -->
         <div class="flex items-center gap-3">
           <button
@@ -347,6 +367,37 @@ defmodule AveroCommandWeb.DashboardComponents do
         </div>
       </div>
     </header>
+    """
+  end
+
+  @doc """
+  Renders the global site selector toggle buttons in the header.
+  """
+  attr(:selected_site, :string, required: true)
+  attr(:available_sites, :list, required: true)
+
+  def global_site_selector(assigns) do
+    ~H"""
+    <div class="flex items-center gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+      <%= for {site_key, config} <- @available_sites do %>
+        <form action="/set-site" method="post" class="inline">
+          <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+          <input type="hidden" name="site" value={site_key} />
+          <button
+            type="submit"
+            class={[
+              "px-4 py-2 text-sm font-medium rounded-md transition-all duration-200",
+              @selected_site == site_key &&
+                "bg-white dark:bg-gray-700 text-brand-600 dark:text-brand-400 shadow-sm",
+              @selected_site != site_key &&
+                "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
+            ]}
+          >
+            <%= config.name %>
+          </button>
+        </form>
+      <% end %>
+    </div>
     """
   end
 end

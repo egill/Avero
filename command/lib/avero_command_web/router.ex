@@ -25,6 +25,7 @@ defmodule AveroCommandWeb.Router do
     get("/login", SessionController, :new)
     post("/login", SessionController, :create)
     delete("/logout", SessionController, :delete)
+    post("/set-site", SessionController, :set_site)
   end
 
   # Protected routes
@@ -84,6 +85,10 @@ defmodule AveroCommandWeb.Router do
     # Gate control (for Grafana button)
     post("/gate/open", GateController, :open)
     options("/gate/open", GateController, :options)
+
+    # ACC simulation (for Avero HQ testing)
+    post("/acc/simulate", AccController, :simulate)
+    options("/acc/simulate", AccController, :options)
 
     # Review endpoint for automated anomaly detection
     get("/review", ReviewController, :index)

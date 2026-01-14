@@ -720,8 +720,7 @@ defmodule AveroCommandWeb.IncidentFeedLive do
   defp format_site_label(sites) when length(sites) == 1, do: format_site_name(hd(sites))
   defp format_site_label(sites), do: "#{length(sites)} selected"
 
-  defp format_site_name("AP-NETTO-GR-01"), do: "Netto"
-  defp format_site_name("AP-AVERO-GR-01"), do: "Avero"
-  defp format_site_name("docker-gateway"), do: "Docker"
+  defp format_site_name("netto"), do: "Netto"
+  defp format_site_name("avero"), do: "Avero HQ"
   defp format_site_name(site), do: site
 end

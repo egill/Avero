@@ -32,4 +32,29 @@ defmodule AveroCommandWeb.SessionController do
     |> clear_session()
     |> redirect(to: "/login")
   end
+
+  @doc """
+  Set the selected site in the session and redirect back.
+  """
+  def set_site(conn, %{"site" => site}) do
+    # Validate site is one of our known sites
+    valid_sites = ["netto", "avero"]
+
+    site = if site in valid_sites, do: site, else: "netto"
+
+    # Get the referer to redirect back, default to dashboard
+    redirect_to =
+      case get_req_header(conn, "referer") do
+        [referer] ->
+          uri = URI.parse(referer)
+          uri.path || "/dashboard"
+
+        _ ->
+          "/dashboard"
+      end
+
+    conn
+    |> put_session(:selected_site, site)
+    |> redirect(to: redirect_to)
+  end
 end

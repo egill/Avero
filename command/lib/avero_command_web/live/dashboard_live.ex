@@ -1,11 +1,13 @@
 defmodule AveroCommandWeb.DashboardLive do
   @moduledoc """
   Real-time dashboard showing gate status, POS zones, journeys, and Grafana metrics.
+  Site-aware: displays data for the currently selected site.
   """
   use AveroCommandWeb, :live_view
 
   alias AveroCommand.Entities.GateRegistry
   alias AveroCommand.Journeys
+  alias AveroCommand.Sites
 
   @refresh_interval 1000
 
@@ -20,19 +22,14 @@ defmodule AveroCommandWeb.DashboardLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    gates = load_gates()
+    # Get site info from the hook
+    selected_site = socket.assigns[:selected_site] || "netto"
+    site_config = socket.assigns[:site_config] || Sites.get(selected_site)
     selected_sites = socket.assigns[:selected_sites] || []
-    journeys = load_recent_journeys(selected_sites)
 
-    # POS zones using zone names from gateway config
-    # Netto: POS_1, POS_2, POS_3, POS_4, POS_5
-    pos_zones = [
-      %{id: "POS_1", occupied: false, count: 0, paid: false},
-      %{id: "POS_2", occupied: false, count: 0, paid: false},
-      %{id: "POS_3", occupied: false, count: 0, paid: false},
-      %{id: "POS_4", occupied: false, count: 0, paid: false},
-      %{id: "POS_5", occupied: false, count: 0, paid: false}
-    ]
+    gates = load_gates(site_config)
+    journeys = load_recent_journeys(selected_sites)
+    pos_zones = build_pos_zones(site_config)
 
     {:ok,
      assign(socket,
@@ -46,12 +43,14 @@ defmodule AveroCommandWeb.DashboardLive do
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_interval)
-    gates = load_gates()
+    site_config = socket.assigns[:site_config]
+    gates = load_gates(site_config)
     {:noreply, assign(socket, gates: gates, last_updated: DateTime.utc_now())}
   end
 
   def handle_info({:gate_event, _event}, socket) do
-    gates = load_gates()
+    site_config = socket.assigns[:site_config]
+    gates = load_gates(site_config)
     {:noreply, assign(socket, gates: gates, last_updated: DateTime.utc_now())}
   end
 
@@ -68,35 +67,28 @@ defmodule AveroCommandWeb.DashboardLive do
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
-  def handle_event("open_gate", %{"site" => site}, socket) do
+  def handle_event("open_gate", _params, socket) do
     require Logger
 
-    # Map site to gateway IP (via Tailscale)
-    gateway_ip =
-      case site do
-        "netto" -> "100.80.187.3"
-        "grandi" -> "100.80.187.4"
-        _ -> nil
-      end
+    selected_site = socket.assigns[:selected_site]
+    gateway_url = Sites.gateway_url(selected_site, "/gate/open")
 
-    if gateway_ip do
-      # Call the gateway's HTTP endpoint to open the gate
+    if gateway_url do
       Task.start(fn ->
-        url = ~c"http://#{gateway_ip}:9090/gate/open"
-        # Ensure httpc is available (should be started at app boot but be safe)
+        url = String.to_charlist(gateway_url)
         :inets.start()
         :ssl.start()
 
         case :httpc.request(:post, {url, [], ~c"application/json", ~c""}, [{:timeout, 5000}], []) do
           {:ok, {{_, status, _}, _, body}} ->
-            Logger.info("Gate open response for #{site}: status=#{status} body=#{inspect(body)}")
+            Logger.info("Gate open response for #{selected_site}: status=#{status} body=#{inspect(body)}")
 
             if status == 200 do
-              Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_opened, site})
+              Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_opened, selected_site})
             end
 
           {:error, reason} ->
-            Logger.warning("Gate open failed for #{site}: #{inspect(reason)}")
+            Logger.warning("Gate open failed for #{selected_site}: #{inspect(reason)}")
         end
       end)
     end
@@ -104,21 +96,59 @@ defmodule AveroCommandWeb.DashboardLive do
     {:noreply, socket}
   end
 
+  # Handle site switching - reload data for new site
+  def handle_event("switch_site", %{"site" => site_key}, socket) do
+    # The SiteFilterHook handles updating the assigns, but we need to reload data
+    site_config = Sites.get(site_key)
+    # Use site key ("netto") not site ID ("AP-NETTO-GR-01") - database uses key
+    selected_sites = [site_key]
+
+    gates = load_gates(site_config)
+    journeys = load_recent_journeys(selected_sites)
+    pos_zones = build_pos_zones(site_config)
+
+    {:noreply,
+     socket
+     |> assign(:selected_site, site_key)
+     |> assign(:site_config, site_config)
+     |> assign(:selected_sites, selected_sites)
+     |> assign(:gates, gates)
+     |> assign(:journeys, journeys)
+     |> assign(:pos_zones, pos_zones)
+     |> put_flash(:info, "Switched to #{site_config.name}")}
+  end
+
   defp update_pos_zone(pos_zones, zone_id, type) do
+    now = DateTime.utc_now()
+
     Enum.map(pos_zones, fn zone ->
       if zone.id == zone_id do
         case type do
           :zone_entry ->
-            %{zone | occupied: true, count: zone.count + 1}
+            # Start timer if this is the first person
+            occupied_since = zone.occupied_since || now
+
+            %{zone | occupied: true, count: zone.count + 1, occupied_since: occupied_since}
 
           :zone_exit ->
             new_count = max(0, zone.count - 1)
+
+            # Accumulate dwell time when zone becomes empty
+            {occupied_since, total_dwell_ms} =
+              if new_count == 0 and zone.occupied_since do
+                elapsed = DateTime.diff(now, zone.occupied_since, :millisecond)
+                {nil, zone.total_dwell_ms + elapsed}
+              else
+                {zone.occupied_since, zone.total_dwell_ms}
+              end
 
             %{
               zone
               | occupied: new_count > 0,
                 count: new_count,
-                paid: if(new_count == 0, do: false, else: zone.paid)
+                paid: if(new_count == 0, do: false, else: zone.paid),
+                occupied_since: occupied_since,
+                total_dwell_ms: total_dwell_ms
             }
 
           :payment ->
@@ -133,8 +163,11 @@ defmodule AveroCommandWeb.DashboardLive do
     end)
   end
 
-  defp load_gates do
+  defp load_gates(nil), do: []
+
+  defp load_gates(site_config) do
     GateRegistry.list_all()
+    |> Enum.filter(fn g -> g.site == site_config.id end)
     |> Enum.sort_by(fn g -> {g.site, g.gate_id} end)
   end
 
@@ -144,6 +177,24 @@ defmodule AveroCommandWeb.DashboardLive do
     rescue
       _ -> []
     end
+  end
+
+  defp build_pos_zones(nil), do: []
+
+  defp build_pos_zones(site_config) do
+    site_config.pos_zones
+    |> Enum.map(fn zone_id ->
+      %{
+        id: zone_id,
+        occupied: false,
+        count: 0,
+        paid: false,
+        # Track when current occupation started (for live timer)
+        occupied_since: nil,
+        # Total accumulated dwell time in ms
+        total_dwell_ms: 0
+      }
+    end)
   end
 
   defp format_duration(seconds) when seconds < 60 do
@@ -161,13 +212,24 @@ defmodule AveroCommandWeb.DashboardLive do
     end
   end
 
+  # Get Grafana panel URL for current site
+  defp grafana_panel(site_key, panel_id, opts \\ []) do
+    Sites.grafana_panel_url(site_key, panel_id, opts) ||
+      "https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=#{panel_id}&theme=dark"
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
     <div class="space-y-6">
       <!-- Header -->
       <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Gate Dashboard</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
+          Gate Dashboard
+          <span class="text-lg font-normal text-gray-500 dark:text-gray-400">
+            - <%= @site_config && @site_config.name || "Unknown" %>
+          </span>
+        </h1>
         <div class="text-sm text-gray-500 dark:text-gray-400">
           Last updated: <%= Calendar.strftime(@last_updated, "%H:%M:%S") %>
         </div>
@@ -183,19 +245,19 @@ defmodule AveroCommandWeb.DashboardLive do
           <div class="grid grid-cols-2 gap-3">
             <.grafana_panel
               title="Gate Opens"
-              src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=4&theme=dark&from=now-30m&to=now&refresh=30s"
+              src={grafana_panel(@selected_site, 4)}
             />
             <.grafana_panel
               title="Exits"
-              src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=5&theme=dark&from=now-30m&to=now&refresh=30s"
+              src={grafana_panel(@selected_site, 5)}
             />
             <.grafana_panel
               title="Current Open"
-              src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=50&theme=dark&from=now-30m&to=now&refresh=30s"
+              src={grafana_panel(@selected_site, 50)}
             />
             <.grafana_panel
               title="Authorized"
-              src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=3&theme=dark&from=now-30m&to=now&refresh=30s"
+              src={grafana_panel(@selected_site, 3)}
             />
           </div>
         </div>
@@ -203,7 +265,7 @@ defmodule AveroCommandWeb.DashboardLive do
 
       <%= if @gates == [] do %>
         <div class="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-          No gates registered yet. Waiting for gateway connections...
+          No gates registered for <%= @site_config && @site_config.name || "this site" %>. Waiting for gateway connections...
         </div>
       <% end %>
 
@@ -211,7 +273,7 @@ defmodule AveroCommandWeb.DashboardLive do
       <.dash_card title="Gate Openings (1h)">
         <div class="h-48">
           <iframe
-            src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=51&theme=dark&from=now-1h&to=now&refresh=30s"
+            src={grafana_panel(@selected_site, 51, from: "now-1h")}
             class="w-full h-full border-0"
             title="Gate Open Duration"
           ></iframe>
@@ -221,25 +283,31 @@ defmodule AveroCommandWeb.DashboardLive do
       <!-- POS Zones -->
       <.dash_card title="POS Zones">
         <div class="p-4">
-          <div class="grid grid-cols-5 gap-3">
-            <%= for zone <- @pos_zones do %>
-              <.pos_zone zone={zone} />
-            <% end %>
-          </div>
-          <div class="mt-4 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-            <div class="flex items-center gap-1">
-              <div class="w-3 h-3 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600"></div>
-              <span>Empty</span>
+          <%= if @pos_zones != [] do %>
+            <div class={"grid grid-cols-#{min(length(@pos_zones), 5)} gap-3"}>
+              <%= for zone <- @pos_zones do %>
+                <.pos_zone zone={zone} />
+              <% end %>
             </div>
-            <div class="flex items-center gap-1">
-              <div class="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30 border-2 border-amber-400"></div>
-              <span>Occupied</span>
+            <div class="mt-4 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+              <div class="flex items-center gap-1">
+                <div class="w-3 h-3 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600"></div>
+                <span>Empty</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <div class="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30 border-2 border-amber-400"></div>
+                <span>Occupied</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <div class="w-3 h-3 rounded bg-green-100 dark:bg-green-900/30 border-2 border-green-400"></div>
+                <span>Paid</span>
+              </div>
             </div>
-            <div class="flex items-center gap-1">
-              <div class="w-3 h-3 rounded bg-green-100 dark:bg-green-900/30 border-2 border-green-400"></div>
-              <span>Paid</span>
+          <% else %>
+            <div class="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
+              No POS zones configured for this site
             </div>
-          </div>
+          <% end %>
         </div>
       </.dash_card>
 
@@ -247,7 +315,7 @@ defmodule AveroCommandWeb.DashboardLive do
       <.dash_card title="POS Zone Occupancy (60m)">
         <div class="h-48">
           <iframe
-            src="https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=10&theme=dark&from=now-60m&to=now&refresh=30s"
+            src={grafana_panel(@selected_site, 10, from: "now-60m")}
             class="w-full h-full border-0"
             title="POS Zone Occupancy"
           ></iframe>
@@ -414,7 +482,6 @@ defmodule AveroCommandWeb.DashboardLive do
       <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
         <button
           phx-click="open_gate"
-          phx-value-site={@gate.site}
           class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -497,11 +564,24 @@ defmodule AveroCommandWeb.DashboardLive do
         id -> id
       end
 
-    assigns = assign(assigns, :zone_num, zone_num)
+    # Calculate current dwell (running timer if occupied)
+    current_dwell_ms =
+      if assigns.zone.occupied_since do
+        DateTime.diff(DateTime.utc_now(), assigns.zone.occupied_since, :millisecond)
+      else
+        0
+      end
+
+    total_ms = assigns.zone.total_dwell_ms + current_dwell_ms
+
+    assigns =
+      assigns
+      |> assign(:zone_num, zone_num)
+      |> assign(:total_ms, total_ms)
 
     ~H"""
     <div class={[
-      "relative rounded-lg p-3 text-center transition-all",
+      "relative rounded-lg p-3 text-center transition-all min-h-[70px]",
       @zone.occupied && @zone.paid && "bg-green-100 dark:bg-green-900/30 border-2 border-green-400",
       @zone.occupied && !@zone.paid && "bg-amber-100 dark:bg-amber-900/30 border-2 border-amber-400",
       !@zone.occupied && "bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600"
@@ -514,8 +594,19 @@ defmodule AveroCommandWeb.DashboardLive do
       ]}>
         <%= @zone_num %>
       </div>
-      <%= if @zone.count > 0 do %>
-        <div class="text-xs text-gray-600 dark:text-gray-400"><%= @zone.count %></div>
+      <%!-- Always show count to prevent layout jump --%>
+      <div class={[
+        "text-xs tabular-nums",
+        @zone.count > 0 && "text-gray-700 dark:text-gray-300 font-medium",
+        @zone.count == 0 && "text-gray-400 dark:text-gray-500"
+      ]}>
+        <%= @zone.count %> people
+      </div>
+      <%!-- Show dwell time if any --%>
+      <%= if @total_ms > 0 do %>
+        <div class="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+          <%= format_dwell_ms(@total_ms) %>
+        </div>
       <% end %>
       <%= if @zone.occupied && @zone.paid do %>
         <div class="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
@@ -526,5 +617,18 @@ defmodule AveroCommandWeb.DashboardLive do
       <% end %>
     </div>
     """
+  end
+
+  defp format_dwell_ms(ms) when ms < 1000, do: "<1s"
+  defp format_dwell_ms(ms) when ms < 60_000, do: "#{div(ms, 1000)}s"
+  defp format_dwell_ms(ms) when ms < 3_600_000 do
+    mins = div(ms, 60_000)
+    secs = div(rem(ms, 60_000), 1000)
+    "#{mins}m #{secs}s"
+  end
+  defp format_dwell_ms(ms) do
+    hours = div(ms, 3_600_000)
+    mins = div(rem(ms, 3_600_000), 60_000)
+    "#{hours}h #{mins}m"
   end
 end

@@ -496,7 +496,7 @@ impl Config {
     /// # Example
     ///
     /// ```no_run
-    /// use gateway_poc::infra::Config;
+    /// use gateway::infra::Config;
     ///
     /// let config = Config::from_file("config/dev.toml").expect("Failed to load config");
     /// assert_eq!(config.mqtt_port(), 1883);
@@ -617,7 +617,7 @@ impl Config {
     /// # Example
     ///
     /// ```
-    /// use gateway_poc::infra::Config;
+    /// use gateway::infra::Config;
     ///
     /// let config = Config::default();
     /// assert!(config.is_pos_zone(1001));  // Default POS zone
@@ -635,8 +635,8 @@ impl Config {
     /// # Example
     ///
     /// ```
-    /// use gateway_poc::infra::Config;
-    /// use gateway_poc::domain::types::GeometryId;
+    /// use gateway::infra::Config;
+    /// use gateway::domain::types::GeometryId;
     ///
     /// let config = Config::default();
     /// assert_eq!(&*config.zone_name(GeometryId(1001)), "POS_1");

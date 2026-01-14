@@ -1637,11 +1637,16 @@
           },
           {
             "selected": false,
+            "text": "avero",
+            "value": "avero"
+          },
+          {
+            "selected": false,
             "text": "grandi",
             "value": "grandi"
           }
         ],
-        "query": "netto,grandi",
+        "query": "netto,avero,grandi",
         "skipUrlSync": false,
         "type": "custom"
       }
