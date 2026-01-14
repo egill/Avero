@@ -14,12 +14,9 @@ defmodule AveroCommand.Entities.Gate do
   alias AveroCommand.Scenarios.UnusualGateOpening
 
   @registry AveroCommand.EntityRegistry
-
-  # Timeout after 30 minutes of inactivity
-  @idle_timeout 30 * 60 * 1000
-
-  # Threshold for unusual gate opening incident (2 minutes)
+  @idle_timeout :timer.minutes(30)
   @unusual_threshold_ms UnusualGateOpening.threshold_ms()
+  @max_events 100
 
   defstruct [
     :site,
@@ -125,50 +122,30 @@ defmodule AveroCommand.Entities.Gate do
   # Event Handlers
   # ============================================
 
-  defp apply_event(state, %{data: %{"type" => "gate.opened"}} = event) do
-    # Only update last_opened_at if transitioning from non-open state
-    # This prevents metrics heartbeats from resetting the timer
-    if state.state == :open do
-      # Already open - don't reset the timer, just update events
-      %{state | events: add_event(state.events, event)}
-    else
-      # Transitioning to open - start timer and set last_opened_at
-      if state.unusual_open_timer_ref, do: Process.cancel_timer(state.unusual_open_timer_ref)
-      timer_ref = Process.send_after(self(), :unusual_gate_opening_check, @unusual_threshold_ms)
+  # Already open - don't reset the timer (prevents metrics heartbeats from resetting)
+  defp apply_event(%{state: :open} = state, %{data: %{"type" => "gate.opened"}} = event) do
+    %{state | events: add_event(state.events, event)}
+  end
 
-      %{
-        state
-        | state: :open,
-          last_opened_at: event.time,
-          unusual_open_timer_ref: timer_ref,
-          exits_this_cycle: 0,
-          events: add_event(state.events, event)
-      }
-    end
+  # Transitioning to open - start unusual opening timer
+  defp apply_event(state, %{data: %{"type" => "gate.opened"}} = event) do
+    cancel_timer(state.unusual_open_timer_ref)
+    timer_ref = Process.send_after(self(), :unusual_gate_opening_check, @unusual_threshold_ms)
+
+    %{
+      state
+      | state: :open,
+        last_opened_at: event.time,
+        unusual_open_timer_ref: timer_ref,
+        exits_this_cycle: 0,
+        events: add_event(state.events, event)
+    }
   end
 
   defp apply_event(state, %{data: %{"type" => "gate.closed"}} = event) do
-    # Cancel unusual gate opening timer if set
-    if state.unusual_open_timer_ref, do: Process.cancel_timer(state.unusual_open_timer_ref)
-
-    # Calculate duration if we have last_opened_at
-    duration_ms =
-      if state.last_opened_at do
-        DateTime.diff(event.time, state.last_opened_at, :millisecond)
-      else
-        nil
-      end
-
-    # Update min/max only if we have a valid duration
-    {new_max, new_min} =
-      if duration_ms do
-        {
-          max(state.max_open_duration_ms || 0, duration_ms),
-          min(state.min_open_duration_ms || duration_ms, duration_ms)
-        }
-      else
-        {state.max_open_duration_ms, state.min_open_duration_ms}
-      end
+    cancel_timer(state.unusual_open_timer_ref)
+    duration_ms = calculate_duration(state.last_opened_at, event.time)
+    {new_max, new_min} = update_duration_stats(state, duration_ms)
 
     %{
       state
@@ -196,26 +173,33 @@ defmodule AveroCommand.Entities.Gate do
   end
 
   defp apply_event(state, %{event_type: "gate.zone_entry", person_id: person_id} = event)
-       when not is_nil(person_id) do
+       when is_binary(person_id) or is_integer(person_id) do
+    persons =
+      if person_id in state.persons_in_zone,
+        do: state.persons_in_zone,
+        else: [person_id | state.persons_in_zone]
+
+    %{state | persons_in_zone: persons, events: add_event(state.events, event)}
+  end
+
+  defp apply_event(
+         %{state: :open} = state,
+         %{event_type: "gate.zone_exit", person_id: person_id} = event
+       )
+       when is_binary(person_id) or is_integer(person_id) do
     %{
       state
-      | persons_in_zone: [person_id | state.persons_in_zone] |> Enum.uniq(),
+      | persons_in_zone: List.delete(state.persons_in_zone, person_id),
+        exits_this_cycle: state.exits_this_cycle + 1,
         events: add_event(state.events, event)
     }
   end
 
   defp apply_event(state, %{event_type: "gate.zone_exit", person_id: person_id} = event)
-       when not is_nil(person_id) do
-    # Increment exit count if gate is currently open (person went through)
-    new_exit_count =
-      if state.state == :open,
-        do: state.exits_this_cycle + 1,
-        else: state.exits_this_cycle
-
+       when is_binary(person_id) or is_integer(person_id) do
     %{
       state
-      | persons_in_zone: Enum.reject(state.persons_in_zone, &(&1 == person_id)),
-        exits_this_cycle: new_exit_count,
+      | persons_in_zone: List.delete(state.persons_in_zone, person_id),
         events: add_event(state.events, event)
     }
   end
@@ -229,8 +213,24 @@ defmodule AveroCommand.Entities.Gate do
   # Helper Functions
   # ============================================
 
-  defp add_event(events, event) do
-    # Keep last 100 events for gates
-    Enum.take([event | events], 100)
+  defp add_event(events, event), do: Enum.take([event | events], @max_events)
+
+  defp cancel_timer(nil), do: :ok
+  defp cancel_timer(ref), do: Process.cancel_timer(ref)
+
+  defp calculate_duration(nil, _closed_at), do: nil
+
+  defp calculate_duration(opened_at, closed_at),
+    do: DateTime.diff(closed_at, opened_at, :millisecond)
+
+  defp update_duration_stats(state, nil) do
+    {state.max_open_duration_ms, state.min_open_duration_ms}
+  end
+
+  defp update_duration_stats(state, duration_ms) do
+    {
+      max(state.max_open_duration_ms || 0, duration_ms),
+      min(state.min_open_duration_ms || duration_ms, duration_ms)
+    }
   end
 end

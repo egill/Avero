@@ -1,55 +1,36 @@
 defmodule AveroCommand.MQTT.EventRouter do
   @moduledoc """
   Routes incoming MQTT events to the appropriate handlers.
-  - Person events -> PersonSupervisor (creates/updates Person GenServer)
-  - Gate events -> GateSupervisor (creates/updates Gate GenServer)
+  - Person events -> PersonRegistry (creates/updates Person GenServer)
+  - Gate events -> GateRegistry (creates/updates Gate GenServer)
   - All events -> Store (persisted to TimescaleDB)
   """
   require Logger
 
-  alias AveroCommand.Store
-  alias AveroCommand.Entities.{PersonRegistry, GateRegistry}
-  alias AveroCommand.Scenarios.Evaluator
-  alias AveroCommand.Scenarios.UnusualGateOpening
+  alias AveroCommand.Entities.{GateRegistry, PersonRegistry}
   alias AveroCommand.Journeys
+  alias AveroCommand.Scenarios.{Evaluator, UnusualGateOpening}
   alias AveroCommand.Sites
+  alias AveroCommand.Store
 
   @doc """
   Route an event from MQTT to the appropriate handlers.
 
-  Topic formats supported:
+  Topic formats:
   - Gateway-PoC: ["gateway", "journeys"] or ["gateway", "events"]
   - Legacy: ["avero", "events", event_type]
   """
   def route_event(topic, event_data) when is_list(topic) and is_map(event_data) do
-    # Handle gateway-poc journey topic directly
     case topic do
       ["gateway", "journeys"] ->
-        # Journey JSON from gateway-poc - create journey directly
         Logger.debug("EventRouter: received journey from gateway-poc")
         Task.start(fn -> Journeys.create_from_gateway_json(event_data) end)
         :ok
 
       ["gateway", topic_name] ->
-        # Other gateway-poc topics (events, gate, acc, metrics)
-        event = normalize_gateway_event(topic_name, event_data)
-
-        # 1. Persist to store (async)
-        Task.start(fn -> Store.insert_event(event) end)
-
-        # 2. Transform to scenario-compatible format, persist for reporting, and evaluate
-        scenario_event = normalize_for_scenarios(topic_name, event, event_data)
-
-        if scenario_event do
-          Task.start(fn -> Store.insert_event(scenario_event) end)
-          route_to_entities(scenario_event)
-          Evaluator.evaluate(scenario_event)
-        end
-
-        :ok
+        route_gateway_event(topic_name, event_data)
 
       _ ->
-        # Legacy avero/events format
         route_legacy_event(topic, event_data)
     end
   end
@@ -59,56 +40,49 @@ defmodule AveroCommand.MQTT.EventRouter do
     :error
   end
 
-  # Legacy routing for old avero/events/* format
+  defp route_gateway_event(topic_name, event_data) do
+    event = normalize_gateway_event(topic_name, event_data)
+    Task.start(fn -> Store.insert_event(event) end)
+
+    case normalize_for_scenarios(topic_name, event, event_data) do
+      nil ->
+        :ok
+
+      scenario_event ->
+        Task.start(fn -> Store.insert_event(scenario_event) end)
+        route_to_entities(scenario_event)
+        Evaluator.evaluate(scenario_event)
+        :ok
+    end
+  end
+
   defp route_legacy_event(topic, event_data) do
     event_type = extract_event_type(topic)
     event = normalize_event(event_type, event_data)
 
-    # 1. Persist to store (async)
     Task.start(fn -> Store.insert_event(event) end)
-
-    # 2. Route to entity handlers
     route_to_entities(event)
 
-    # 3. Handle journey completion events
     if event_data["type"] == "journey.completed" do
       Task.start(fn -> Journeys.create_from_event(event) end)
     end
 
-    # 4. Evaluate scenarios
     if event_type == "gates" do
       Logger.info("EventRouter: calling Evaluator for gates event type=#{event.data["type"]}")
     end
 
     Evaluator.evaluate(event)
-
     :ok
   end
 
-  # Extract event type from topic
-  # ["avero", "events", "zone.entry"] -> "zone.entry"
-  defp extract_event_type(["avero", "events" | rest]) do
-    Enum.join(rest, ".")
-  end
+  defp extract_event_type(["avero", "events" | rest]), do: Enum.join(rest, ".")
+  defp extract_event_type(topic), do: Enum.join(topic, ".")
 
-  defp extract_event_type(topic) do
-    Enum.join(topic, ".")
-  end
-
-  # Normalize gateway-poc events (events, gate, acc topics)
-  # These use short keys: tid, ts, t, z, etc.
   defp normalize_gateway_event(topic_name, data) do
-    time =
-      case data["ts"] do
-        ts when is_integer(ts) -> DateTime.from_unix!(ts, :millisecond)
-        _ -> DateTime.utc_now()
-      end
-
     %{
       event_type: "gateway.#{topic_name}",
-      time: time,
+      time: parse_unix_timestamp(data["ts"]),
       site: data["site"] || "unknown",
-      # track ID
       person_id: data["tid"],
       gate_id: nil,
       sensor_id: nil,
@@ -120,15 +94,12 @@ defmodule AveroCommand.MQTT.EventRouter do
     }
   end
 
-  # Normalize event data into a consistent structure
   defp normalize_event(event_type, data) do
-    # Handle compact keys from gate.status.heartbeat events
-    # Compact format: g=gate_id, s=status, d=duration_ms, c=crossing_count
     data = expand_compact_keys(data)
 
     %{
       event_type: event_type,
-      time: parse_timestamp(data["timestamp"]) || DateTime.utc_now(),
+      time: parse_iso_timestamp(data["timestamp"]) || DateTime.utc_now(),
       site: data["site"] || data["site_id"] || data["gateway_id"] || "unknown",
       person_id: data["person_id"],
       gate_id: data["gate_id"] || data["g"],
@@ -141,46 +112,31 @@ defmodule AveroCommand.MQTT.EventRouter do
     }
   end
 
-  # Expand compact keys used in gate.status.heartbeat events
-  defp expand_compact_keys(data) when is_map(data) do
-    case data["type"] do
-      "gate.status.heartbeat" ->
-        data
-        |> Map.put_new("gate_id", data["g"])
-        |> Map.put_new("status", data["s"])
-        |> Map.put_new("duration_ms", data["d"])
-        |> Map.put_new("crossing_count", data["c"])
-
-      _ ->
-        data
-    end
+  defp expand_compact_keys(%{"type" => "gate.status.heartbeat"} = data) do
+    data
+    |> Map.put_new("gate_id", data["g"])
+    |> Map.put_new("status", data["s"])
+    |> Map.put_new("duration_ms", data["d"])
+    |> Map.put_new("crossing_count", data["c"])
   end
 
   defp expand_compact_keys(data), do: data
 
-  defp parse_timestamp(nil), do: nil
+  defp parse_unix_timestamp(ts) when is_integer(ts), do: DateTime.from_unix!(ts, :millisecond)
+  defp parse_unix_timestamp(_), do: DateTime.utc_now()
 
-  defp parse_timestamp(ts) when is_binary(ts) do
+  defp parse_iso_timestamp(ts) when is_binary(ts) do
     case DateTime.from_iso8601(ts) do
       {:ok, dt, _} -> dt
       _ -> nil
     end
   end
 
-  defp parse_timestamp(_), do: nil
+  defp parse_iso_timestamp(_), do: nil
 
-  # Route event to Person/Gate GenServers
   defp route_to_entities(%{person_id: person_id} = event) when not is_nil(person_id) do
-    # Get or create Person GenServer
-    case PersonRegistry.get_or_create(event.site, person_id) do
-      {:ok, pid} ->
-        GenServer.cast(pid, {:event, event})
+    route_to_person(event.site, person_id, event)
 
-      {:error, reason} ->
-        Logger.warning("Failed to route to person #{person_id}: #{inspect(reason)}")
-    end
-
-    # Also route gate events to gate GenServer
     if event.gate_id do
       route_to_gate(event)
     end
@@ -190,159 +146,232 @@ defmodule AveroCommand.MQTT.EventRouter do
     route_to_gate(event)
   end
 
-  defp route_to_entities(_event) do
-    # Event doesn't have person_id or gate_id, skip entity routing
-    :ok
-  end
+  defp route_to_entities(_event), do: :ok
 
-  defp route_to_gate(%{gate_id: gate_id, site: site} = event) do
-    case GateRegistry.get_or_create(site, gate_id) do
+  defp route_to_person(site, person_id, event) do
+    case PersonRegistry.get_or_create(site, person_id) do
       {:ok, pid} ->
         GenServer.cast(pid, {:event, event})
 
       {:error, reason} ->
-        Logger.warning("Failed to route to gate #{gate_id}: #{inspect(reason)}")
+        Logger.warning("Failed to route to person #{person_id}: #{inspect(reason)}")
     end
   end
 
-  # =============================================================================
+  defp route_to_gate(%{gate_id: gate_id, site: site} = event) do
+    case GateRegistry.get_or_create(site, gate_id) do
+      {:ok, pid} -> GenServer.cast(pid, {:event, event})
+      {:error, reason} -> Logger.warning("Failed to route to gate #{gate_id}: #{inspect(reason)}")
+    end
+  end
+
   # Gateway-PoC to Scenario Event Normalization
-  # =============================================================================
   # Maps gateway event types to formats expected by scenario detectors.
-  # Gateway uses short keys (t, ts, tid) while scenarios expect (event_type, data["type"])
 
-  # gateway/gate: state = cmd_sent | open | closed | moving
   defp normalize_for_scenarios("gate", event, data) do
-    gate_type =
-      case data["state"] do
-        "open" -> "gate.opened"
-        "closed" -> "gate.closed"
-        "cmd_sent" -> "gate.cmd"
-        "moving" -> "gate.moving"
-        _ -> "gate.status"
-      end
-
     gate_id = data["gate_id"] || 1
+    gate_type = gate_state_to_type(data["state"])
 
-    # Broadcast gate event for dashboard real-time updates
-    gate_event = %{
-      site: event.site,
-      gate_id: gate_id,
-      state: data["state"],
-      time: event.time
-    }
+    broadcast_gate_event(event.site, gate_id, data["state"], event.time)
 
-    Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_event, gate_event})
-
-    # Auto-resolve unusual_gate_opening incidents when gate closes
     if data["state"] == "closed" do
       Task.start(fn -> UnusualGateOpening.maybe_resolve(event.site, gate_id) end)
     end
 
-    %{
-      event
-      | event_type: "gates",
-        gate_id: gate_id,
-        data:
-          Map.merge(event.data, %{
-            "type" => gate_type,
-            "gate_id" => gate_id,
-            "open_duration_ms" => data["duration_ms"],
-            "_source" => "gateway"
-          })
-    }
+    update_event(event,
+      event_type: "gates",
+      gate_id: gate_id,
+      extra_data: %{
+        "type" => gate_type,
+        "gate_id" => gate_id,
+        "open_duration_ms" => data["duration_ms"]
+      }
+    )
   end
 
-  # gateway/events: t = zone_entry | zone_exit | line_cross
   defp normalize_for_scenarios("events", event, data) do
     case data["t"] do
       "zone_entry" ->
-        # Broadcast zone event for dashboard POS zones
-        # Map numeric zone ID to zone name (e.g., 1007 -> "POS_1")
-        zone_name = Sites.zone_name(event.site, data["z"])
+        broadcast_zone_event(event.site, data["z"], :zone_entry)
 
-        if zone_name do
-          Phoenix.PubSub.broadcast(
-            AveroCommand.PubSub,
-            "gateway:events",
-            {:zone_event, %{site: event.site, zone_id: zone_name, event_type: :zone_entry}}
-          )
-        end
-
-        %{
-          event
-          | event_type: "sensors",
-            data:
-              Map.merge(event.data, %{
-                "type" => "xovis.zone.entry",
-                "zone" => data["z"],
-                "_source" => "gateway"
-              })
-        }
+        update_event(event,
+          event_type: "sensors",
+          extra_data: %{"type" => "xovis.zone.entry", "zone" => data["z"]}
+        )
 
       "zone_exit" ->
-        # Broadcast zone event for dashboard POS zones
-        # Map numeric zone ID to zone name (e.g., 1007 -> "POS_1")
-        zone_name = Sites.zone_name(event.site, data["z"])
+        broadcast_zone_event(event.site, data["z"], :zone_exit)
 
-        if zone_name do
-          Phoenix.PubSub.broadcast(
-            AveroCommand.PubSub,
-            "gateway:events",
-            {:zone_event, %{site: event.site, zone_id: zone_name, event_type: :zone_exit}}
-          )
-        end
-
-        %{
-          event
-          | event_type: "sensors",
-            data:
-              Map.merge(event.data, %{
-                "type" => "xovis.zone.exit",
-                "zone" => data["z"],
-                "dwell_ms" => data["dwell_ms"],
-                "_source" => "gateway"
-              })
-        }
+        update_event(event,
+          event_type: "sensors",
+          extra_data: %{
+            "type" => "xovis.zone.exit",
+            "zone" => data["z"],
+            "dwell_ms" => data["dwell_ms"]
+          }
+        )
 
       "line_cross" ->
-        # Check if this is an exit line crossing
-        zone = data["z"] || ""
-        is_exit = String.contains?(String.upcase(zone), "EXIT")
-
-        if is_exit do
-          %{
-            event
-            | event_type: "exits",
-              data:
-                Map.merge(event.data, %{
-                  "type" => "exit.confirmed",
-                  "authorized" => data["auth"] || false,
-                  "zone" => zone,
-                  "_source" => "gateway"
-                })
-          }
-        else
-          %{
-            event
-            | event_type: "sensors",
-              data:
-                Map.merge(event.data, %{
-                  "type" => "xovis.line.cross",
-                  "zone" => zone,
-                  "_source" => "gateway"
-                })
-          }
-        end
+        normalize_line_cross(event, data)
 
       _ ->
         nil
     end
   end
 
-  # gateway/acc: t = received | matched | unmatched | matched_no_journey | late_after_gate
   defp normalize_for_scenarios("acc", event, data) do
-    # Broadcast ALL ACC events to the acc_events channel for the ACC monitor
+    broadcast_acc_event(event, data)
+
+    case data["t"] do
+      "matched" ->
+        broadcast_payment_event(event.site, data["pos"])
+
+        update_event(event,
+          event_type: "people",
+          extra_data: %{
+            "type" => "person.payment.received",
+            "person_id" => data["tid"],
+            "pos_zone" => data["pos"]
+          }
+        )
+
+      "received" ->
+        update_event(event,
+          event_type: "acc",
+          extra_data: %{"type" => "acc.received", "pos_zone" => data["pos"]}
+        )
+
+      "unmatched" ->
+        update_event(event,
+          event_type: "acc",
+          extra_data: %{"type" => "acc.unmatched", "pos_zone" => data["pos"]}
+        )
+
+      "matched_no_journey" ->
+        update_event(event,
+          event_type: "acc",
+          extra_data: %{
+            "type" => "acc.matched_no_journey",
+            "pos_zone" => data["pos"],
+            "person_id" => data["tid"]
+          }
+        )
+
+      "late_after_gate" ->
+        update_event(event,
+          event_type: "acc",
+          extra_data: %{
+            "type" => "acc.late_after_gate",
+            "pos_zone" => data["pos"],
+            "person_id" => data["tid"],
+            "delta_ms" => data["delta_ms"]
+          }
+        )
+
+      _ ->
+        nil
+    end
+  end
+
+  defp normalize_for_scenarios("tracks", event, data) do
+    case data["t"] do
+      "delete" ->
+        update_event(event,
+          event_type: "exits",
+          extra_data: %{"type" => "exit.confirmed", "authorized" => data["auth"] || false}
+        )
+
+      "create" ->
+        update_event(event,
+          event_type: "tracking",
+          extra_data: %{"type" => "track.created"}
+        )
+
+      "stitch" ->
+        update_event(event,
+          event_type: "tracking",
+          extra_data: %{"type" => "track.stitched", "prev_track_id" => data["prev_tid"]}
+        )
+
+      _ ->
+        nil
+    end
+  end
+
+  defp normalize_for_scenarios("metrics", event, data) do
+    site = data["site"]
+
+    if site do
+      gate_id = data["gate_id"] || 1
+      gate_type = gate_state_to_type(data["gate_state"] || "unknown")
+
+      case GateRegistry.get_or_create(site, gate_id) do
+        {:ok, pid} ->
+          synthetic_event = %{
+            event_type: "gates",
+            site: site,
+            gate_id: gate_id,
+            time: event.time,
+            data: %{"type" => gate_type}
+          }
+
+          GenServer.cast(pid, {:event, synthetic_event})
+
+        {:error, _} ->
+          :ok
+      end
+    end
+
+    nil
+  end
+
+  defp normalize_for_scenarios(_topic, _event, _data), do: nil
+
+  # Helper functions for normalize_for_scenarios
+
+  defp gate_state_to_type("open"), do: "gate.opened"
+  defp gate_state_to_type("closed"), do: "gate.closed"
+  defp gate_state_to_type("cmd_sent"), do: "gate.cmd"
+  defp gate_state_to_type("moving"), do: "gate.moving"
+  defp gate_state_to_type(_), do: "gate.status"
+
+  defp broadcast_gate_event(site, gate_id, state, time) do
+    Phoenix.PubSub.broadcast(
+      AveroCommand.PubSub,
+      "gates",
+      {:gate_event, %{site: site, gate_id: gate_id, state: state, time: time}}
+    )
+  end
+
+  defp normalize_line_cross(event, data) do
+    zone = data["z"] || ""
+
+    if String.contains?(String.upcase(zone), "EXIT") do
+      update_event(event,
+        event_type: "exits",
+        extra_data: %{
+          "type" => "exit.confirmed",
+          "authorized" => data["auth"] || false,
+          "zone" => zone
+        }
+      )
+    else
+      update_event(event,
+        event_type: "sensors",
+        extra_data: %{"type" => "xovis.line.cross", "zone" => zone}
+      )
+    end
+  end
+
+  defp broadcast_zone_event(site, zone, event_type) do
+    Phoenix.PubSub.broadcast(
+      AveroCommand.PubSub,
+      "gateway:events",
+      {:zone_event, %{site: site, zone_id: zone, event_type: event_type}}
+    )
+  end
+
+  defp broadcast_acc_event(event, data) do
     acc_event = %{
       type: data["t"],
       ts: data["ts"],
@@ -361,175 +390,28 @@ defmodule AveroCommand.MQTT.EventRouter do
     }
 
     Phoenix.PubSub.broadcast(AveroCommand.PubSub, "acc_events", {:acc_event, acc_event})
-
-    case data["t"] do
-      "matched" ->
-        # Broadcast payment event for dashboard POS zones
-        pos_zone = data["pos"]
-
-        if pos_zone do
-          zone_id = to_string(pos_zone)
-
-          Phoenix.PubSub.broadcast(
-            AveroCommand.PubSub,
-            "gateway:events",
-            {:zone_event, %{site: event.site, zone_id: zone_id, event_type: :payment}}
-          )
-        end
-
-        %{
-          event
-          | event_type: "people",
-            data:
-              Map.merge(event.data, %{
-                "type" => "person.payment.received",
-                "person_id" => data["tid"],
-                "pos_zone" => data["pos"],
-                "_source" => "gateway"
-              })
-        }
-
-      "received" ->
-        %{
-          event
-          | event_type: "acc",
-            data:
-              Map.merge(event.data, %{
-                "type" => "acc.received",
-                "pos_zone" => data["pos"],
-                "_source" => "gateway"
-              })
-        }
-
-      "unmatched" ->
-        %{
-          event
-          | event_type: "acc",
-            data:
-              Map.merge(event.data, %{
-                "type" => "acc.unmatched",
-                "pos_zone" => data["pos"],
-                "_source" => "gateway"
-              })
-        }
-
-      "matched_no_journey" ->
-        %{
-          event
-          | event_type: "acc",
-            data:
-              Map.merge(event.data, %{
-                "type" => "acc.matched_no_journey",
-                "pos_zone" => data["pos"],
-                "person_id" => data["tid"],
-                "_source" => "gateway"
-              })
-        }
-
-      "late_after_gate" ->
-        %{
-          event
-          | event_type: "acc",
-            data:
-              Map.merge(event.data, %{
-                "type" => "acc.late_after_gate",
-                "pos_zone" => data["pos"],
-                "person_id" => data["tid"],
-                "delta_ms" => data["delta_ms"],
-                "_source" => "gateway"
-              })
-        }
-
-      _ ->
-        nil
-    end
   end
 
-  # gateway/tracks: t = create | delete | stitch | lost | reentry
-  defp normalize_for_scenarios("tracks", event, data) do
-    case data["t"] do
-      "delete" ->
-        # Track deletion can be treated as exit for some scenarios
-        %{
-          event
-          | event_type: "exits",
-            data:
-              Map.merge(event.data, %{
-                "type" => "exit.confirmed",
-                "authorized" => data["auth"] || false,
-                "_source" => "gateway"
-              })
-        }
-
-      "create" ->
-        %{
-          event
-          | event_type: "tracking",
-            data:
-              Map.merge(event.data, %{
-                "type" => "track.created",
-                "_source" => "gateway"
-              })
-        }
-
-      "stitch" ->
-        %{
-          event
-          | event_type: "tracking",
-            data:
-              Map.merge(event.data, %{
-                "type" => "track.stitched",
-                "prev_track_id" => data["prev_tid"],
-                "_source" => "gateway"
-              })
-        }
-
-      _ ->
-        # lost, reentry - pass through but don't evaluate
-        nil
-    end
+  defp broadcast_payment_event(site, pos_zone) when not is_nil(pos_zone) do
+    Phoenix.PubSub.broadcast(
+      AveroCommand.PubSub,
+      "gateway:events",
+      {:zone_event, %{site: site, zone_id: to_string(pos_zone), event_type: :payment}}
+    )
   end
 
-  # gateway/metrics: metrics snapshots with gate heartbeat
-  # Register gate from heartbeat so dashboard shows gates without user activity
-  defp normalize_for_scenarios("metrics", event, data) do
-    site = data["site"]
-    gate_id = data["gate_id"] || 1
-    gate_state = data["gate_state"] || "unknown"
+  defp broadcast_payment_event(_, _), do: :ok
 
-    if site do
-      # Register gate in GateRegistry - dashboard refreshes every 1s so no need to broadcast
-      case GateRegistry.get_or_create(site, gate_id) do
-        {:ok, pid} ->
-          # Send a synthetic gate event to update state
-          # Map gate_state to expected event types: open->opened, closed->closed, etc.
-          gate_type =
-            case gate_state do
-              "open" -> "gate.opened"
-              "closed" -> "gate.closed"
-              "moving" -> "gate.moving"
-              _ -> "gate.#{gate_state}"
-            end
+  defp update_event(event, opts) do
+    event_type = Keyword.get(opts, :event_type, event.event_type)
+    gate_id = Keyword.get(opts, :gate_id, event.gate_id)
+    extra_data = Keyword.get(opts, :extra_data, %{})
 
-          synthetic_event = %{
-            event_type: "gates",
-            site: site,
-            gate_id: gate_id,
-            time: event.time,
-            data: %{"type" => gate_type}
-          }
-
-          GenServer.cast(pid, {:event, synthetic_event})
-
-        {:error, _reason} ->
-          :ok
-      end
-    end
-
-    # Don't return a scenario event - metrics don't need scenario evaluation
-    nil
+    %{
+      event
+      | event_type: event_type,
+        gate_id: gate_id,
+        data: Map.merge(event.data, Map.put(extra_data, "_source", "gateway"))
+    }
   end
-
-  # Unknown topic - skip
-  defp normalize_for_scenarios(_topic, _event, _data), do: nil
 end

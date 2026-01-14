@@ -5,11 +5,14 @@ defmodule AveroCommandWeb.DashboardLive do
   """
   use AveroCommandWeb, :live_view
 
+  require Logger
+
   alias AveroCommand.Entities.GateRegistry
   alias AveroCommand.Journeys
   alias AveroCommand.Sites
 
   @refresh_interval 1000
+  @http_timeout 5000
 
   @impl true
   def mount(_params, _session, socket) do
@@ -49,91 +52,50 @@ defmodule AveroCommandWeb.DashboardLive do
     {:noreply, assign(socket, gates: gates, last_updated: DateTime.utc_now())}
   end
 
+  @impl true
   def handle_info({:gate_event, _event}, socket) do
     selected_site = socket.assigns[:selected_site]
     gates = load_gates(selected_site)
     {:noreply, assign(socket, gates: gates, last_updated: DateTime.utc_now())}
   end
 
+  @impl true
   def handle_info({:journey_created, _journey}, socket) do
     journeys = load_recent_journeys(socket.assigns[:selected_sites] || [])
     {:noreply, assign(socket, journeys: journeys)}
   end
 
+  @impl true
   def handle_info({:zone_event, %{site: event_site, zone_id: zone_id, event_type: type}}, socket) do
-    # Only process events for the currently selected site
-    if event_site == socket.assigns[:selected_site] do
+    if event_site != socket.assigns[:selected_site] do
+      {:noreply, socket}
+    else
       pos_zones = update_pos_zone(socket.assigns.pos_zones, zone_id, type)
       {:noreply, assign(socket, pos_zones: pos_zones)}
-    else
-      {:noreply, socket}
     end
   end
 
+  @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event("open_gate", _params, socket) do
-    require Logger
-
     selected_site = socket.assigns[:selected_site]
-    gateway_url = Sites.gateway_url(selected_site, "/gate/open")
 
-    if gateway_url do
-      Task.start(fn ->
-        url = String.to_charlist(gateway_url)
-        :inets.start()
-        :ssl.start()
+    case Sites.gateway_url(selected_site, "/gate/open") do
+      nil ->
+        {:noreply, socket}
 
-        case :httpc.request(:post, {url, [], ~c"application/json", ~c""}, [{:timeout, 5000}], []) do
-          {:ok, {{_, status, _}, _, body}} ->
-            Logger.info("Gate open response for #{selected_site}: status=#{status} body=#{inspect(body)}")
-
-            if status == 200 do
-              Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_opened, selected_site})
-            end
-
-          {:error, reason} ->
-            Logger.warning("Gate open failed for #{selected_site}: #{inspect(reason)}")
-        end
-      end)
+      gateway_url ->
+        Task.start(fn -> send_gate_open_request(gateway_url, selected_site) end)
+        {:noreply, socket}
     end
-
-    {:noreply, socket}
   end
 
   def handle_event("simulate_acc", %{"pos" => pos}, socket) do
-    require Logger
-
     selected_site = socket.assigns[:selected_site]
 
-    # Call the ACC simulate API
-    Task.start(fn ->
-      url = "http://localhost:4000/api/acc/simulate"
-
-      body =
-        Jason.encode!(%{
-          "pos" => pos,
-          "site" => selected_site
-        })
-
-      :inets.start()
-      :ssl.start()
-
-      case :httpc.request(
-             :post,
-             {String.to_charlist(url), [{'content-type', 'application/json'}], 'application/json',
-              String.to_charlist(body)},
-             [{:timeout, 5000}],
-             []
-           ) do
-        {:ok, {{_, status, _}, _, resp_body}} ->
-          Logger.info("ACC simulate response for #{selected_site}/#{pos}: status=#{status} body=#{inspect(resp_body)}")
-
-        {:error, reason} ->
-          Logger.warning("ACC simulate failed for #{selected_site}/#{pos}: #{inspect(reason)}")
-      end
-    end)
+    Task.start(fn -> send_acc_simulate_request(selected_site, pos) end)
 
     {:noreply, put_flash(socket, :info, "ACC triggered for #{pos}")}
   end
@@ -161,49 +123,44 @@ defmodule AveroCommandWeb.DashboardLive do
   end
 
   defp update_pos_zone(pos_zones, zone_id, type) do
-    now = DateTime.utc_now()
-
     Enum.map(pos_zones, fn zone ->
       if zone.id == zone_id do
-        case type do
-          :zone_entry ->
-            # Start timer if this is the first person
-            occupied_since = zone.occupied_since || now
-
-            %{zone | occupied: true, count: zone.count + 1, occupied_since: occupied_since}
-
-          :zone_exit ->
-            new_count = max(0, zone.count - 1)
-
-            # Accumulate dwell time when zone becomes empty
-            {occupied_since, total_dwell_ms} =
-              if new_count == 0 and zone.occupied_since do
-                elapsed = DateTime.diff(now, zone.occupied_since, :millisecond)
-                {nil, zone.total_dwell_ms + elapsed}
-              else
-                {zone.occupied_since, zone.total_dwell_ms}
-              end
-
-            %{
-              zone
-              | occupied: new_count > 0,
-                count: new_count,
-                paid: if(new_count == 0, do: false, else: zone.paid),
-                occupied_since: occupied_since,
-                total_dwell_ms: total_dwell_ms
-            }
-
-          :payment ->
-            %{zone | paid: true}
-
-          _ ->
-            zone
-        end
+        apply_zone_event(zone, type)
       else
         zone
       end
     end)
   end
+
+  defp apply_zone_event(zone, :zone_entry) do
+    occupied_since = zone.occupied_since || DateTime.utc_now()
+    %{zone | occupied: true, count: zone.count + 1, occupied_since: occupied_since}
+  end
+
+  defp apply_zone_event(zone, :zone_exit) do
+    new_count = max(0, zone.count - 1)
+    now = DateTime.utc_now()
+
+    {occupied_since, total_dwell_ms} =
+      if new_count == 0 and zone.occupied_since do
+        elapsed = DateTime.diff(now, zone.occupied_since, :millisecond)
+        {nil, zone.total_dwell_ms + elapsed}
+      else
+        {zone.occupied_since, zone.total_dwell_ms}
+      end
+
+    %{
+      zone
+      | occupied: new_count > 0,
+        count: new_count,
+        paid: new_count > 0 and zone.paid,
+        occupied_since: occupied_since,
+        total_dwell_ms: total_dwell_ms
+    }
+  end
+
+  defp apply_zone_event(zone, :payment), do: %{zone | paid: true}
+  defp apply_zone_event(zone, _type), do: zone
 
   defp load_gates(nil), do: []
 
@@ -249,47 +206,103 @@ defmodule AveroCommandWeb.DashboardLive do
     Enum.reduce(pos_zones, 0, fn zone, acc -> acc + (zone.count || 0) end)
   end
 
-  defp format_duration(seconds) when seconds < 60 do
-    "#{seconds}s"
-  end
-
-  defp format_duration(seconds) do
-    minutes = div(seconds, 60)
-    secs = rem(seconds, 60)
-
-    if secs == 0 do
-      "#{minutes}m"
-    else
-      "#{minutes}m #{secs}s"
-    end
-  end
-
   defp format_duration_ms(nil), do: "--:--"
 
   defp format_duration_ms(ms) when is_integer(ms) do
     total_seconds = div(ms, 1000)
     minutes = div(total_seconds, 60)
     seconds = rem(total_seconds, 60)
-
-    if minutes > 0 do
-      "#{minutes}:#{String.pad_leading(Integer.to_string(seconds), 2, "0")}"
-    else
-      "0:#{String.pad_leading(Integer.to_string(seconds), 2, "0")}"
-    end
+    "#{minutes}:#{String.pad_leading(Integer.to_string(seconds), 2, "0")}"
   end
 
-  # Get Grafana panel URL for current site
-  defp grafana_panel(site_key, panel_id, opts \\ []) do
-    base_url =
-      Sites.grafana_panel_url(site_key, panel_id, opts) ||
-        "https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=#{panel_id}&theme=dark"
+  defp gate_door_colors(true, _is_open), do: {"rgba(239, 68, 68, 0.3)", "rgba(239, 68, 68, 0.6)"}
+  defp gate_door_colors(false, true), do: {"rgba(34, 197, 94, 0.3)", "rgba(34, 197, 94, 0.5)"}
+  defp gate_door_colors(false, false), do: {"rgba(99, 102, 241, 0.2)", "#6366f1"}
 
-    # Add refresh parameter if specified
+  defp extract_gate_state(gate) do
+    state = gate.state || %{state: :unknown, persons_in_zone: 0, fault: false}
+    gate_state = state[:state] || :unknown
+    is_open = gate_state == :open
+    last_opened_at = state[:last_opened_at]
+
+    opened_at_ms =
+      if is_open && last_opened_at do
+        DateTime.to_unix(last_opened_at, :millisecond)
+      else
+        nil
+      end
+
+    %{
+      gate_state: gate_state,
+      is_open: is_open,
+      has_fault: state[:fault] || false,
+      persons: state[:persons_in_zone] || 0,
+      opened_at_ms: opened_at_ms,
+      last_open_duration_ms: state[:last_open_duration_ms],
+      max_open_duration_ms: state[:max_open_duration_ms],
+      min_open_duration_ms: state[:min_open_duration_ms]
+    }
+  end
+
+  defp grafana_panel_url(site_key, panel_id, opts \\ []) do
+    default_url =
+      "https://grafana.e18n.net/d-solo/command-live/command-live?orgId=1&panelId=#{panel_id}&theme=dark"
+
+    base_url = Sites.grafana_panel_url(site_key, panel_id, opts) || default_url
+
     case Keyword.get(opts, :refresh) do
       nil -> base_url
       refresh -> base_url <> "&refresh=#{refresh}"
     end
   end
+
+  # HTTP helpers
+
+  defp send_gate_open_request(url, site) do
+    ensure_http_started()
+
+    case :httpc.request(:post, {charlist(url), [], ~c"application/json", ~c""}, http_opts(), []) do
+      {:ok, {{_, status, _}, _, body}} ->
+        Logger.info("Gate open response for #{site}: status=#{status} body=#{inspect(body)}")
+
+        if status == 200 do
+          Phoenix.PubSub.broadcast(AveroCommand.PubSub, "gates", {:gate_opened, site})
+        end
+
+      {:error, reason} ->
+        Logger.warning("Gate open failed for #{site}: #{inspect(reason)}")
+    end
+  end
+
+  defp send_acc_simulate_request(site, pos) do
+    ensure_http_started()
+    url = "http://localhost:4000/api/acc/simulate"
+    body = Jason.encode!(%{"pos" => pos, "site" => site})
+    headers = [{~c"content-type", ~c"application/json"}]
+
+    case :httpc.request(
+           :post,
+           {charlist(url), headers, ~c"application/json", charlist(body)},
+           http_opts(),
+           []
+         ) do
+      {:ok, {{_, status, _}, _, resp_body}} ->
+        Logger.info(
+          "ACC simulate response for #{site}/#{pos}: status=#{status} body=#{inspect(resp_body)}"
+        )
+
+      {:error, reason} ->
+        Logger.warning("ACC simulate failed for #{site}/#{pos}: #{inspect(reason)}")
+    end
+  end
+
+  defp ensure_http_started do
+    :inets.start()
+    :ssl.start()
+  end
+
+  defp http_opts, do: [{:timeout, @http_timeout}]
+  defp charlist(s), do: String.to_charlist(s)
 
   @impl true
   def render(assigns) do
@@ -316,25 +329,25 @@ defmodule AveroCommandWeb.DashboardLive do
 
           <!-- Grafana Stats Grid -->
           <div class="grid grid-cols-3 gap-3">
-            <.grafana_panel
+            <.grafana_panel_component
               title="Gate Opens"
-              src={grafana_panel(@selected_site, 4)}
+              src={grafana_panel_url(@selected_site, 4)}
             />
-            <.grafana_panel
+            <.grafana_panel_component
               title="Exits"
-              src={grafana_panel(@selected_site, 5)}
+              src={grafana_panel_url(@selected_site, 5)}
             />
-            <.grafana_panel
+            <.grafana_panel_component
               title="Active Tracks"
-              src={grafana_panel(@selected_site, 2)}
+              src={grafana_panel_url(@selected_site, 2)}
             />
-            <.grafana_panel
+            <.grafana_panel_component
               title="Current Open"
-              src={grafana_panel(@selected_site, 50, refresh: "1s")}
+              src={grafana_panel_url(@selected_site, 50, refresh: "1s")}
             />
-            <.grafana_panel
+            <.grafana_panel_component
               title="Authorized"
-              src={grafana_panel(@selected_site, 3)}
+              src={grafana_panel_url(@selected_site, 3)}
             />
           </div>
         </div>
@@ -363,7 +376,7 @@ defmodule AveroCommandWeb.DashboardLive do
       <.dash_card title="Gate Openings (1h)">
         <div class="h-48">
           <iframe
-            src={grafana_panel(@selected_site, 51, from: "now-1h")}
+            src={grafana_panel_url(@selected_site, 51, from: "now-1h")}
             class="w-full h-full border-0"
             title="Gate Open Duration"
           ></iframe>
@@ -421,7 +434,7 @@ defmodule AveroCommandWeb.DashboardLive do
       <.dash_card title="POS Zone Occupancy (60m)">
         <div class="h-48">
           <iframe
-            src={grafana_panel(@selected_site, 10, from: "now-60m")}
+            src={grafana_panel_url(@selected_site, 10, from: "now-60m")}
             class="w-full h-full border-0"
             title="POS Zone Occupancy"
           ></iframe>
@@ -499,11 +512,12 @@ defmodule AveroCommandWeb.DashboardLive do
     """
   end
 
-  # Grafana embedded panel component
-  attr :title, :string, required: true
-  attr :src, :string, required: true
+  # Components
 
-  defp grafana_panel(assigns) do
+  attr(:title, :string, required: true)
+  attr(:src, :string, required: true)
+
+  defp grafana_panel_component(assigns) do
     ~H"""
     <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       <div class="h-24">
@@ -516,8 +530,6 @@ defmodule AveroCommandWeb.DashboardLive do
     </div>
     """
   end
-
-  # === Components ===
 
   attr(:title, :string, default: nil)
   slot(:inner_block, required: true)
@@ -536,35 +548,7 @@ defmodule AveroCommandWeb.DashboardLive do
   attr(:gate, :map, required: true)
 
   defp gate_card(assigns) do
-    state = assigns.gate.state || %{state: :unknown, persons_in_zone: 0, fault: false}
-    gate_state = state[:state] || :unknown
-    is_open = gate_state == :open
-    has_fault = state[:fault] || false
-    persons = state[:persons_in_zone] || 0
-    last_opened_at = state[:last_opened_at]
-    last_open_duration_ms = state[:last_open_duration_ms]
-    max_open_duration_ms = state[:max_open_duration_ms]
-    min_open_duration_ms = state[:min_open_duration_ms]
-
-    # Convert DateTime to unix ms for JS hook
-    opened_at_ms =
-      if is_open && last_opened_at do
-        DateTime.to_unix(last_opened_at, :millisecond)
-      else
-        nil
-      end
-
-    assigns =
-      assign(assigns,
-        gate_state: gate_state,
-        is_open: is_open,
-        has_fault: has_fault,
-        persons: persons,
-        opened_at_ms: opened_at_ms,
-        last_open_duration_ms: last_open_duration_ms,
-        max_open_duration_ms: max_open_duration_ms,
-        min_open_duration_ms: min_open_duration_ms
-      )
+    assigns = assign(assigns, extract_gate_state(assigns.gate))
 
     ~H"""
     <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
@@ -636,25 +620,8 @@ defmodule AveroCommandWeb.DashboardLive do
   attr(:has_fault, :boolean, default: false)
 
   defp gate_animation(assigns) do
-    # Colors from original Go dashboard (dashboard.monitor.js)
-    # Open: green rgba(34, 197, 94, 0.3) / rgba(34, 197, 94, 0.5)
-    # Closed: indigo rgba(99, 102, 241, 0.2) / #6366f1
-    # Fault: red
-    {door_fill, door_stroke} =
-      cond do
-        assigns.has_fault ->
-          {"rgba(239, 68, 68, 0.3)", "rgba(239, 68, 68, 0.6)"}
-
-        assigns.is_open ->
-          {"rgba(34, 197, 94, 0.3)", "rgba(34, 197, 94, 0.5)"}
-
-        true ->
-          {"rgba(99, 102, 241, 0.2)", "#6366f1"}
-      end
-
-    # Position based on state
+    {door_fill, door_stroke} = gate_door_colors(assigns.has_fault, assigns.is_open)
     {left_x, right_x} = if assigns.is_open, do: {36, 356}, else: {141, 251}
-    state_key = if assigns.is_open, do: "open", else: "closed"
 
     assigns =
       assign(assigns,
@@ -662,10 +629,9 @@ defmodule AveroCommandWeb.DashboardLive do
         door_stroke: door_stroke,
         left_x: left_x,
         right_x: right_x,
-        state_key: state_key
+        state_key: if(assigns.is_open, do: "open", else: "closed")
       )
 
-    # Use inline style with CSS variable to force browser to animate
     ~H"""
     <svg id={"gate-svg-#{@state_key}"} viewBox="0 0 500 160" class="w-full max-w-md h-auto">
       <!-- LEFT DOOR -->
@@ -760,11 +726,13 @@ defmodule AveroCommandWeb.DashboardLive do
 
   defp format_dwell_ms(ms) when ms < 1000, do: "<1s"
   defp format_dwell_ms(ms) when ms < 60_000, do: "#{div(ms, 1000)}s"
+
   defp format_dwell_ms(ms) when ms < 3_600_000 do
     mins = div(ms, 60_000)
     secs = div(rem(ms, 60_000), 1000)
     "#{mins}m #{secs}s"
   end
+
   defp format_dwell_ms(ms) do
     hours = div(ms, 3_600_000)
     mins = div(rem(ms, 3_600_000), 60_000)
