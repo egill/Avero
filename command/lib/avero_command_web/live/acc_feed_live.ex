@@ -58,12 +58,13 @@ defmodule AveroCommandWeb.AccFeedLive do
   defp matches_filter?(event, filter, selected_sites) do
     site_match = event.site in selected_sites or Enum.empty?(selected_sites)
 
-    type_match = case filter do
-      :all -> true
-      :matched -> event.type in ["matched", "matched_no_journey"]
-      :unmatched -> event.type == "unmatched"
-      :late -> event.type == "late_after_gate"
-    end
+    type_match =
+      case filter do
+        :all -> true
+        :matched -> event.type in ["matched", "matched_no_journey"]
+        :unmatched -> event.type == "unmatched"
+        :late -> event.type == "late_after_gate"
+      end
 
     site_match and type_match
   end
@@ -130,9 +131,9 @@ defmodule AveroCommandWeb.AccFeedLive do
     """
   end
 
-  attr :filter, :atom, required: true
-  attr :current, :atom, required: true
-  attr :label, :string, required: true
+  attr(:filter, :atom, required: true)
+  attr(:current, :atom, required: true)
+  attr(:label, :string, required: true)
 
   defp filter_button(assigns) do
     ~H"""
@@ -150,7 +151,7 @@ defmodule AveroCommandWeb.AccFeedLive do
     """
   end
 
-  attr :event, :map, required: true
+  attr(:event, :map, required: true)
 
   defp acc_event_row(assigns) do
     ~H"""
@@ -218,17 +219,29 @@ defmodule AveroCommandWeb.AccFeedLive do
     """
   end
 
-  attr :type, :string, required: true
+  attr(:type, :string, required: true)
 
   defp status_badge(assigns) do
-    {bg_class, text_class, icon} = case assigns.type do
-      "matched" -> {"bg-green-100 dark:bg-green-900/30", "text-green-700 dark:text-green-300", "✓"}
-      "matched_no_journey" -> {"bg-blue-100 dark:bg-blue-900/30", "text-blue-700 dark:text-blue-300", "~"}
-      "unmatched" -> {"bg-red-100 dark:bg-red-900/30", "text-red-700 dark:text-red-300", "✗"}
-      "late_after_gate" -> {"bg-amber-100 dark:bg-amber-900/30", "text-amber-700 dark:text-amber-300", "⏰"}
-      "received" -> {"bg-gray-100 dark:bg-gray-700", "text-gray-600 dark:text-gray-400", "→"}
-      _ -> {"bg-gray-100 dark:bg-gray-700", "text-gray-600 dark:text-gray-400", "?"}
-    end
+    {bg_class, text_class, icon} =
+      case assigns.type do
+        "matched" ->
+          {"bg-green-100 dark:bg-green-900/30", "text-green-700 dark:text-green-300", "✓"}
+
+        "matched_no_journey" ->
+          {"bg-blue-100 dark:bg-blue-900/30", "text-blue-700 dark:text-blue-300", "~"}
+
+        "unmatched" ->
+          {"bg-red-100 dark:bg-red-900/30", "text-red-700 dark:text-red-300", "✗"}
+
+        "late_after_gate" ->
+          {"bg-amber-100 dark:bg-amber-900/30", "text-amber-700 dark:text-amber-300", "⏰"}
+
+        "received" ->
+          {"bg-gray-100 dark:bg-gray-700", "text-gray-600 dark:text-gray-400", "→"}
+
+        _ ->
+          {"bg-gray-100 dark:bg-gray-700", "text-gray-600 dark:text-gray-400", "?"}
+      end
 
     assigns = assign(assigns, bg_class: bg_class, text_class: text_class, icon: icon)
 
@@ -247,6 +260,7 @@ defmodule AveroCommandWeb.AccFeedLive do
   defp format_type(other), do: other
 
   defp format_duration(nil), do: "-"
+
   defp format_duration(ms) when is_integer(ms) do
     cond do
       ms < 1000 -> "#{ms}ms"
@@ -254,6 +268,7 @@ defmodule AveroCommandWeb.AccFeedLive do
       true -> "#{div(ms, 60_000)}m #{rem(div(ms, 1000), 60)}s"
     end
   end
+
   defp format_duration(_), do: "-"
 
   defp format_time(nil), do: "-"

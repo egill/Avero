@@ -2,6 +2,8 @@
   current_path={@current_path}
   sidebar_collapsed={assigns[:sidebar_collapsed] || false}
   mobile_sidebar_open={assigns[:mobile_sidebar_open] || false}
+  selected_site={assigns[:selected_site] || "netto"}
+  available_sites={assigns[:available_sites] || []}
 >
   <.flash_group flash={@flash} />
   <%= @inner_content %>

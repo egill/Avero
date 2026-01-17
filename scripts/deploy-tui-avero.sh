@@ -2,20 +2,20 @@
 set -e
 
 # Configuration
-HOST="avero@100.80.187.4"
+HOST="avero@100.65.110.63"
 SITE="avero"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "Deploying gateway-tui to Avero..."
 
 echo "Syncing source..."
-rsync -avz --exclude target --exclude .git "$SCRIPT_DIR/" "$HOST:~/gateway-poc-new/"
+rsync -avz --exclude target --exclude .git "$SCRIPT_DIR/" "$HOST:~/gateway/"
 
 echo "Building on server..."
-ssh "$HOST" "source ~/.cargo/env && cd ~/gateway-poc-new && cargo build --release --bin gateway-tui"
+ssh "$HOST" "source ~/.cargo/env && cd ~/gateway && cargo build --release --bin gateway-tui"
 
 echo "Installing binary..."
-ssh "$HOST" "cp ~/gateway-poc-new/target/release/gateway-tui /opt/avero/gateway-poc/target/release/"
+ssh "$HOST" "cp ~/gateway/target/release/gateway-tui /opt/avero/gateway/target/release/"
 
 echo "Done."
-echo "Run: ssh $HOST '/opt/avero/gateway-poc/target/release/gateway-tui --config /opt/avero/gateway-poc/config/$SITE.toml'"
+echo "Run: ssh $HOST '/opt/avero/gateway/target/release/gateway-tui --config /opt/avero/gateway/config/$SITE.toml'"

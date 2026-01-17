@@ -27,7 +27,10 @@ defmodule AveroCommand.Scenarios.GateStuck do
     open_duration_ms = data["open_duration_ms"] || 0
 
     if open_duration_ms >= @stuck_threshold_ms do
-      Logger.info("GateStuck: gate was open for #{open_duration_ms}ms (#{div(open_duration_ms, 1000)}s)")
+      Logger.info(
+        "GateStuck: gate was open for #{open_duration_ms}ms (#{div(open_duration_ms, 1000)}s)"
+      )
+
       {:match, build_incident_from_closed(event, open_duration_ms)}
     else
       :no_match
@@ -42,6 +45,7 @@ defmodule AveroCommand.Scenarios.GateStuck do
   def evaluate(%{event_type: event_type} = event) when event_type in ["sensors", "people"] do
     # Check gate state on other events
     gate_id = event.gate_id || event.data["gate_id"]
+
     if gate_id do
       check_gate_state(event, gate_id)
     else

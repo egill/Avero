@@ -28,6 +28,7 @@ pub struct MqttPublisher {
     gate_topic: String,
     tracks_topic: String,
     acc_topic: String,
+    positions_topic: String,
 }
 
 impl MqttPublisher {
@@ -42,8 +43,10 @@ impl MqttPublisher {
         mqttoptions.set_keep_alive(Duration::from_secs(30));
         mqttoptions.set_clean_session(true);
 
-        // Set credentials if configured
-        if let (Some(username), Some(password)) = (config.mqtt_username(), config.mqtt_password()) {
+        // Set credentials if configured (uses egress-specific or falls back to main mqtt creds)
+        if let (Some(username), Some(password)) =
+            (config.mqtt_egress_username(), config.mqtt_egress_password())
+        {
             mqttoptions.set_credentials(username, password);
         }
 
@@ -81,6 +84,7 @@ impl MqttPublisher {
             gate_topic: config.mqtt_egress_gate_topic().to_string(),
             tracks_topic: config.mqtt_egress_tracks_topic().to_string(),
             acc_topic: config.mqtt_egress_acc_topic().to_string(),
+            positions_topic: config.mqtt_egress_positions_topic().to_string(),
         }
     }
 
@@ -97,6 +101,7 @@ impl MqttPublisher {
             metrics = %self.metrics_topic,
             gate = %self.gate_topic,
             acc = %self.acc_topic,
+            positions = %self.positions_topic,
             "mqtt_egress_started"
         );
 
@@ -190,6 +195,18 @@ impl MqttPublisher {
                         .await
                     {
                         debug!(error = %e, "mqtt_egress_acc_failed");
+                    }
+                }
+            }
+            EgressMessage::Position(payload) => {
+                // Use QoS 0 for position updates
+                if let Ok(json) = serde_json::to_string(&payload) {
+                    if let Err(e) = self
+                        .client
+                        .publish(&self.positions_topic, QoS::AtMostOnce, false, json.as_bytes())
+                        .await
+                    {
+                        debug!(error = %e, "mqtt_egress_position_failed");
                     }
                 }
             }

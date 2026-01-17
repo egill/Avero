@@ -49,8 +49,8 @@ cargo install cargo-zigbuild
 cargo zigbuild --release --target aarch64-unknown-linux-gnu
 
 # Option 2: Remote build on target
-rsync -avz --exclude target --exclude .git ./ avero@HOST:~/gateway-poc/
-ssh avero@HOST "cd ~/gateway-poc && cargo build --release"
+rsync -avz --exclude target --exclude .git ./ avero@HOST:~/gateway/
+ssh avero@HOST "cd ~/gateway && cargo build --release"
 ```
 
 ### Deployment Hosts
@@ -66,6 +66,9 @@ ssh avero@HOST "cd ~/gateway-poc && cargo build --release"
 # Deploy main service to Netto
 ./scripts/deploy-netto.sh
 
+# Deploy main service to Avero HQ
+./scripts/deploy-avero.sh
+
 # Deploy command app (Phoenix dashboard)
 ./scripts/deploy-command.sh
 
@@ -74,9 +77,9 @@ ssh avero@HOST "cd ~/gateway-poc && cargo build --release"
 ./scripts/deploy-tui-avero.sh
 
 # Manual service control
-ssh avero@HOST "sudo systemctl stop gateway-poc"
-ssh avero@HOST "sudo systemctl start gateway-poc"
-ssh avero@HOST "sudo journalctl -u gateway-poc -f"  # Live logs
+ssh avero@HOST "sudo systemctl stop gateway"
+ssh avero@HOST "sudo systemctl start gateway"
+ssh avero@HOST "sudo journalctl -u gateway -f"  # Live logs
 
 # Command app logs
 ssh root@e18n.net "docker logs avero-command -f"
@@ -242,7 +245,7 @@ command/lib/
 ### Data Flow
 
 ```
-gateway-poc (Rust) → MQTT → command/MQTT.Client → EventRouter
+gateway (Rust) → MQTT → command/MQTT.Client → EventRouter
                                                        ↓
                                     ┌──────────────────┼──────────────────┐
                                     ↓                  ↓                  ↓

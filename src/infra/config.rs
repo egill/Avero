@@ -64,6 +64,9 @@ pub struct Rs485Config {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ZonesConfig {
     pub pos_zones: Vec<i32>,
+    /// Dwell zones auto-authorize after min_dwell_ms (no ACC needed)
+    #[serde(default)]
+    pub dwell_zones: Vec<i32>,
     pub gate_zone: i32,
     pub exit_line: i32,
     #[serde(default)]
@@ -150,6 +153,10 @@ pub struct MqttEgressConfig {
     pub enabled: bool,
     pub host: Option<String>,
     pub port: Option<u16>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
     #[serde(default = "Defaults::journeys_topic")]
     pub journeys_topic: String,
     #[serde(default = "Defaults::events_topic")]
@@ -162,6 +169,8 @@ pub struct MqttEgressConfig {
     pub tracks_topic: String,
     #[serde(default = "Defaults::acc_topic")]
     pub acc_topic: String,
+    #[serde(default = "Defaults::positions_topic")]
+    pub positions_topic: String,
     #[serde(default = "Defaults::metrics_publish_interval")]
     pub metrics_publish_interval_secs: u64,
 }
@@ -172,12 +181,15 @@ impl Default for MqttEgressConfig {
             enabled: true,
             host: None,
             port: None,
+            username: None,
+            password: None,
             journeys_topic: "gateway/journeys".to_string(),
             events_topic: "gateway/events".to_string(),
             metrics_topic: "gateway/metrics".to_string(),
             gate_topic: "gateway/gate".to_string(),
             tracks_topic: "gateway/tracks".to_string(),
             acc_topic: "gateway/acc".to_string(),
+            positions_topic: "gateway/positions".to_string(),
             metrics_publish_interval_secs: DEFAULT_METRICS_PUBLISH_INTERVAL,
         }
     }
@@ -206,6 +218,28 @@ pub struct SiteConfig {
 impl Default for SiteConfig {
     fn default() -> Self {
         Self { id: "gateway".to_string() }
+    }
+}
+
+/// Analysis logging configuration (for offline position data analysis)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AnalysisLogConfig {
+    /// Enable analysis logging (default: false)
+    pub enabled: bool,
+    /// Directory to write log files (default: "logs")
+    pub dir: String,
+    /// Rotation strategy: "daily" or "size:100" for 100MB (default: "daily")
+    pub rotation: String,
+}
+
+impl Default for AnalysisLogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dir: "logs".to_string(),
+            rotation: "daily".to_string(),
+        }
     }
 }
 
@@ -252,6 +286,9 @@ impl Defaults {
     fn acc_topic() -> String {
         "gateway/acc".to_string()
     }
+    fn positions_topic() -> String {
+        "gateway/positions".to_string()
+    }
     fn metrics_publish_interval() -> u64 {
         DEFAULT_METRICS_PUBLISH_INTERVAL
     }
@@ -287,6 +324,8 @@ pub struct TomlConfig {
     pub mqtt_egress: MqttEgressConfig,
     #[serde(default)]
     pub pos_tracking: PosTrackingConfig,
+    #[serde(default)]
+    pub analysis_log: AnalysisLogConfig,
 }
 
 // ============================================================================
@@ -320,6 +359,7 @@ pub struct Config {
 
     // Zone definitions
     pos_zones: Vec<i32>,
+    dwell_zones: Vec<i32>,
     gate_zone: i32,
     exit_line: i32,
     entry_line: Option<i32>,
@@ -353,13 +393,21 @@ pub struct Config {
     mqtt_egress_enabled: bool,
     mqtt_egress_host: Option<String>,
     mqtt_egress_port: Option<u16>,
+    mqtt_egress_username: Option<String>,
+    mqtt_egress_password: Option<String>,
     mqtt_egress_journeys_topic: String,
     mqtt_egress_events_topic: String,
     mqtt_egress_metrics_topic: String,
     mqtt_egress_gate_topic: String,
     mqtt_egress_tracks_topic: String,
     mqtt_egress_acc_topic: String,
+    mqtt_egress_positions_topic: String,
     mqtt_egress_metrics_interval_secs: u64,
+
+    // Analysis logging
+    analysis_log_enabled: bool,
+    analysis_log_dir: String,
+    analysis_log_rotation: String,
 }
 
 /// Macro to generate simple getter methods
@@ -412,6 +460,7 @@ impl Default for Config {
             rs485_baud: 19200,
             rs485_poll_interval_ms: 250,
             pos_zones: vec![1001, 1002, 1003, 1004, 1005],
+            dwell_zones: vec![],
             gate_zone: 1007,
             exit_line: 1006,
             entry_line: None,
@@ -433,13 +482,19 @@ impl Default for Config {
             mqtt_egress_enabled: mqtt_egress.enabled,
             mqtt_egress_host: mqtt_egress.host,
             mqtt_egress_port: mqtt_egress.port,
+            mqtt_egress_username: mqtt_egress.username,
+            mqtt_egress_password: mqtt_egress.password,
             mqtt_egress_journeys_topic: mqtt_egress.journeys_topic,
             mqtt_egress_events_topic: mqtt_egress.events_topic,
             mqtt_egress_metrics_topic: mqtt_egress.metrics_topic,
             mqtt_egress_gate_topic: mqtt_egress.gate_topic,
             mqtt_egress_tracks_topic: mqtt_egress.tracks_topic,
             mqtt_egress_acc_topic: mqtt_egress.acc_topic,
+            mqtt_egress_positions_topic: mqtt_egress.positions_topic,
             mqtt_egress_metrics_interval_secs: mqtt_egress.metrics_publish_interval_secs,
+            analysis_log_enabled: false,
+            analysis_log_dir: "logs".to_string(),
+            analysis_log_rotation: "daily".to_string(),
         }
     }
 }
@@ -496,7 +551,7 @@ impl Config {
     /// # Example
     ///
     /// ```no_run
-    /// use gateway_poc::infra::Config;
+    /// use gateway::infra::Config;
     ///
     /// let config = Config::from_file("config/dev.toml").expect("Failed to load config");
     /// assert_eq!(config.mqtt_port(), 1883);
@@ -556,6 +611,7 @@ impl Config {
             rs485_baud: toml_config.rs485.baud,
             rs485_poll_interval_ms: toml_config.rs485.poll_interval_ms,
             pos_zones: toml_config.zones.pos_zones,
+            dwell_zones: toml_config.zones.dwell_zones,
             gate_zone: toml_config.zones.gate_zone,
             exit_line: toml_config.zones.exit_line,
             entry_line: toml_config.zones.entry_line,
@@ -578,15 +634,21 @@ impl Config {
             mqtt_egress_enabled: toml_config.mqtt_egress.enabled,
             mqtt_egress_host: toml_config.mqtt_egress.host,
             mqtt_egress_port: toml_config.mqtt_egress.port,
+            mqtt_egress_username: toml_config.mqtt_egress.username,
+            mqtt_egress_password: toml_config.mqtt_egress.password,
             mqtt_egress_journeys_topic: toml_config.mqtt_egress.journeys_topic,
             mqtt_egress_events_topic: toml_config.mqtt_egress.events_topic,
             mqtt_egress_metrics_topic: toml_config.mqtt_egress.metrics_topic,
             mqtt_egress_gate_topic: toml_config.mqtt_egress.gate_topic,
             mqtt_egress_tracks_topic: toml_config.mqtt_egress.tracks_topic,
             mqtt_egress_acc_topic: toml_config.mqtt_egress.acc_topic,
+            mqtt_egress_positions_topic: toml_config.mqtt_egress.positions_topic,
             mqtt_egress_metrics_interval_secs: toml_config
                 .mqtt_egress
                 .metrics_publish_interval_secs,
+            analysis_log_enabled: toml_config.analysis_log.enabled,
+            analysis_log_dir: toml_config.analysis_log.dir,
+            analysis_log_rotation: toml_config.analysis_log.rotation,
         })
     }
 
@@ -617,7 +679,7 @@ impl Config {
     /// # Example
     ///
     /// ```
-    /// use gateway_poc::infra::Config;
+    /// use gateway::infra::Config;
     ///
     /// let config = Config::default();
     /// assert!(config.is_pos_zone(1001));  // Default POS zone
@@ -635,8 +697,8 @@ impl Config {
     /// # Example
     ///
     /// ```
-    /// use gateway_poc::infra::Config;
-    /// use gateway_poc::domain::types::GeometryId;
+    /// use gateway::infra::Config;
+    /// use gateway::domain::types::GeometryId;
     ///
     /// let config = Config::default();
     /// assert_eq!(&*config.zone_name(GeometryId(1001)), "POS_1");
@@ -669,6 +731,9 @@ impl Config {
         mqtt_egress_gate_topic,
         mqtt_egress_tracks_topic,
         mqtt_egress_acc_topic,
+        mqtt_egress_positions_topic,
+        analysis_log_dir,
+        analysis_log_rotation,
     );
 
     config_getters!(copy:
@@ -688,6 +753,7 @@ impl Config {
         broker_port -> u16,
         mqtt_egress_enabled -> bool,
         mqtt_egress_metrics_interval_secs -> u64,
+        analysis_log_enabled -> bool,
     );
 
     config_getters!(opt_i32: entry_line, approach_line);
@@ -719,6 +785,16 @@ impl Config {
     }
 
     #[inline]
+    pub fn dwell_zones(&self) -> &[i32] {
+        &self.dwell_zones
+    }
+
+    /// Check if a geometry_id is a dwell zone (auto-authorizes on dwell threshold).
+    pub fn is_dwell_zone(&self, geometry_id: i32) -> bool {
+        self.dwell_zones.contains(&geometry_id)
+    }
+
+    #[inline]
     pub fn gate_zone(&self) -> GeometryId {
         GeometryId(self.gate_zone)
     }
@@ -738,6 +814,22 @@ impl Config {
     #[inline]
     pub fn mqtt_egress_port(&self) -> u16 {
         self.mqtt_egress_port.unwrap_or(self.mqtt_port)
+    }
+
+    /// Get MQTT egress username, falling back to main mqtt username if not set
+    #[inline]
+    pub fn mqtt_egress_username(&self) -> Option<&str> {
+        self.mqtt_egress_username
+            .as_deref()
+            .or(self.mqtt_username.as_deref())
+    }
+
+    /// Get MQTT egress password, falling back to main mqtt password if not set
+    #[inline]
+    pub fn mqtt_egress_password(&self) -> Option<&str> {
+        self.mqtt_egress_password
+            .as_deref()
+            .or(self.mqtt_password.as_deref())
     }
 
     /// Builder method for tests to set min_dwell_ms

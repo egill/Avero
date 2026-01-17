@@ -763,7 +763,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-poc"
+name = "gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",

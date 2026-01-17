@@ -5,6 +5,7 @@ defmodule AveroCommandWeb.GateController do
 
   @gateway_ips %{
     "netto" => "100.80.187.3",
+    "avero" => "100.65.110.63",
     "grandi" => "100.80.187.4"
   }
 
@@ -19,12 +20,14 @@ defmodule AveroCommandWeb.GateController do
       case :httpc.request(:post, {url, [], ~c"application/json", ~c""}, [{:timeout, 5000}], []) do
         {:ok, {{_, 200, _}, _, body}} ->
           Logger.info("Gate opened for #{site}: #{inspect(body)}")
+
           conn
           |> put_resp_header("access-control-allow-origin", "*")
           |> json(%{ok: true, site: site})
 
         {:ok, {{_, status, _}, _, body}} ->
           Logger.warning("Gate open failed for #{site}: status=#{status} body=#{inspect(body)}")
+
           conn
           |> put_resp_header("access-control-allow-origin", "*")
           |> put_status(502)
@@ -32,6 +35,7 @@ defmodule AveroCommandWeb.GateController do
 
         {:error, reason} ->
           Logger.warning("Gate open failed for #{site}: #{inspect(reason)}")
+
           conn
           |> put_resp_header("access-control-allow-origin", "*")
           |> put_status(502)

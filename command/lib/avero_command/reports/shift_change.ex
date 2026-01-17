@@ -37,9 +37,10 @@ defmodule AveroCommand.Reports.ShiftChange do
     current_hour = DateTime.utc_now().hour
 
     # Find the shift that just ended
-    ending_shift = Enum.find(shifts, fn shift ->
-      shift.end == current_hour
-    end)
+    ending_shift =
+      Enum.find(shifts, fn shift ->
+        shift.end == current_hour
+      end)
 
     if ending_shift do
       Logger.info("ShiftChange: generating summary for #{ending_shift.name} shift")
@@ -92,13 +93,15 @@ defmodule AveroCommand.Reports.ShiftChange do
   end
 
   defp calculate_shift_stats(events) do
-    exits = Enum.count(events, fn e ->
-      e.event_type == "exits" && e.data["type"] == "exit.confirmed"
-    end)
+    exits =
+      Enum.count(events, fn e ->
+        e.event_type == "exits" && e.data["type"] == "exit.confirmed"
+      end)
 
-    gate_cycles = Enum.count(events, fn e ->
-      e.event_type == "gates" && e.data["type"] == "gate.closed"
-    end)
+    gate_cycles =
+      Enum.count(events, fn e ->
+        e.event_type == "gates" && e.data["type"] == "gate.closed"
+      end)
 
     payments = Enum.count(events, &payment_event?/1)
 
@@ -147,7 +150,8 @@ defmodule AveroCommand.Reports.ShiftChange do
         event_count: stats.event_count,
         open_incidents: open_incidents,
         open_incident_count: length(open_incidents),
-        message: "#{String.capitalize(shift.name)} shift ended: #{stats.total_exits} exits, #{stats.total_payments} payments, #{length(open_incidents)} open incidents"
+        message:
+          "#{String.capitalize(shift.name)} shift ended: #{stats.total_exits} exits, #{stats.total_payments} payments, #{length(open_incidents)} open incidents"
       },
       suggested_actions: [
         %{"id" => "review_incidents", "label" => "Review Open Incidents", "auto" => false},
@@ -156,6 +160,9 @@ defmodule AveroCommand.Reports.ShiftChange do
     }
 
     Manager.create_incident(incident_attrs)
-    Logger.info("ShiftChange: #{site} #{shift.name} shift - #{stats.total_exits} exits, #{length(open_incidents)} open incidents")
+
+    Logger.info(
+      "ShiftChange: #{site} #{shift.name} shift - #{stats.total_exits} exits, #{length(open_incidents)} open incidents"
+    )
   end
 end

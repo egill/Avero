@@ -54,7 +54,10 @@ defmodule AveroCommand.Scenarios.ConfusedCustomer do
     has_exited = has_successful_exit?(site, person_id, since)
 
     if cycle_count >= @cycle_threshold && not has_exited do
-      Logger.info("ConfusedCustomer: person #{person_id} has #{cycle_count} gate zone cycles without exit")
+      Logger.info(
+        "ConfusedCustomer: person #{person_id} has #{cycle_count} gate zone cycles without exit"
+      )
+
       {:match, build_incident(event, data, person_id, cycle_count)}
     else
       :no_match
@@ -114,7 +117,8 @@ defmodule AveroCommand.Scenarios.ConfusedCustomer do
         cycle_count: cycle_count,
         cycle_threshold: @cycle_threshold,
         time_window_seconds: @time_window_seconds,
-        message: "Customer #{person_id} has cycled #{cycle_count} times in gate area without exiting"
+        message:
+          "Customer #{person_id} has cycled #{cycle_count} times in gate area without exiting"
       },
       suggested_actions: [
         %{"id" => "assist_customer", "label" => "Send Staff to Assist", "auto" => false},

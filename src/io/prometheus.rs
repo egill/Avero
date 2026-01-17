@@ -3,7 +3,7 @@
 //! Exposes gateway metrics in Prometheus text format at /metrics.
 //! Uses hyper for the HTTP server.
 
-use crate::domain::types::TrackId;
+use crate::domain::types::{DoorStatus, EventType, ParsedEvent, TrackId};
 use crate::infra::metrics::{
     Metrics, MetricsSummary, METRICS_BUCKET_BOUNDS, METRICS_NUM_BUCKETS, METRICS_STITCH_DIST_BOUNDS,
 };
@@ -18,9 +18,10 @@ use std::convert::Infallible;
 use std::fmt::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::net::TcpListener;
-use tokio::sync::watch;
-use tracing::{error, info};
+use tokio::sync::{mpsc, watch};
+use tracing::{error, info, warn};
 
 /// Prometheus metric type
 enum MetricType {
@@ -597,6 +598,8 @@ async fn handle_request<G: GateCommand>(
     metrics: Arc<Metrics>,
     site_id: Arc<String>,
     gate: Option<Arc<G>>,
+    event_tx: Option<mpsc::Sender<ParsedEvent>>,
+    door_tx: Option<watch::Sender<DoorStatus>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
@@ -617,6 +620,9 @@ async fn handle_request<G: GateCommand>(
         (&Method::POST, "/gate/open") => {
             if let Some(gate) = gate {
                 let latency_us = gate.send_open_command(TrackId(0)).await;
+                // Record manual gate open in metrics (same as automatic opens)
+                metrics.record_gate_command();
+                metrics.record_gate_latency(latency_us);
                 info!(latency_us = %latency_us, "manual_gate_open");
                 Ok(Response::builder()
                     .status(StatusCode::OK)
@@ -644,6 +650,126 @@ async fn handle_request<G: GateCommand>(
             .header("Access-Control-Allow-Headers", "Content-Type")
             .body(Full::new(Bytes::from("")))
             .expect("static response should not fail")),
+        // ACC simulation endpoint - POST /acc/simulate?pos=POS_1
+        (&Method::POST, "/acc/simulate") => {
+            if let Some(event_tx) = event_tx {
+                // Parse query parameters for pos (default to POS_1)
+                let query = req.uri().query().unwrap_or("");
+                let pos = query
+                    .split('&')
+                    .find_map(|p| p.strip_prefix("pos="))
+                    .unwrap_or("POS_1")
+                    .to_string();
+
+                // Create simulated ACC event
+                let event = ParsedEvent {
+                    event_type: EventType::AccEventSimulated(pos.clone()),
+                    track_id: TrackId(0),
+                    geometry_id: None,
+                    direction: None,
+                    event_time: 0,
+                    received_at: Instant::now(),
+                    position: None,
+                };
+
+                // Send to tracker
+                match event_tx.try_send(event) {
+                    Ok(()) => {
+                        info!(pos = %pos, "acc_simulate_sent");
+                        Ok(Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/json")
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(Full::new(Bytes::from(format!(
+                                r#"{{"ok":true,"pos":"{}","message":"ACC event sent to tracker"}}"#,
+                                pos
+                            ))))
+                            .expect("static response should not fail"))
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "acc_simulate_failed");
+                        Ok(Response::builder()
+                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                            .header("Content-Type", "application/json")
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(Full::new(Bytes::from(r#"{"ok":false,"error":"channel_full"}"#)))
+                            .expect("static response should not fail"))
+                    }
+                }
+            } else {
+                Ok(Response::builder()
+                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                    .header("Content-Type", "application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Full::new(Bytes::from(r#"{"ok":false,"error":"event_channel_not_configured"}"#)))
+                    .expect("static response should not fail"))
+            }
+        }
+        // CORS preflight for acc/simulate
+        (&Method::OPTIONS, "/acc/simulate") => Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            .header("Access-Control-Allow-Headers", "Content-Type")
+            .body(Full::new(Bytes::from("")))
+            .expect("static response should not fail")),
+        // Door state simulation endpoint - POST /door/simulate?status=moving|open|closed
+        // Used by mock_cloudplus to simulate RS485 door state changes
+        (&Method::POST, "/door/simulate") => {
+            if let Some(ref door_tx) = door_tx {
+                let query = req.uri().query().unwrap_or("");
+                let status_str = query
+                    .split('&')
+                    .find_map(|p| p.strip_prefix("status="))
+                    .unwrap_or("unknown");
+
+                let status = match status_str {
+                    "moving" => DoorStatus::Moving,
+                    "open" => DoorStatus::Open,
+                    "closed" => DoorStatus::Closed,
+                    _ => {
+                        return Ok(Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("Content-Type", "application/json")
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(Full::new(Bytes::from(
+                                r#"{"ok":false,"error":"invalid_status","valid":["moving","open","closed"]}"#,
+                            )))
+                            .expect("static response should not fail"));
+                    }
+                };
+
+                door_tx.send_replace(status);
+                info!(status = %status.as_str(), "door_simulate_sent");
+
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Full::new(Bytes::from(format!(
+                        r#"{{"ok":true,"status":"{}"}}"#,
+                        status.as_str()
+                    ))))
+                    .expect("static response should not fail"))
+            } else {
+                Ok(Response::builder()
+                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                    .header("Content-Type", "application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Full::new(Bytes::from(
+                        r#"{"ok":false,"error":"door_simulation_not_enabled"}"#,
+                    )))
+                    .expect("static response should not fail"))
+            }
+        }
+        // CORS preflight for door/simulate
+        (&Method::OPTIONS, "/door/simulate") => Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            .header("Access-Control-Allow-Headers", "Content-Type")
+            .body(Full::new(Bytes::from("")))
+            .expect("static response should not fail")),
         _ => Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Full::new(Bytes::from("Not Found")))
@@ -657,6 +783,8 @@ pub async fn start_metrics_server<G: GateCommand + 'static>(
     metrics: Arc<Metrics>,
     site_id: String,
     gate: Option<Arc<G>>,
+    event_tx: Option<mpsc::Sender<ParsedEvent>>,
+    door_tx: Option<watch::Sender<DoorStatus>>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -674,13 +802,17 @@ pub async fn start_metrics_server<G: GateCommand + 'static>(
                         let metrics = metrics.clone();
                         let site_id = site_id.clone();
                         let gate = gate.clone();
+                        let event_tx = event_tx.clone();
+                        let door_tx = door_tx.clone();
 
                         tokio::spawn(async move {
                             let service = service_fn(move |req| {
                                 let metrics = metrics.clone();
                                 let site_id = site_id.clone();
                                 let gate = gate.clone();
-                                async move { handle_request(req, metrics, site_id, gate).await }
+                                let event_tx = event_tx.clone();
+                                let door_tx = door_tx.clone();
+                                async move { handle_request(req, metrics, site_id, gate, event_tx, door_tx).await }
                             });
 
                             if let Err(e) = http1::Builder::new()

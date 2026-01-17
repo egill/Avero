@@ -1,0 +1,765 @@
+{
+  "editable": true,
+  "id": 7,
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "blue",
+                  "text": "SYNC"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "green",
+                  "text": "ASYNC"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "gateway_async_mode_enabled{site=\"AVERO-HQ\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Processing Mode",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "gateway_concurrent_persons{site=\"AVERO-HQ\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Concurrent Persons",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "Offline"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "green",
+                  "text": "Online"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 0
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "gateway_gate_online{site=~\".*[Gg]randi.*\"}",
+          "legendFormat": "Gate {{gate_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Status",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 0
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_exits_total{site=\"AVERO-HQ\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 0
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_gate_opens_total{site=\"AVERO-HQ\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Opens (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 0
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_payments_total{site=\"AVERO-HQ\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Payments (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 0
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "sum(increase(gateway_gate_faults_total{site=\"AVERO-HQ\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Faults (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "gateway_people_tracking{site=\"AVERO-HQ\"}",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_concurrent_persons{site=\"AVERO-HQ\"}",
+          "legendFormat": "Concurrent",
+          "refId": "B"
+        }
+      ],
+      "title": "People Tracking",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum(clamp_max(gateway_pos_occupancy{site=\"AVERO-HQ\"}, 1))",
+          "legendFormat": "Occupied Zones",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Zone Occupancy",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "round(increase(gateway_payments_per_zone_total{site=\"AVERO-HQ\"}[1m]))",
+          "legendFormat": "{{zone}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Payments by Zone",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "increase(gateway_exits_total{site=\"AVERO-HQ\"}[1m])",
+          "legendFormat": "{{authorized}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits by Type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 12,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_event_processing_duration_seconds_bucket{site=\"AVERO-HQ\"}[1m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_event_processing_duration_seconds_bucket{site=\"AVERO-HQ\"}[1m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_event_processing_duration_seconds_bucket{site=\"AVERO-HQ\"}[1m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Event Processing Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 13,
+      "targets": [
+        {
+          "expr": "increase(gateway_cross_person_delays_total{site=\"AVERO-HQ\"}[5m])",
+          "legendFormat": "{{event_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cross-Person Delays",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 14,
+      "targets": [
+        {
+          "expr": "gateway_persister_queue_depth{site=\"AVERO-HQ\"}",
+          "legendFormat": "Persister",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_journey_queue_depth{site=\"AVERO-HQ\"}",
+          "legendFormat": "Journey",
+          "refId": "B"
+        },
+        {
+          "expr": "gateway_worker_pool_queue_depth{site=\"AVERO-HQ\"}",
+          "legendFormat": "Worker Pool",
+          "refId": "C"
+        },
+        {
+          "expr": "gateway_event_queue_depth{site=\"AVERO-HQ\"}",
+          "legendFormat": "Event Bus",
+          "refId": "D"
+        }
+      ],
+      "title": "Queue Depths",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "always",
+            "spanNulls": true,
+            "staircase": true
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "green",
+                  "text": "Closed"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "yellow",
+                  "text": "Moving"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "2": {
+                  "color": "red",
+                  "text": "Open"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "max": 2,
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 15,
+      "targets": [
+        {
+          "expr": "gateway_gate_state{site=\"AVERO-HQ\"}",
+          "legendFormat": "Gate {{gate_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate State History",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "staircase": true
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "id": 16,
+      "targets": [
+        {
+          "expr": "sum(gateway_exits_total{site=\"AVERO-HQ\"}) by (authorized)",
+          "legendFormat": "{{authorized}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cumulative Exits",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 17,
+      "targets": [
+        {
+          "expr": "gateway_events_dropped_total{site=\"AVERO-HQ\"}",
+          "legendFormat": "Events Dropped",
+          "refId": "A"
+        },
+        {
+          "expr": "gateway_persist_dropped_total{site=\"AVERO-HQ\"}",
+          "legendFormat": "Persist Dropped",
+          "refId": "B"
+        },
+        {
+          "expr": "gateway_journey_dropped_total{site=\"AVERO-HQ\"}",
+          "legendFormat": "Journey Dropped",
+          "refId": "C"
+        },
+        {
+          "expr": "gateway_worker_pool_dropped_total{site=\"AVERO-HQ\"}",
+          "legendFormat": "Worker Pool Dropped",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(gateway_tracker_handler_errors_total{site=\"AVERO-HQ\"}) by (handler)",
+          "legendFormat": "Handler Errors ({{handler}})",
+          "refId": "E"
+        }
+      ],
+      "title": "System Health (Errors & Drops)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0,
+          "noValue": "0",
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "id": 18,
+      "targets": [
+        {
+          "expr": "rate(gateway_line_crossings_total{site=\"AVERO-HQ\", line=\"entry\", direction=\"forward\"}[1m]) * 60 or vector(0)",
+          "legendFormat": "Entry Forward",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(gateway_line_crossings_total{site=\"AVERO-HQ\", line=\"entry\", direction=\"backward\"}[1m]) * 60 or vector(0)",
+          "legendFormat": "Entry Backward",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(gateway_line_crossings_total{site=\"AVERO-HQ\", line=\"exit\", direction=\"forward\"}[1m]) * 60 or vector(0)",
+          "legendFormat": "Exit Forward",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(gateway_line_crossings_total{site=\"AVERO-HQ\", line=\"exit\", direction=\"backward\"}[1m]) * 60 or vector(0)",
+          "legendFormat": "Exit Backward",
+          "refId": "D"
+        }
+      ],
+      "title": "Line Crossings (per minute)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "id": 19,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_gate_cycle_duration_seconds_bucket{site=\"AVERO-HQ\"}[5m])) by (le, gate_id))",
+          "legendFormat": "Gate {{gate_id}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_gate_cycle_duration_seconds_bucket{site=\"AVERO-HQ\"}[5m])) by (le, gate_id))",
+          "legendFormat": "Gate {{gate_id}} p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Gate Cycle Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "id": 20,
+      "targets": [
+        {
+          "expr": "increase(gateway_gate_cycle_crossings_total{site=\"AVERO-HQ\"}[5m])",
+          "legendFormat": "Gate {{gate_id}} Crossings",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(gateway_gate_cycle_multi_exit_total{site=\"AVERO-HQ\"}[5m])) by (gate_id)",
+          "legendFormat": "Gate {{gate_id}} Multi-Exit Cycles",
+          "refId": "B"
+        }
+      ],
+      "title": "Gate Cycle Crossings (Tailgating)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0,
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "id": 21,
+      "targets": [
+        {
+          "expr": "increase(gateway_gate_cycle_multi_exit_total{site=\"AVERO-HQ\"}[1h])",
+          "legendFormat": "{{crossing_count}} exits",
+          "refId": "A"
+        }
+      ],
+      "title": "Multi-Exit Distribution",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 37,
+  "tags": [
+    "avero",
+    "AVERO-HQ",
+    "gateway"
+  ],
+  "timezone": "browser",
+  "title": "AVERO-HQ Gateway",
+  "uid": "AVERO-HQ-gateway",
+  "version": 1
+}

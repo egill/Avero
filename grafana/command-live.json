@@ -10,7 +10,12 @@
   "panels": [
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 300,
       "title": "🚪 Gate Control",
       "type": "row"
@@ -22,36 +27,88 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [
-            { "options": { "0": { "color": "purple", "index": 0, "text": "CLOSED" } }, "type": "value" },
-            { "options": { "1": { "color": "yellow", "index": 1, "text": "MOVING" } }, "type": "value" },
-            { "options": { "2": { "color": "green", "index": 2, "text": "OPEN" } }, "type": "value" }
+            {
+              "options": {
+                "0": {
+                  "color": "purple",
+                  "index": 0,
+                  "text": "CLOSED"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "color": "yellow",
+                  "index": 1,
+                  "text": "MOVING"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "2": {
+                  "color": "green",
+                  "index": 2,
+                  "text": "OPEN"
+                }
+              },
+              "type": "value"
+            }
           ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "purple", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "green", "value": 2 }
+              {
+                "color": "purple",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
             ]
           }
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
       "id": 1,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value"
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "expr": "gateway_gate_state{site=\"netto\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "gateway_gate_state{site=\"$site\"}",
           "refId": "A"
         }
       ],
@@ -59,7 +116,12 @@
       "type": "stat"
     },
     {
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
       "id": 100,
       "options": {
         "SVGBaseFix": true,
@@ -76,44 +138,137 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "custom": { "fillOpacity": 70, "lineWidth": 0, "spanNulls": false },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [
-            { "options": { "0": { "color": "purple", "index": 0, "text": "Closed" } }, "type": "value" },
-            { "options": { "1": { "color": "yellow", "index": 1, "text": "Moving" } }, "type": "value" },
-            { "options": { "2": { "color": "green", "index": 2, "text": "Open" } }, "type": "value" }
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "purple",
+                  "index": 0,
+                  "text": "Closed"
+                }
+              },
+              "type": "special"
+            }
           ],
+          "noValue": "Closed",
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
-          }
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          },
+          "unit": "s"
         }
       },
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 1 },
-      "id": 11,
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 8,
+        "y": 1
+      },
+      "id": 50,
       "options": {
-        "alignValue": "center",
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
-        "mergeValues": true,
-        "rowHeight": 0.9,
-        "showValue": "auto",
-        "tooltip": { "mode": "single", "sort": "none" }
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "expr": "gateway_gate_state{site=\"netto\"}",
-          "legendFormat": "Gate",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "WITH latest_state AS (SELECT data->>'state' as state, time FROM events WHERE site = '$site' AND event_type = 'gateway.gate' AND data->>'src' = 'rs485' AND data->>'state' IN ('open', 'closed') ORDER BY time DESC LIMIT 1) SELECT CASE WHEN state = 'open' THEN EXTRACT(EPOCH FROM (NOW() - time)) ELSE NULL END as open_duration FROM latest_state;",
           "refId": "A"
         }
       ],
-      "title": "Gate Timeline",
-      "type": "state-timeline"
+      "title": "Current Open",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "noValue": "-",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 11,
+        "y": 1
+      },
+      "id": 52,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "WITH last_open AS (SELECT time as open_time FROM events WHERE site = '$site' AND event_type = 'gateway.gate' AND data->>'src' = 'rs485' AND data->>'state' = 'open' ORDER BY time DESC LIMIT 1), last_close AS (SELECT time as close_time FROM events WHERE site = '$site' AND event_type = 'gateway.gate' AND data->>'src' = 'rs485' AND data->>'state' = 'closed' ORDER BY time DESC LIMIT 1) SELECT COUNT(*) as exits FROM events e, last_open o, last_close c WHERE e.site = '$site' AND e.event_type = 'gateway.events' AND e.data->>'t' = 'line_cross' AND UPPER(e.data->>'z') LIKE '%EXIT%' AND e.time >= o.open_time AND (o.open_time > c.close_time OR e.time <= c.close_time);",
+          "refId": "A"
+        }
+      ],
+      "title": "Exits (cycle)",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -122,28 +277,49 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           },
           "unit": "short"
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 1
+      },
       "id": 4,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "expr": "increase(gateway_gate_commands_total{site=\"netto\"}[1h])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "increase(gateway_gate_commands_total{site=\"$site\"}[1h])",
           "refId": "A"
         }
       ],
@@ -157,32 +333,57 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 500 },
-              { "color": "red", "value": 1000 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
             ]
           },
           "unit": "µs"
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
       "id": 12,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "expr": "gateway_gate_latency_p99_us{site=\"netto\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "gateway_gate_latency_p99_us{site=\"$site\"}",
           "refId": "A"
         }
       ],
@@ -191,7 +392,12 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
       "id": 301,
       "title": "📊 Real-Time Metrics",
       "type": "row"
@@ -203,32 +409,57 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 10 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
             ]
           },
           "unit": "short"
         }
       },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 6 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
       "id": 2,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "expr": "gateway_active_tracks{site=\"netto\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "gateway_active_tracks{site=\"$site\"}",
           "refId": "A"
         }
       ],
@@ -242,28 +473,49 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "blue", "value": null }]
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
           },
           "unit": "short"
         }
       },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 6 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
       "id": 3,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "expr": "gateway_authorized_tracks{site=\"netto\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "gateway_authorized_tracks{site=\"$site\"}",
           "refId": "A"
         }
       ],
@@ -277,28 +529,49 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           },
           "unit": "short"
         }
       },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 6 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
       "id": 5,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "expr": "increase(gateway_exits_total{site=\"netto\"}[1h])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "increase(gateway_exits_total{site=\"$site\"}[1h])",
           "refId": "A"
         }
       ],
@@ -312,98 +585,64 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 10 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
             ]
           },
           "unit": "percent"
         }
       },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 6 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
       "id": 13,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
           "format": "table",
-          "rawSql": "SELECT ROUND(COUNT(*) FILTER (WHERE tailgated = true)::numeric / NULLIF(COUNT(*), 0) * 100, 1) as tailgate_rate FROM person_journeys WHERE site = 'netto' AND time > NOW() - INTERVAL '24 hours' AND outcome IS NOT NULL;",
+          "rawSql": "SELECT ROUND(COUNT(*) FILTER (WHERE tailgated = true)::numeric / NULLIF(COUNT(*), 0) * 100, 1) as tailgate_rate FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND outcome IS NOT NULL;",
           "refId": "A"
         }
       ],
       "title": "Tailgating (24h)",
       "type": "stat"
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
-      "id": 302,
-      "title": "📈 Activity",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 20,
-            "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
-      "id": 10,
-      "options": {
-        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
-      },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "expr": "gateway_pos_occupancy{site=\"netto\"}",
-          "legendFormat": "{{zone_id}}",
-          "refId": "A"
-        }
-      ],
-      "title": "POS Zone Occupancy",
-      "type": "timeseries"
     },
     {
       "datasource": {
@@ -412,7 +651,361 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 10
+      },
+      "id": 14,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT ROUND(COUNT(*) FILTER (WHERE outcome = 'paid_exit')::numeric / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('paid_exit', 'unpaid_exit')), 0) * 100, 1) as paid_rate FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours';",
+          "refId": "A"
+        }
+      ],
+      "title": "Paid Exit Rate (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 10
+      },
+      "id": 15,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "100 * gateway_acc_matched_total{site=\"$site\"} / (gateway_acc_events_total{site=\"$site\"} + 0.001)",
+          "refId": "A"
+        }
+      ],
+      "title": "ACC Match Rate",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 10
+      },
+      "id": 16,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as quick_exits FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND total_pos_dwell_ms < 30000 AND outcome IN ('paid_exit', 'unpaid_exit');",
+          "refId": "A"
+        }
+      ],
+      "title": "Quick Exits <30s (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 10
+      },
+      "id": 17,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as unpaid FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '24 hours' AND outcome = 'unpaid_exit';",
+          "refId": "A"
+        }
+      ],
+      "title": "Unpaid Exits (24h)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 302,
+      "title": "📈 Activity",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMin": 0,
+            "drawStyle": "points",
+            "fillOpacity": 0,
+            "lineWidth": 0,
+            "pointSize": 10,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "always"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 30
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "id": 51,
+      "options": {
+        "legend": {
+          "calcs": ["max", "mean"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "time_series",
+          "rawSql": "WITH gate_cycles AS (SELECT time as open_time, data->>'state' as state, LEAD(time) OVER (ORDER BY time) as close_time, LEAD(data->>'state') OVER (ORDER BY time) as next_state FROM events WHERE site = '$site' AND event_type = 'gateway.gate' AND data->>'src' = 'rs485' AND data->>'state' IN ('open', 'closed') AND $__timeFilter(time)) SELECT open_time as time, EXTRACT(EPOCH FROM (close_time - open_time)) as open_duration_sec FROM gate_cycles WHERE state = 'open' AND next_state = 'closed' ORDER BY open_time;",
+          "refId": "A"
+        }
+      ],
+      "title": "Gate Open Duration (per cycle)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
@@ -422,49 +1015,219 @@
             "drawStyle": "line",
             "fillOpacity": 30,
             "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "max": 5,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull", "max"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "count(gateway_pos_occupancy{site=\"$site\"} > 0) or vector(0)",
+          "legendFormat": "Zones Occupied",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Zones Occupied",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "lineInterpolation": "smooth",
             "lineWidth": 1,
             "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "never",
             "spanNulls": false,
-            "stacking": { "group": "A", "mode": "normal" },
-            "thresholdsStyle": { "mode": "off" }
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           },
           "unit": "short"
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "paid_exit" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "paid_exit"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "unpaid_exit" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "unpaid_exit"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "lost_unauthorized" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "lost_unauthorized"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lost_authorized"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
       "id": 20,
       "options": {
-        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
           "format": "time_series",
-          "rawSql": "SELECT time_bucket('15 minutes', time) as time, COUNT(*) FILTER (WHERE outcome = 'paid_exit') as paid_exit, COUNT(*) FILTER (WHERE outcome = 'unpaid_exit') as unpaid_exit, COUNT(*) FILTER (WHERE outcome = 'lost_unauthorized') as lost_unauthorized FROM person_journeys WHERE site = 'netto' AND $__timeFilter(time) AND outcome IS NOT NULL GROUP BY 1 ORDER BY 1;",
+          "rawSql": "SELECT time_bucket('15 minutes', time) as time, COUNT(*) FILTER (WHERE outcome = 'paid_exit') as paid_exit, COUNT(*) FILTER (WHERE outcome = 'unpaid_exit') as unpaid_exit, COUNT(*) FILTER (WHERE outcome = 'lost_unauthorized') as lost_unauthorized, COUNT(*) FILTER (WHERE outcome = 'lost_authorized') as lost_authorized FROM person_journeys WHERE site = '$site' AND $__timeFilter(time) AND outcome IS NOT NULL GROUP BY 1 ORDER BY 1;",
           "refId": "A"
         }
       ],
@@ -473,7 +1236,12 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
       "id": 303,
       "title": "📅 Comparison",
       "type": "row"
@@ -485,7 +1253,9 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
@@ -495,65 +1265,409 @@
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "auto",
             "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           },
           "unit": "short"
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "today" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "today"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "yesterday" },
+            "matcher": {
+              "id": "byName",
+              "options": "yesterday"
+            },
             "properties": [
-              { "id": "color", "value": { "fixedColor": "#808080", "mode": "fixed" } },
-              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#808080",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              }
             ]
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
       "id": 21,
       "options": {
-        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
           "format": "time_series",
-          "rawSql": "WITH hours AS (SELECT generate_series(0, 23) as hour), today_data AS (SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int as hour, COUNT(*) as cnt FROM person_journeys WHERE site = 'netto' AND time >= CURRENT_DATE AND outcome IS NOT NULL GROUP BY 1), yesterday_data AS (SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int as hour, COUNT(*) as cnt FROM person_journeys WHERE site = 'netto' AND time >= CURRENT_DATE - INTERVAL '1 day' AND time < CURRENT_DATE AND outcome IS NOT NULL GROUP BY 1) SELECT (CURRENT_DATE + (h.hour || ' hours')::interval) AT TIME ZONE 'Atlantic/Reykjavik' as time, COALESCE(t.cnt, 0) as today, COALESCE(y.cnt, 0) as yesterday FROM hours h LEFT JOIN today_data t ON h.hour = t.hour LEFT JOIN yesterday_data y ON h.hour = y.hour ORDER BY h.hour;",
+          "rawSql": "WITH hours AS (SELECT generate_series(0, 23) as hour), today_data AS (SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int as hour, COUNT(*) as cnt FROM person_journeys WHERE site = '$site' AND time >= CURRENT_DATE AND outcome IS NOT NULL GROUP BY 1), yesterday_data AS (SELECT EXTRACT(HOUR FROM time AT TIME ZONE 'Atlantic/Reykjavik')::int as hour, COUNT(*) as cnt FROM person_journeys WHERE site = '$site' AND time >= CURRENT_DATE - INTERVAL '1 day' AND time < CURRENT_DATE AND outcome IS NOT NULL GROUP BY 1) SELECT (CURRENT_DATE + (h.hour || ' hours')::interval) AT TIME ZONE 'Atlantic/Reykjavik' as time, COALESCE(t.cnt, 0) as today, COALESCE(y.cnt, 0) as yesterday FROM hours h LEFT JOIN today_data t ON h.hour = t.hour LEFT JOIN yesterday_data y ON h.hour = y.hour ORDER BY h.hour;",
           "refId": "A"
         }
       ],
-      "title": "Today vs Yesterday",
+      "title": "Today vs Yesterday (Hourly)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "always",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "paid_rate"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', time) as time, ROUND(COUNT(*) FILTER (WHERE outcome = 'paid_exit')::numeric / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('paid_exit', 'unpaid_exit')), 0) * 100, 1) as paid_rate FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '7 days' AND outcome IS NOT NULL GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Paid Exit Rate (7 Day Trend)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "paid"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unpaid"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', time) as time, COUNT(*) FILTER (WHERE outcome = 'paid_exit') as paid, COUNT(*) FILTER (WHERE outcome = 'unpaid_exit') as unpaid FROM person_journeys WHERE site = '$site' AND time > NOW() - INTERVAL '7 days' AND outcome IS NOT NULL GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "Daily Exits (7 Days)",
       "type": "timeseries"
     }
   ],
+  "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["command", "live"],
-  "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
-  "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m"] },
+  "tags": [
+    "command",
+    "live",
+    "operations"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "netto",
+          "value": "netto"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Site",
+        "multi": false,
+        "name": "site",
+        "options": [
+          {
+            "selected": true,
+            "text": "netto",
+            "value": "netto"
+          },
+          {
+            "selected": false,
+            "text": "avero",
+            "value": "avero"
+          },
+          {
+            "selected": false,
+            "text": "grandi",
+            "value": "grandi"
+          }
+        ],
+        "query": "netto,avero,grandi",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m"
+    ]
+  },
   "timezone": "Atlantic/Reykjavik",
-  "title": "Command Live",
+  "title": "Operations",
   "uid": "command-live",
-  "version": 18,
-  "weekStart": "monday",
-  "refresh": "10s"
+  "version": 32,
+  "weekStart": "monday"
 }

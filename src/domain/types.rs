@@ -154,6 +154,8 @@ pub enum EventType {
     DoorStateChange(DoorStatus),
     /// ACC (payment terminal) event with kiosk IP
     AccEvent(String),
+    /// Simulated ACC event with POS zone name directly (e.g., "POS_1")
+    AccEventSimulated(String),
     Unknown(String),
 }
 
@@ -185,6 +187,7 @@ impl EventType {
             EventType::LineCrossBackward => "line_cross_backward",
             EventType::DoorStateChange(_) => "door_state_change",
             EventType::AccEvent(_) => "acc_event",
+            EventType::AccEventSimulated(_) => "acc_event_simulated",
             EventType::Unknown(s) => s,
         }
     }

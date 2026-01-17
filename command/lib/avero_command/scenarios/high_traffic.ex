@@ -57,7 +57,8 @@ defmodule AveroCommand.Scenarios.HighTraffic do
         concurrent_persons: concurrent,
         threshold: if(severity == "high", do: @elevated_threshold, else: @warning_threshold),
         queue_depth: data["event_queue_depth"] || 0,
-        message: "#{concurrent} people currently tracked (threshold: #{if severity == "high", do: @elevated_threshold, else: @warning_threshold})"
+        message:
+          "#{concurrent} people currently tracked (threshold: #{if severity == "high", do: @elevated_threshold, else: @warning_threshold})"
       },
       suggested_actions: [
         %{"id" => "monitor", "label" => "Monitor Closely", "auto" => false},

@@ -37,14 +37,34 @@ defmodule AveroCommand.Scenarios.GroupSplit do
 
     # If more than half are unauthorized, flag it
     if payment_ratio < 0.5 do
-      Logger.info("GroupSplit: #{total_crossings} people exited, only #{authorized_count} authorized (#{Float.round(payment_ratio * 100, 1)}%)")
-      {:match, build_incident(event, data, exit_summary, total_crossings, authorized_count, unauthorized_count, payment_ratio)}
+      Logger.info(
+        "GroupSplit: #{total_crossings} people exited, only #{authorized_count} authorized (#{Float.round(payment_ratio * 100, 1)}%)"
+      )
+
+      {:match,
+       build_incident(
+         event,
+         data,
+         exit_summary,
+         total_crossings,
+         authorized_count,
+         unauthorized_count,
+         payment_ratio
+       )}
     else
       :no_match
     end
   end
 
-  defp build_incident(event, data, exit_summary, total_crossings, authorized_count, unauthorized_count, payment_ratio) do
+  defp build_incident(
+         event,
+         data,
+         exit_summary,
+         total_crossings,
+         authorized_count,
+         unauthorized_count,
+         payment_ratio
+       ) do
     gate_id = data["gate_id"] || 0
     open_duration_ms = data["open_duration_ms"] || 0
 
@@ -62,7 +82,8 @@ defmodule AveroCommand.Scenarios.GroupSplit do
         payment_ratio: Float.round(payment_ratio * 100, 1),
         open_duration_ms: open_duration_ms,
         tailgating_count: exit_summary["tailgating_count"] || 0,
-        message: "Group of #{total_crossings} exited with #{authorized_count} payments (#{Float.round(payment_ratio * 100, 1)}% paid)"
+        message:
+          "Group of #{total_crossings} exited with #{authorized_count} payments (#{Float.round(payment_ratio * 100, 1)}% paid)"
       },
       suggested_actions: [
         %{"id" => "review_camera", "label" => "Review Camera Footage", "auto" => false},

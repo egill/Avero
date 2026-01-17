@@ -16,7 +16,8 @@ defmodule AveroCommand.Scenarios.SensorOffline do
   alias AveroCommand.Store
 
   # Time threshold to consider sensor offline (in seconds)
-  @offline_threshold_seconds 120  # 2 minutes without status
+  # 2 minutes without status
+  @offline_threshold_seconds 120
 
   @doc """
   Evaluate if this event triggers the sensor-offline scenario.
@@ -45,7 +46,8 @@ defmodule AveroCommand.Scenarios.SensorOffline do
 
     if Enum.empty?(recent_status) do
       # Check if we've EVER seen a sensor status to avoid false positives on startup
-      all_status = get_recent_sensor_status(site, DateTime.add(DateTime.utc_now(), -3600, :second))
+      all_status =
+        get_recent_sensor_status(site, DateTime.add(DateTime.utc_now(), -3600, :second))
 
       if Enum.empty?(all_status) do
         # Never seen sensor status - don't alert (might be startup)

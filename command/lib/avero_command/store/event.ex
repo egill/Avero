@@ -7,18 +7,18 @@ defmodule AveroCommand.Store.Event do
 
   @primary_key false
   schema "events" do
-    field :id, :integer, primary_key: true
-    field :time, :utc_datetime_usec, primary_key: true
-    field :site, :string
-    field :event_type, :string
-    field :person_id, :integer
-    field :gate_id, :integer
-    field :sensor_id, :string
-    field :zone, :string
-    field :authorized, :boolean
-    field :auth_method, :string
-    field :duration_ms, :integer
-    field :data, :map
+    field(:id, :integer, primary_key: true)
+    field(:time, :utc_datetime_usec, primary_key: true)
+    field(:site, :string)
+    field(:event_type, :string)
+    field(:person_id, :integer)
+    field(:gate_id, :integer)
+    field(:sensor_id, :string)
+    field(:zone, :string)
+    field(:authorized, :boolean)
+    field(:auth_method, :string)
+    field(:duration_ms, :integer)
+    field(:data, :map)
   end
 
   def changeset(event, attrs) do

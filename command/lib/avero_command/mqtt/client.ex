@@ -8,8 +8,10 @@ defmodule AveroCommand.MQTT.Client do
 
   alias AveroCommand.MQTT.EventRouter
 
-  @reconnect_interval 5_000  # 5 seconds between reconnection attempts
-  @max_reconnect_attempts 10  # Max consecutive failures before longer backoff
+  # 5 seconds between reconnection attempts
+  @reconnect_interval 5_000
+  # Max consecutive failures before longer backoff
+  @max_reconnect_attempts 10
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -63,7 +65,10 @@ defmodule AveroCommand.MQTT.Client do
         {:noreply, new_state}
 
       {:error, reason, new_state} ->
-        Logger.warning("MQTT connection failed: #{inspect(reason)}, will retry in #{reconnect_delay(new_state)}ms")
+        Logger.warning(
+          "MQTT connection failed: #{inspect(reason)}, will retry in #{reconnect_delay(new_state)}ms"
+        )
+
         schedule_reconnect(new_state)
         {:noreply, new_state}
     end
@@ -100,7 +105,9 @@ defmodule AveroCommand.MQTT.Client do
   # ============================================
 
   defp attempt_connection(state) do
-    Logger.info("MQTT Client connecting to #{state.host}:#{state.port} (attempt #{state.reconnect_attempts + 1})")
+    Logger.info(
+      "MQTT Client connecting to #{state.host}:#{state.port} (attempt #{state.reconnect_attempts + 1})"
+    )
 
     conn_opts = build_connection_opts(state)
 
@@ -141,9 +148,11 @@ defmodule AveroCommand.MQTT.Client do
     Process.send_after(self(), :reconnect, delay)
   end
 
-  defp reconnect_delay(%{reconnect_attempts: attempts}) when attempts >= @max_reconnect_attempts do
+  defp reconnect_delay(%{reconnect_attempts: attempts})
+       when attempts >= @max_reconnect_attempts do
     # After many failures, use exponential backoff up to 5 minutes
-    min(300_000, @reconnect_interval * :math.pow(2, attempts - @max_reconnect_attempts)) |> trunc()
+    min(300_000, @reconnect_interval * :math.pow(2, attempts - @max_reconnect_attempts))
+    |> trunc()
   end
 
   defp reconnect_delay(_state) do

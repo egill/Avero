@@ -311,8 +311,11 @@ defmodule AveroCommandWeb.IncidentExplorerLive do
   end
 
   defp hour_details(assigns) do
-    type_counts = Incidents.list_by_type_for_hour(assigns.selected_date, assigns.hour, assigns.selected_sites)
-    incidents = Incidents.list_for_hour(assigns.selected_date, assigns.hour, assigns.selected_sites)
+    type_counts =
+      Incidents.list_by_type_for_hour(assigns.selected_date, assigns.hour, assigns.selected_sites)
+
+    incidents =
+      Incidents.list_for_hour(assigns.selected_date, assigns.hour, assigns.selected_sites)
 
     # Group incidents by type for drill-down
     incidents_by_type = Enum.group_by(incidents, & &1.type)

@@ -59,19 +59,22 @@ defmodule AveroCommand.Reports.HourlySummary do
   end
 
   defp calculate_stats(events) do
-    exits = Enum.count(events, fn e ->
-      e.event_type == "exits" && e.data["type"] == "exit.confirmed"
-    end)
+    exits =
+      Enum.count(events, fn e ->
+        e.event_type == "exits" && e.data["type"] == "exit.confirmed"
+      end)
 
-    gate_opens = Enum.count(events, fn e ->
-      e.event_type == "gates" && e.data["type"] == "gate.opened"
-    end)
+    gate_opens =
+      Enum.count(events, fn e ->
+        e.event_type == "gates" && e.data["type"] == "gate.opened"
+      end)
 
     payments = Enum.count(events, &payment_event?/1)
 
-    barcodes = Enum.count(events, fn e ->
-      e.event_type == "barcodes" && e.data["type"] == "barcode.validated"
-    end)
+    barcodes =
+      Enum.count(events, fn e ->
+        e.event_type == "barcodes" && e.data["type"] == "barcode.validated"
+      end)
 
     # Get gate-specific stats
     gate_stats =
@@ -79,17 +82,20 @@ defmodule AveroCommand.Reports.HourlySummary do
       |> Enum.filter(fn e -> e.event_type == "gates" && e.data["type"] == "gate.closed" end)
       |> Enum.group_by(fn e -> e.data["gate_id"] end)
       |> Enum.map(fn {gate_id, gate_events} ->
-        total_exits = gate_events
+        total_exits =
+          gate_events
           |> Enum.map(fn e -> e.data["exit_summary"]["total_crossings"] || 0 end)
           |> Enum.sum()
 
-        avg_duration = gate_events
+        avg_duration =
+          gate_events
           |> Enum.map(fn e -> e.data["open_duration_ms"] || 0 end)
           |> then(fn durations ->
             if length(durations) > 0, do: Enum.sum(durations) / length(durations), else: 0
           end)
 
-        {gate_id, %{cycles: length(gate_events), exits: total_exits, avg_duration_ms: round(avg_duration)}}
+        {gate_id,
+         %{cycles: length(gate_events), exits: total_exits, avg_duration_ms: round(avg_duration)}}
       end)
       |> Map.new()
 
@@ -125,7 +131,8 @@ defmodule AveroCommand.Reports.HourlySummary do
         total_barcodes: stats.total_barcodes,
         gate_stats: stats.gate_stats,
         event_count: stats.event_count,
-        message: "Hourly summary: #{stats.total_exits} exits, #{stats.total_payments} payments, #{stats.total_gate_opens} gate cycles"
+        message:
+          "Hourly summary: #{stats.total_exits} exits, #{stats.total_payments} payments, #{stats.total_gate_opens} gate cycles"
       },
       suggested_actions: [
         %{"id" => "view_dashboard", "label" => "View Dashboard", "auto" => false},
@@ -134,6 +141,9 @@ defmodule AveroCommand.Reports.HourlySummary do
     }
 
     Manager.create_incident(incident_attrs)
-    Logger.info("HourlySummary: #{site} - #{stats.total_exits} exits, #{stats.total_payments} payments")
+
+    Logger.info(
+      "HourlySummary: #{site} - #{stats.total_exits} exits, #{stats.total_payments} payments"
+    )
   end
 end

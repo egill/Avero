@@ -30,7 +30,13 @@ if config_env() == :prod do
   config :avero_command, AveroCommandWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [ip: {0, 0, 0, 0}, port: port],
-    secret_key_base: secret_key_base
+    secret_key_base: secret_key_base,
+    check_origin: [
+      "https://command.e18n.net",
+      "https://dashboard.avero.is",
+      "//command.e18n.net",
+      "//dashboard.avero.is"
+    ]
 end
 
 # MQTT configuration (all environments)
@@ -40,7 +46,7 @@ config :avero_command, :mqtt,
   username: System.get_env("MQTT_USERNAME"),
   password: System.get_env("MQTT_PASSWORD"),
   client_id: System.get_env("MQTT_CLIENT_ID", "avero_command_#{System.get_env("MIX_ENV", "dev")}"),
-  topics: String.split(System.get_env("MQTT_TOPICS", "gateway/journeys,gateway/events,gateway/gate,gateway/acc"), ",")
+  topics: String.split(System.get_env("MQTT_TOPICS", "gateway/journeys,gateway/events,gateway/gate,gateway/acc,gateway/metrics,gateway/positions,xovis/sensor"), ",")
 
 # Gateway-PoC configuration
 # GATEWAY_SITE: Default site ID for journeys from gateway-poc (if not included in JSON)

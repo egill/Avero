@@ -9,13 +9,13 @@ defmodule AveroCommandWeb.CoreComponents do
   @doc """
   Renders flash notices.
   """
-  attr :id, :string, doc: "the optional id of flash container"
-  attr :flash, :map, default: %{}, doc: "the map of flash messages to display"
-  attr :title, :string, default: nil
-  attr :kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup"
-  attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
+  attr(:id, :string, doc: "the optional id of flash container")
+  attr(:flash, :map, default: %{}, doc: "the map of flash messages to display")
+  attr(:title, :string, default: nil)
+  attr(:kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup")
+  attr(:rest, :global, doc: "the arbitrary HTML attributes to add to the flash container")
 
-  slot :inner_block, doc: "the optional inner block that renders the flash message"
+  slot(:inner_block, doc: "the optional inner block that renders the flash message")
 
   def flash(assigns) do
     assigns = assign_new(assigns, :id, fn -> "flash-#{assigns.kind}" end)
@@ -47,8 +47,8 @@ defmodule AveroCommandWeb.CoreComponents do
   @doc """
   Shows the flash group with standard titles and content.
   """
-  attr :flash, :map, required: true, doc: "the map of flash messages"
-  attr :id, :string, default: "flash-group", doc: "the optional id of flash container"
+  attr(:flash, :map, required: true, doc: "the map of flash messages")
+  attr(:id, :string, default: "flash-group", doc: "the optional id of flash container")
 
   def flash_group(assigns) do
     ~H"""
@@ -83,15 +83,16 @@ defmodule AveroCommandWeb.CoreComponents do
   @doc """
   Renders a simple form.
   """
-  attr :for, :any, required: true, doc: "the datastructure for the form"
-  attr :as, :any, default: nil, doc: "the server side parameter to collect all input under"
+  attr(:for, :any, required: true, doc: "the datastructure for the form")
+  attr(:as, :any, default: nil, doc: "the server side parameter to collect all input under")
 
-  attr :rest, :global,
+  attr(:rest, :global,
     include: ~w(autocomplete name rel action enctype method novalidate target multipart),
     doc: "the arbitrary HTML attributes to apply to the form tag"
+  )
 
-  slot :inner_block, required: true
-  slot :actions, doc: "the slot for form actions, such as a submit button"
+  slot(:inner_block, required: true)
+  slot(:actions, doc: "the slot for form actions, such as a submit button")
 
   def simple_form(assigns) do
     ~H"""
@@ -109,11 +110,11 @@ defmodule AveroCommandWeb.CoreComponents do
   @doc """
   Renders a button.
   """
-  attr :type, :string, default: nil
-  attr :class, :string, default: nil
-  attr :rest, :global, include: ~w(disabled form name value)
+  attr(:type, :string, default: nil)
+  attr(:class, :string, default: nil)
+  attr(:rest, :global, include: ~w(disabled form name value))
 
-  slot :inner_block, required: true
+  slot(:inner_block, required: true)
 
   def button(assigns) do
     ~H"""
@@ -135,11 +136,11 @@ defmodule AveroCommandWeb.CoreComponents do
   @doc """
   Renders a header with title.
   """
-  attr :class, :string, default: nil
+  attr(:class, :string, default: nil)
 
-  slot :inner_block, required: true
-  slot :subtitle
-  slot :actions
+  slot(:inner_block, required: true)
+  slot(:subtitle)
+  slot(:actions)
 
   def header(assigns) do
     ~H"""
@@ -160,8 +161,8 @@ defmodule AveroCommandWeb.CoreComponents do
   @doc """
   Renders a back navigation link.
   """
-  attr :navigate, :any, required: true
-  slot :inner_block, required: true
+  attr(:navigate, :any, required: true)
+  slot(:inner_block, required: true)
 
   def back(assigns) do
     ~H"""

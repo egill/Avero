@@ -1,0 +1,59 @@
+# Avero HQ configuration
+# Development/demo environment at Avero office
+
+[site]
+id = "avero"
+
+[mqtt]
+host = "localhost"
+port = 1883
+topic = "#"
+username = "avero"
+password = "avero"
+
+[gate]
+mode = "tcp"
+tcp_addr = "192.168.0.245:8000"
+http_url = "http://admin:88888888@192.168.0.245/cdor.cgi?door=0&open=1"
+timeout_ms = 2000
+
+[rs485]
+device = "/dev/ttyAMA4"
+baud = 19200
+poll_interval_ms = 250
+
+[zones]
+pos_zones = [1007]
+dwell_zones = [1010]
+gate_zone = 1008
+exit_line = 1006
+entry_line = 1005
+approach_line = 1009
+
+[zones.names]
+1005 = "ENTRY_1"
+1006 = "EXIT_1"
+1007 = "POS_1"
+1008 = "GATE_1"
+1009 = "APPROACH_1"
+1010 = "DWELL_1"
+
+[pos_tracking]
+min_dwell_ms = 7000
+
+[metrics]
+prometheus_port = 9090
+interval_secs = 10
+
+[acc]
+listener_enabled = false
+listener_port = 25803
+flicker_merge_s = 10
+recent_exit_window_ms = 3000
+
+[mqtt_egress]
+enabled = true
+host = "100.112.14.22"  # VerneMQ on e18n.net via Tailscale
+port = 1883
+username = "avero"
+password = "avero"

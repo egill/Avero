@@ -27,8 +27,8 @@ use tracing::{debug, error, info, warn};
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::EnvFilter;
 
-use gateway_poc::infra::Config;
-use gateway_poc::io::analysis_logger::{AnalysisLogger, RotationStrategy};
+use gateway::infra::Config;
+use gateway::io::analysis_logger::{AnalysisLogger, RotationStrategy};
 
 /// Gateway Analysis - Diagnostic logging for gateway-poc
 #[derive(Parser, Debug)]

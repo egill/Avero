@@ -46,26 +46,30 @@ defmodule AveroCommand.Reports.SiteComparison do
   defp get_site_stats(site) do
     today_start = Date.utc_today() |> DateTime.new!(~T[00:00:00], "Etc/UTC")
 
-    events = Store.recent_events(2000, site)
-    |> Enum.filter(fn e ->
-      DateTime.compare(e.time, today_start) == :gt
-    end)
+    events =
+      Store.recent_events(2000, site)
+      |> Enum.filter(fn e ->
+        DateTime.compare(e.time, today_start) == :gt
+      end)
 
-    exits = Enum.count(events, fn e ->
-      e.event_type == "exits" && e.data["type"] == "exit.confirmed"
-    end)
+    exits =
+      Enum.count(events, fn e ->
+        e.event_type == "exits" && e.data["type"] == "exit.confirmed"
+      end)
 
-    gate_cycles = Enum.count(events, fn e ->
-      e.event_type == "gates" && e.data["type"] == "gate.closed"
-    end)
+    gate_cycles =
+      Enum.count(events, fn e ->
+        e.event_type == "gates" && e.data["type"] == "gate.closed"
+      end)
 
     payments = Enum.count(events, &payment_event?/1)
 
-    incidents = Incidents.list_active()
-    |> Enum.filter(fn inc ->
-      inc.site == site &&
-        DateTime.to_date(inc.created_at) == Date.utc_today()
-    end)
+    incidents =
+      Incidents.list_active()
+      |> Enum.filter(fn inc ->
+        inc.site == site &&
+          DateTime.to_date(inc.created_at) == Date.utc_today()
+      end)
 
     incident_count = length(incidents)
     high_severity = Enum.count(incidents, &(&1.severity in ["high", "critical"]))
@@ -80,7 +84,16 @@ defmodule AveroCommand.Reports.SiteComparison do
       event_count: length(events)
     }
   rescue
-    _ -> %{site: site, exits: 0, gate_cycles: 0, payments: 0, incidents: 0, high_severity_incidents: 0, event_count: 0}
+    _ ->
+      %{
+        site: site,
+        exits: 0,
+        gate_cycles: 0,
+        payments: 0,
+        incidents: 0,
+        high_severity_incidents: 0,
+        event_count: 0
+      }
   end
 
   defp payment_event?(event) do
@@ -99,7 +112,7 @@ defmodule AveroCommand.Reports.SiteComparison do
     bottom_site = List.last(sorted_by_exits)
 
     # Find sites with high incident rates
-    sites_with_issues = Enum.filter(site_stats, & &1.high_severity_incidents > 0)
+    sites_with_issues = Enum.filter(site_stats, &(&1.high_severity_incidents > 0))
 
     # Create a summary incident for each site
     Enum.each(site_stats, fn stats ->
@@ -133,7 +146,8 @@ defmodule AveroCommand.Reports.SiteComparison do
         performance: performance,
         average_exits: round(avg_exits),
         sites_compared: site_count,
-        message: "Site #{stats.site}: #{stats.exits} exits (#{performance} vs #{round(avg_exits)} avg), #{stats.incidents} incidents"
+        message:
+          "Site #{stats.site}: #{stats.exits} exits (#{performance} vs #{round(avg_exits)} avg), #{stats.incidents} incidents"
       },
       suggested_actions: [
         %{"id" => "view_details", "label" => "View Details", "auto" => false},
@@ -161,8 +175,10 @@ defmodule AveroCommand.Reports.SiteComparison do
         bottom_site: bottom_site && bottom_site.site,
         bottom_site_exits: bottom_site && bottom_site.exits,
         sites_with_issues: Enum.map(sites_with_issues, & &1.site),
-        site_stats: Enum.map(site_stats, fn s -> %{site: s.site, exits: s.exits, incidents: s.incidents} end),
-        message: "Cross-site comparison: #{length(site_stats)} sites, avg #{round(avg_exits)} exits. Top: #{top_site && top_site.site} (#{top_site && top_site.exits}), #{length(sites_with_issues)} sites with critical incidents"
+        site_stats:
+          Enum.map(site_stats, fn s -> %{site: s.site, exits: s.exits, incidents: s.incidents} end),
+        message:
+          "Cross-site comparison: #{length(site_stats)} sites, avg #{round(avg_exits)} exits. Top: #{top_site && top_site.site} (#{top_site && top_site.exits}), #{length(sites_with_issues)} sites with critical incidents"
       },
       suggested_actions: [
         %{"id" => "view_dashboard", "label" => "View Dashboard", "auto" => false},

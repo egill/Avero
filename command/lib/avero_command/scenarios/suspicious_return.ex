@@ -17,8 +17,13 @@ defmodule AveroCommand.Scenarios.SuspiciousReturn do
   Evaluate if this event triggers the checkout-return scenario.
   Event comes through as event_type: "people" with data: %{"type" => "person.returned_to_store", ...}
   """
-  def evaluate(%{event_type: "people", data: %{"type" => "person.returned_to_store"} = data} = event) do
-    Logger.debug("CheckoutReturn: person #{event.person_id || data["person_id"]} returned to store")
+  def evaluate(
+        %{event_type: "people", data: %{"type" => "person.returned_to_store"} = data} = event
+      ) do
+    Logger.debug(
+      "CheckoutReturn: person #{event.person_id || data["person_id"]} returned to store"
+    )
+
     {:match, build_incident(event, data)}
   end
 

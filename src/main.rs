@@ -12,17 +12,19 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use parking_lot::Mutex;
 use tokio::sync::{mpsc, watch};
 use tracing::info;
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::EnvFilter;
 
-use gateway_poc::infra::{Config, Metrics};
-use gateway_poc::io::{
+use gateway::infra::{Config, Metrics};
+use gateway::io::analysis_logger::{AnalysisLogger, RotationStrategy};
+use gateway::io::{
     create_egress_channel, create_egress_writer, start_acc_listener, AccListenerConfig,
     MqttPublisher, Rs485Monitor,
 };
-use gateway_poc::services::{create_gate_worker, GateController};
+use gateway::services::{create_gate_worker, GateController};
 
 /// Gateway PoC - Automated retail gate control system
 #[derive(Parser, Debug)]
@@ -58,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(
         version = env!("CARGO_PKG_VERSION"),
         git_hash = option_env!("GIT_HASH").unwrap_or("unknown"),
-        "gateway_poc_starting"
+        "gateway_starting"
     );
 
     // Parse command line arguments using clap
@@ -68,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load_from_path(&args.config);
 
     // Start embedded MQTT broker with config
-    gateway_poc::infra::broker::start_embedded_broker(&config);
+    gateway::infra::broker::start_embedded_broker(&config);
 
     info!(
         config_file = %config.config_file(),
@@ -85,6 +87,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         prometheus_port = %config.prometheus_port(),
         "config_loaded"
     );
+
+    // Initialize analysis logger if enabled (for offline position data analysis)
+    let analysis_logger = if config.analysis_log_enabled() {
+        let rotation = match config.analysis_log_rotation() {
+            s if s.starts_with("size:") => {
+                let mb: u64 = s[5..].parse().unwrap_or(100);
+                RotationStrategy::Size(mb * 1024 * 1024)
+            }
+            _ => RotationStrategy::Daily,
+        };
+        Some(Arc::new(Mutex::new(AnalysisLogger::with_rotation(
+            config.analysis_log_dir(),
+            config.site_id(),
+            rotation,
+        ))))
+    } else {
+        None
+    };
 
     // Create shutdown signal
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -132,32 +152,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_tx_sampler = event_tx.clone();
 
     // Create watch channel for door state (lossless - latest value always available)
-    let (door_tx, door_rx) = watch::channel(gateway_poc::domain::types::DoorStatus::Unknown);
+    let (door_tx, door_rx) = watch::channel(gateway::domain::types::DoorStatus::Unknown);
 
     // Start RS485 monitor (with watch channel for door state changes)
-    let rs485_monitor = Rs485Monitor::new(&config).with_door_tx(door_tx);
+    // Clone door_tx since we also need it for the HTTP /door/simulate endpoint
+    let rs485_monitor = Rs485Monitor::new(&config).with_door_tx(door_tx.clone());
     let rs485_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
         rs485_monitor.run(rs485_shutdown).await;
     });
 
-    // Start MQTT client (with metrics for drop tracking)
+    // Start MQTT client (with metrics for drop tracking and position streaming)
     let mqtt_config = config.clone();
     let mqtt_tx = event_tx.clone();
     let mqtt_metrics = metrics.clone();
     let mqtt_shutdown = shutdown_rx.clone();
+    let mqtt_analysis_logger = analysis_logger.clone();
+    let mqtt_egress_sender = egress_sender.clone();
     tokio::spawn(async move {
-        if let Err(e) = gateway_poc::io::mqtt::start_mqtt_client(
+        if let Err(e) = gateway::io::mqtt::start_mqtt_client(
             &mqtt_config,
             mqtt_tx,
             mqtt_metrics,
             mqtt_shutdown,
+            mqtt_analysis_logger,
+            mqtt_egress_sender,
         )
         .await
         {
             tracing::error!(error = %e, "MQTT client error");
         }
     });
+
+    // Clone event_tx for the HTTP server's ACC simulation endpoint
+    let prom_event_tx = event_tx.clone();
 
     // Start ACC TCP listener (with metrics for drop tracking)
     let acc_config = AccListenerConfig {
@@ -179,13 +207,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let prom_metrics = metrics.clone();
         let prom_site_id = config.site_id().to_string();
         let prom_gate = gate.clone();
+        let prom_door_tx = door_tx.clone(); // For /door/simulate endpoint
         let prom_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
-            if let Err(e) = gateway_poc::io::prometheus::start_metrics_server(
+            if let Err(e) = gateway::io::prometheus::start_metrics_server(
                 prometheus_port,
                 prom_metrics,
                 prom_site_id,
                 Some(prom_gate),
+                Some(prom_event_tx),
+                Some(prom_door_tx),
                 prom_shutdown,
             )
             .await
@@ -239,8 +270,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
         // Start metrics egress publisher (separate from logging)
+        // Clone door_rx to get current gate state for heartbeat
         let metrics_egress = sender.clone();
         let metrics_for_egress = metrics.clone();
+        let metrics_door_rx = door_rx.clone();
         let egress_interval = config.mqtt_egress_metrics_interval_secs();
         tokio::spawn(async move {
             let mut interval =
@@ -248,13 +281,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 interval.tick().await;
                 let summary = metrics_for_egress.report(0, 0);
-                metrics_egress.send_metrics(summary);
+                let door_status = *metrics_door_rx.borrow();
+                metrics_egress.send_metrics(summary, door_status.as_str());
             }
         });
     }
 
     // Start tracker (main event processing loop)
-    let mut tracker = gateway_poc::services::Tracker::new(
+    let mut tracker = gateway::services::Tracker::new(
         config,
         gate_cmd_tx,
         journey_tx,

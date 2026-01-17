@@ -119,11 +119,12 @@ defmodule AveroCommand.Entities.Person do
       dwell_ms: nil
     }
 
-    %{state |
-      current_zone: event.zone,
-      state: :in_zone,
-      zones_visited: [zone_visit | state.zones_visited],
-      events: add_event(state.events, event)
+    %{
+      state
+      | current_zone: event.zone,
+        state: :in_zone,
+        zones_visited: [zone_visit | state.zones_visited],
+        events: add_event(state.events, event)
     }
   end
 
@@ -131,11 +132,12 @@ defmodule AveroCommand.Entities.Person do
     zones = update_zone_exit(state.zones_visited, event.zone, event.time, event.duration_ms)
     dwelled = dwelled_at_pos?(zones)
 
-    %{state |
-      current_zone: nil,
-      zones_visited: zones,
-      dwelled_at_pos: dwelled,
-      events: add_event(state.events, event)
+    %{
+      state
+      | current_zone: nil,
+        zones_visited: zones,
+        dwelled_at_pos: dwelled,
+        events: add_event(state.events, event)
     }
   end
 
@@ -151,10 +153,11 @@ defmodule AveroCommand.Entities.Person do
 
     gate_id = event.data["gate_id"] || event.gate_id
 
-    %{state |
-      state: new_state_atom,
-      current_gate: gate_id,
-      events: add_event(state.events, event)
+    %{
+      state
+      | state: new_state_atom,
+        current_gate: gate_id,
+        events: add_event(state.events, event)
     }
   end
 
@@ -165,25 +168,21 @@ defmodule AveroCommand.Entities.Person do
       time: event.time
     }
 
-    %{state |
-      payments: [payment | state.payments],
-      has_payment: true,
-      events: add_event(state.events, event)
+    %{
+      state
+      | payments: [payment | state.payments],
+        has_payment: true,
+        events: add_event(state.events, event)
     }
   end
 
   defp apply_event(state, %{event_type: "exit.confirmed"} = event) do
-    %{state |
-      state: :exited,
-      events: add_event(state.events, event)
-    }
+    %{state | state: :exited, events: add_event(state.events, event)}
   end
 
   defp apply_event(state, %{event_type: "exit.rejected"} = event) do
     # Exit was rejected, person stays at gate
-    %{state |
-      events: add_event(state.events, event)
-    }
+    %{state | events: add_event(state.events, event)}
   end
 
   defp apply_event(state, event) do

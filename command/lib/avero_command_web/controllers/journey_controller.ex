@@ -134,6 +134,7 @@ defmodule AveroCommandWeb.JourneyController do
 
   defp maybe_add_site(opts, nil), do: opts
   defp maybe_add_site(opts, ""), do: opts
+
   defp maybe_add_site(opts, site) do
     # Support comma-separated sites
     sites = String.split(site, ",") |> Enum.map(&String.trim/1)
@@ -143,14 +144,17 @@ defmodule AveroCommandWeb.JourneyController do
   defp maybe_add_exit_type(opts, nil), do: opts
   defp maybe_add_exit_type(opts, ""), do: opts
   defp maybe_add_exit_type(opts, "all"), do: opts
+
   defp maybe_add_exit_type(opts, exit_type) do
     # Map aliases to atoms
-    exit_type_atom = case exit_type do
-      "exits" -> :exits
-      "lost" -> :lost
-      "returns" -> :returns
-      other -> other
-    end
+    exit_type_atom =
+      case exit_type do
+        "exits" -> :exits
+        "lost" -> :lost
+        "returns" -> :returns
+        other -> other
+      end
+
     Keyword.put(opts, :exit_type, exit_type_atom)
   end
 
@@ -159,6 +163,7 @@ defmodule AveroCommandWeb.JourneyController do
   defp maybe_add_person_id(opts, person_id), do: Keyword.put(opts, :person_id, person_id)
 
   defp maybe_add_date_range(opts, nil, nil), do: opts
+
   defp maybe_add_date_range(opts, since, until_param) do
     opts
     |> then(fn o -> if since, do: add_since_filter(o, since), else: o end)
@@ -184,7 +189,9 @@ defmodule AveroCommandWeb.JourneyController do
   defp parse_datetime_or_date(str) do
     # Try ISO8601 datetime first
     case DateTime.from_iso8601(str) do
-      {:ok, dt, _} -> {:datetime, dt}
+      {:ok, dt, _} ->
+        {:datetime, dt}
+
       _ ->
         # Try date
         case Date.from_iso8601(str) do
@@ -224,18 +231,23 @@ defmodule AveroCommandWeb.JourneyController do
   end
 
   defp maybe_add_cursor(opts, nil, _), do: opts
+
   defp maybe_add_cursor(opts, cursor, direction) do
     case DateTime.from_iso8601(cursor) do
       {:ok, dt, _} ->
         dir = if direction == "prev", do: :prev, else: :next
+
         opts
         |> Keyword.put(:cursor, dt)
         |> Keyword.put(:direction, dir)
-      _ -> opts
+
+      _ ->
+        opts
     end
   end
 
   defp parse_limit(nil), do: @default_limit
+
   defp parse_limit(limit_str) do
     case Integer.parse(limit_str) do
       {n, ""} when n > 0 -> min(n, @max_limit)
@@ -315,9 +327,11 @@ defmodule AveroCommandWeb.JourneyController do
       journeys ->
         first = List.first(journeys)
         last = List.last(journeys)
+
         %{
           has_next: has_more,
-          has_prev: false,  # Would need reverse query to determine
+          # Would need reverse query to determine
+          has_prev: false,
           next_cursor: if(has_more && last, do: format_datetime(last.time), else: nil),
           prev_cursor: if(first, do: format_datetime(first.time), else: nil)
         }
@@ -326,7 +340,16 @@ defmodule AveroCommandWeb.JourneyController do
 
   defp summarize_filters(params) do
     params
-    |> Map.take(["site", "exit_type", "since", "until", "person_id", "pos_filter", "min_dwell", "has_acc"])
+    |> Map.take([
+      "site",
+      "exit_type",
+      "since",
+      "until",
+      "person_id",
+      "pos_filter",
+      "min_dwell",
+      "has_acc"
+    ])
     |> Enum.reject(fn {_, v} -> is_nil(v) or v == "" end)
     |> Map.new()
   end
@@ -364,8 +387,9 @@ defmodule AveroCommandWeb.JourneyController do
 
   defp safe_avg(journeys, value_fn) do
     values = journeys |> Enum.map(value_fn) |> Enum.reject(&is_nil/1)
+
     if length(values) > 0 do
-      Enum.sum(values) / length(values) |> round()
+      (Enum.sum(values) / length(values)) |> round()
     else
       nil
     end

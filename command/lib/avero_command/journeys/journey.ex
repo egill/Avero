@@ -12,49 +12,61 @@ defmodule AveroCommand.Journeys.Journey do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "person_journeys" do
-    field :time, :utc_datetime_usec
-    field :site, :string
-    field :person_id, :integer
-    field :session_id, :string
+    field(:time, :utc_datetime_usec)
+    field(:site, :string)
+    field(:person_id, :integer)
+    field(:session_id, :string)
 
     # Timing
-    field :started_at, :utc_datetime_usec
-    field :ended_at, :utc_datetime_usec
-    field :duration_ms, :integer
+    field(:started_at, :utc_datetime_usec)
+    field(:ended_at, :utc_datetime_usec)
+    field(:duration_ms, :integer)
 
     # Outcome
-    field :outcome, :string  # paid_exit, unpaid_exit, abandoned
-    field :exit_type, :string  # exit_confirmed, tracking_lost, returned_to_store
-    field :authorized, :boolean
-    field :auth_method, :string
-    field :receipt_id, :string
+    # paid_exit, unpaid_exit, abandoned
+    field(:outcome, :string)
+    # exit_confirmed, tracking_lost, returned_to_store
+    field(:exit_type, :string)
+    field(:authorized, :boolean)
+    field(:auth_method, :string)
+    field(:receipt_id, :string)
 
     # Gate details
-    field :gate_opened_by, :string  # xovis or sensor
-    field :tailgated, :boolean, default: false
-    field :gate_cmd_at, :utc_datetime_usec  # When gate command was sent
-    field :gate_opened_at, :utc_datetime_usec  # When gate opened (from RS485)
+    # xovis or sensor
+    field(:gate_opened_by, :string)
+    field(:tailgated, :boolean, default: false)
+    # When gate command was sent
+    field(:gate_cmd_at, :utc_datetime_usec)
+    # When gate opened (from RS485)
+    field(:gate_opened_at, :utc_datetime_usec)
 
     # ACC (payment terminal) correlation
-    field :acc_matched, :boolean, default: false
+    field(:acc_matched, :boolean, default: false)
 
     # Payment details
-    field :payment_zone, :string  # Which POS zone they paid at
-    field :total_pos_dwell_ms, :integer  # Sum of all POS zone dwell times
+    # Which POS zone they paid at
+    field(:payment_zone, :string)
+    # Sum of all POS zone dwell times
+    field(:total_pos_dwell_ms, :integer)
 
     # Dwell tracking
-    field :dwell_threshold_met, :boolean, default: false
-    field :dwell_zone, :string  # Zone where dwell threshold was met
+    field(:dwell_threshold_met, :boolean, default: false)
+    # Zone where dwell threshold was met
+    field(:dwell_zone, :string)
 
     # Group tracking (ACC group = people at POS together when payment arrived)
-    field :is_group, :boolean, default: false  # True if part of ACC group (member_count > 1)
-    field :member_count, :integer, default: 1  # Number of people in the ACC group
-    field :group_id, :integer  # Unused (legacy)
-    field :group_member_ids, {:array, :integer}, default: []  # Track IDs of all group members
+    # True if part of ACC group (member_count > 1)
+    field(:is_group, :boolean, default: false)
+    # Number of people in the ACC group
+    field(:member_count, :integer, default: 1)
+    # Unused (legacy)
+    field(:group_id, :integer)
+    # Track IDs of all group members
+    field(:group_member_ids, {:array, :integer}, default: [])
 
     # Full path data
-    field :zones_visited, {:array, :map}, default: []
-    field :events, {:array, :map}, default: []
+    field(:zones_visited, {:array, :map}, default: [])
+    field(:events, {:array, :map}, default: [])
   end
 
   def changeset(journey, attrs) do

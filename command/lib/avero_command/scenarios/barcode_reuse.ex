@@ -13,7 +13,8 @@ defmodule AveroCommand.Scenarios.BarcodeReuse do
   alias AveroCommand.Store
 
   # Time window to check for reuse (in seconds)
-  @reuse_window_seconds 3600  # 1 hour
+  # 1 hour
+  @reuse_window_seconds 3600
 
   @doc """
   Evaluate if this event triggers the barcode-reuse scenario.
@@ -39,7 +40,10 @@ defmodule AveroCommand.Scenarios.BarcodeReuse do
     recent_uses = get_recent_barcode_uses(site, barcode, since)
 
     if length(recent_uses) > 0 do
-      Logger.warning("BarcodeReuse: barcode #{barcode} used #{length(recent_uses) + 1} times in #{@reuse_window_seconds}s")
+      Logger.warning(
+        "BarcodeReuse: barcode #{barcode} used #{length(recent_uses) + 1} times in #{@reuse_window_seconds}s"
+      )
+
       {:match, build_incident(event, data, barcode, recent_uses)}
     else
       :no_match
@@ -84,7 +88,8 @@ defmodule AveroCommand.Scenarios.BarcodeReuse do
         first_use: first_use,
         gate_id: gate_id,
         window_hours: div(@reuse_window_seconds, 3600),
-        message: "Barcode #{mask_barcode(barcode)} used #{use_count} times in #{div(@reuse_window_seconds, 3600)} hour(s)"
+        message:
+          "Barcode #{mask_barcode(barcode)} used #{use_count} times in #{div(@reuse_window_seconds, 3600)} hour(s)"
       },
       suggested_actions: [
         %{"id" => "block_barcode", "label" => "Block Barcode", "auto" => false},

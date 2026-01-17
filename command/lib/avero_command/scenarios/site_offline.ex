@@ -103,7 +103,8 @@ defmodule AveroCommand.Scenarios.SiteOffline do
         offline_minutes: round(offline_minutes),
         last_event_time: last_event_time,
         threshold_minutes: @offline_threshold_minutes,
-        message: "Site #{site} has been offline for #{round(offline_minutes)} minutes (last event: #{Calendar.strftime(last_event_time, "%H:%M:%S")})"
+        message:
+          "Site #{site} has been offline for #{round(offline_minutes)} minutes (last event: #{Calendar.strftime(last_event_time, "%H:%M:%S")})"
       },
       suggested_actions: [
         %{"id" => "check_network", "label" => "Check Network", "auto" => false},

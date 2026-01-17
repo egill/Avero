@@ -1,5 +1,5 @@
 ---
-description: Deploy gateway-poc or command app to production servers
+description: Deploy gateway or command app to production servers
 allowed-tools: Bash, Read
 argument-hint: <target> (netto|avero|command|tui-netto|tui-avero|grafana)
 ---
@@ -20,7 +20,7 @@ Deploy to production servers. Usage: `/deploy <target>`
 
 ## Gateway Deployment
 
-Deploys the main gateway-poc binary to Raspberry Pi hosts.
+Deploys the main gateway binary to Raspberry Pi hosts.
 
 **Steps**: Run tests, cross-compile with zig for aarch64, copy binary, restart systemd service, verify logs.
 

@@ -1,11 +1,17 @@
 //! MQTT client for receiving Xovis sensor data
 
+use crate::domain::journey::epoch_ms;
 use crate::domain::types::{
-    EventType, Frame, GeometryId, ParsedEvent, TimestampValue, TrackId, XovisMessage,
+    EventType, Frame, GeometryId, ParsedEvent, TimestampValue, TrackId, TrackedObject,
+    XovisMessage,
 };
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
+use crate::io::analysis_logger::AnalysisLogger;
+use crate::io::egress_channel::{EgressSender, PositionPayload};
+use parking_lot::Mutex;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use time::format_description::well_known::Rfc3339;
@@ -14,15 +20,79 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
+/// Bit flag for Xovis GROUP tracks (high bit set)
+const XOVIS_GROUP_BIT: i64 = 0x80000000;
+
+/// Throttles position updates to reduce bandwidth
+/// Only publishes when:
+/// - At least 100ms since last publish
+/// - Position has moved more than 5cm
+struct PositionThrottler {
+    /// Last published position per track_id [x, y, z]
+    last_positions: FxHashMap<i64, [f64; 3]>,
+    /// Last publish time
+    last_publish: Instant,
+    /// Minimum interval between publishes (100ms)
+    min_interval: Duration,
+    /// Minimum distance to trigger publish (5cm = 0.05m)
+    min_distance: f64,
+}
+
+impl PositionThrottler {
+    fn new() -> Self {
+        Self {
+            last_positions: FxHashMap::default(),
+            last_publish: Instant::now() - Duration::from_millis(200), // Allow immediate first publish
+            min_interval: Duration::from_millis(100),
+            min_distance: 0.05, // 5cm
+        }
+    }
+
+    /// Check if enough time has passed for a new batch
+    fn should_publish_batch(&self) -> bool {
+        self.last_publish.elapsed() >= self.min_interval
+    }
+
+    /// Mark batch as published
+    fn mark_published(&mut self) {
+        self.last_publish = Instant::now();
+    }
+
+    /// Check if a specific track has moved enough to publish
+    /// Returns true if the track should be published
+    fn should_publish_track(&mut self, track_id: i64, pos: [f64; 3]) -> bool {
+        if let Some(last_pos) = self.last_positions.get(&track_id) {
+            let dx = pos[0] - last_pos[0];
+            let dy = pos[1] - last_pos[1];
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance < self.min_distance {
+                return false;
+            }
+        }
+        // Update last position
+        self.last_positions.insert(track_id, pos);
+        true
+    }
+
+    /// Remove stale tracks (not seen in a while)
+    fn cleanup_stale(&mut self, active_track_ids: &[i64]) {
+        self.last_positions
+            .retain(|tid, _| active_track_ids.contains(tid));
+    }
+}
+
 /// Start the MQTT client and send parsed events to the channel
 ///
 /// Events are sent via try_send to avoid blocking the MQTT eventloop.
 /// Dropped events are counted in metrics and logged (rate-limited).
+/// If egress_sender is provided, position updates are streamed at 10Hz with 5cm threshold.
 pub async fn start_mqtt_client(
     config: &Config,
     event_tx: mpsc::Sender<ParsedEvent>,
     metrics: Arc<Metrics>,
     mut shutdown: watch::Receiver<bool>,
+    analysis_logger: Option<Arc<Mutex<AnalysisLogger>>>,
+    egress_sender: Option<EgressSender>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut mqttoptions = MqttOptions::new("gateway-poc", config.mqtt_host(), config.mqtt_port());
     mqttoptions.set_keep_alive(Duration::from_secs(30));
@@ -39,6 +109,9 @@ pub async fn start_mqtt_client(
 
     // Rate-limit drop warnings to 1 per second
     let mut last_drop_warn = Instant::now() - Duration::from_secs(2);
+
+    // Position throttler for streaming positions at 10Hz with 5cm threshold
+    let mut position_throttler = PositionThrottler::new();
 
     loop {
         tokio::select! {
@@ -59,7 +132,58 @@ pub async fn start_mqtt_client(
 
                         match payload {
                             Ok(json_str) => {
-                                let events = parse_xovis_message(json_str, received_at);
+                                // Log to analysis file if enabled
+                                if let Some(ref logger) = analysis_logger {
+                                    // Try to parse for ts_event extraction
+                                    let parsed: Option<serde_json::Value> =
+                                        serde_json::from_str(json_str).ok();
+                                    logger.lock().log_mqtt(topic, json_str, parsed.as_ref());
+                                }
+
+                                // Parse and extract tracked objects for position streaming
+                                let (events, tracked_objects) = parse_xovis_message_with_positions(json_str, received_at);
+
+                                // Stream positions if egress sender is available and throttle allows
+                                if let Some(ref sender) = egress_sender {
+                                    if position_throttler.should_publish_batch() && !tracked_objects.is_empty() {
+                                        let ts = epoch_ms();
+                                        let mut published_any = false;
+
+                                        for obj in &tracked_objects {
+                                            // Skip GROUP tracks (high bit set)
+                                            if obj.track_id & XOVIS_GROUP_BIT != 0 {
+                                                continue;
+                                            }
+                                            if obj.position.len() >= 3 {
+                                                let pos = [obj.position[0], obj.position[1], obj.position[2]];
+                                                if position_throttler.should_publish_track(obj.track_id, pos) {
+                                                    sender.send_position(PositionPayload {
+                                                        site: None,
+                                                        ts,
+                                                        tid: obj.track_id,
+                                                        obj_type: obj.obj_type.clone(),
+                                                        x: pos[0],
+                                                        y: pos[1],
+                                                        z: pos[2],
+                                                        zone: None,
+                                                        auth: false,
+                                                        ctx: Some("continuous".to_string()),
+                                                    });
+                                                    published_any = true;
+                                                }
+                                            }
+                                        }
+
+                                        if published_any {
+                                            position_throttler.mark_published();
+                                        }
+
+                                        // Cleanup stale tracks periodically
+                                        let active_ids: Vec<i64> = tracked_objects.iter().map(|o| o.track_id).collect();
+                                        position_throttler.cleanup_stale(&active_ids);
+                                    }
+                                }
+
                                 if !events.is_empty() {
                                     debug!(topic = %topic, event_count = %events.len(), "MQTT message with events");
                                 }
@@ -104,25 +228,38 @@ pub async fn start_mqtt_client(
 
 /// Parse a Xovis JSON message and extract events
 pub fn parse_xovis_message(json_str: &str, received_at: Instant) -> Vec<ParsedEvent> {
+    let (events, _) = parse_xovis_message_with_positions(json_str, received_at);
+    events
+}
+
+/// Parse a Xovis JSON message and extract both events and tracked objects
+/// Returns (events, tracked_objects) for position streaming
+fn parse_xovis_message_with_positions(
+    json_str: &str,
+    received_at: Instant,
+) -> (Vec<ParsedEvent>, Vec<TrackedObject>) {
     let mut parsed_events = Vec::with_capacity(8);
+    let mut all_tracked_objects = Vec::with_capacity(16);
 
     let message: XovisMessage = match serde_json::from_str(json_str) {
         Ok(m) => m,
         Err(e) => {
             debug!(error = %e, "Failed to parse Xovis message");
-            return parsed_events;
+            return (parsed_events, all_tracked_objects);
         }
     };
 
     let Some(live_data) = message.live_data else {
-        return parsed_events;
+        return (parsed_events, all_tracked_objects);
     };
 
     for frame in live_data.frames {
         parsed_events.extend(parse_frame(&frame, received_at));
+        // Collect all tracked objects from all frames
+        all_tracked_objects.extend(frame.tracked_objects.into_iter());
     }
 
-    parsed_events
+    (parsed_events, all_tracked_objects)
 }
 
 /// Parse ISO 8601 timestamp to epoch milliseconds

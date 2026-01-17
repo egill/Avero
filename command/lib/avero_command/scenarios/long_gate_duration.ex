@@ -16,16 +16,22 @@ defmodule AveroCommand.Scenarios.LongGateDuration do
 
   # Base thresholds in milliseconds (for 1 person)
   # Add ~10 seconds per additional crossing
-  @base_warning_ms 30_000        # 30 seconds for 1 person
-  @base_elevated_ms 60_000       # 60 seconds (gate stuck)
-  @per_crossing_allowance_ms 10_000  # 10 seconds per additional crossing
+  # 30 seconds for 1 person
+  @base_warning_ms 30_000
+  # 60 seconds (gate stuck)
+  @base_elevated_ms 60_000
+  # 10 seconds per additional crossing
+  @per_crossing_allowance_ms 10_000
 
   @doc """
   Evaluate if this event triggers the long-gate-duration scenario.
   Event comes through with event_type: "gates" and data: %{"type" => "gate.closed", ...}
   """
   def evaluate(%{event_type: "gates", data: %{"type" => "gate.closed"} = data} = event) do
-    Logger.info("LongGateDuration: evaluating gate.closed event, duration=#{data["open_duration_ms"]}")
+    Logger.info(
+      "LongGateDuration: evaluating gate.closed event, duration=#{data["open_duration_ms"]}"
+    )
+
     check_duration(data, event)
   end
 
@@ -38,7 +44,8 @@ defmodule AveroCommand.Scenarios.LongGateDuration do
 
   def evaluate(_event), do: :no_match
 
-  defp check_duration(%{"open_duration_ms" => duration_ms} = data, event) when is_integer(duration_ms) do
+  defp check_duration(%{"open_duration_ms" => duration_ms} = data, event)
+       when is_integer(duration_ms) do
     gate_id = Map.get(data, "gate_id", 0)
 
     # Skip gate_id 0 (invalid)

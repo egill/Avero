@@ -16,7 +16,10 @@ defmodule AveroCommand.Scenarios.ClockSkew do
   @doc """
   Evaluate if this event triggers the clock-skew scenario.
   """
-  def evaluate(%{event_type: "sensors", data: %{"type" => "sensor.status"} = data, time: event_time} = event) do
+  def evaluate(
+        %{event_type: "sensors", data: %{"type" => "sensor.status"} = data, time: event_time} =
+          event
+      ) do
     sensor_timestamp = parse_sensor_timestamp(data)
 
     if sensor_timestamp do
@@ -39,18 +42,23 @@ defmodule AveroCommand.Scenarios.ClockSkew do
     timestamp = data["sensor_timestamp"] || data["device_timestamp"]
 
     case timestamp do
-      nil -> nil
+      nil ->
+        nil
+
       ts when is_binary(ts) ->
         case DateTime.from_iso8601(ts) do
           {:ok, dt, _} -> dt
           _ -> nil
         end
+
       ts when is_integer(ts) ->
         case DateTime.from_unix(ts) do
           {:ok, dt} -> dt
           _ -> nil
         end
-      _ -> nil
+
+      _ ->
+        nil
     end
   end
 
@@ -69,7 +77,8 @@ defmodule AveroCommand.Scenarios.ClockSkew do
         gateway_timestamp: event.time,
         skew_seconds: skew_seconds,
         max_allowed_seconds: @max_skew_seconds,
-        message: "Sensor #{sensor_id} clock is #{skew_seconds}s off from gateway (max: #{@max_skew_seconds}s)"
+        message:
+          "Sensor #{sensor_id} clock is #{skew_seconds}s off from gateway (max: #{@max_skew_seconds}s)"
       },
       suggested_actions: [
         %{"id" => "sync_time", "label" => "Sync Sensor Time", "auto" => false},

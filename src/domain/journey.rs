@@ -127,10 +127,12 @@ pub struct Journey {
     pub acc_matched: bool,
     pub acc_group_size: u8, // 1 = solo, 2+ = group (people at POS together)
     pub acc_group_tids: SmallVec<[TrackId; 4]>, // Track IDs of all group members
-    pub gate_cmd_at: Option<u64>, // epoch ms
+    pub gate_cmd_at: Option<u64>,    // epoch ms (first gate command)
     pub gate_opened_at: Option<u64>, // epoch ms from RS485
     pub gate_was_open: bool,
-    pub started_at: u64,       // epoch ms
+    pub gate_open_count: u8,         // number of gate opens issued (max 2)
+    pub gate_zone_exited: bool,      // true if exited GATE zone without exiting store
+    pub started_at: u64,             // epoch ms
     pub ended_at: Option<u64>, // epoch ms
     pub crossed_entry: bool,
     pub exit_inferred: bool, // true if exit was inferred (track lost in exit corridor)
@@ -146,8 +148,8 @@ impl Journey {
     /// # Example
     ///
     /// ```
-    /// use gateway_poc::domain::journey::Journey;
-    /// use gateway_poc::domain::types::TrackId;
+    /// use gateway::domain::journey::Journey;
+    /// use gateway::domain::types::TrackId;
     ///
     /// let journey = Journey::new(TrackId(100));
     /// assert_eq!(journey.current_track_id(), TrackId(100));
@@ -169,6 +171,8 @@ impl Journey {
             gate_cmd_at: None,
             gate_opened_at: None,
             gate_was_open: false,
+            gate_open_count: 0,
+            gate_zone_exited: false,
             started_at: now,
             ended_at: None,
             crossed_entry: false,

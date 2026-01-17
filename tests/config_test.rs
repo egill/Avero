@@ -1,7 +1,7 @@
 //! Integration tests for configuration loading
 
-use gateway_poc::domain::types::GeometryId;
-use gateway_poc::infra::{Config, GateMode};
+use gateway::domain::types::GeometryId;
+use gateway::infra::{Config, GateMode};
 use std::io::Write;
 use tempfile::NamedTempFile;
 

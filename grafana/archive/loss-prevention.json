@@ -1,0 +1,792 @@
+{
+  "description": "Dedicated dashboard for loss prevention analysis - unauthorized exits, tailgating, and suspicious behavior patterns",
+  "editable": true,
+  "id": 8,
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Percentage of exits that were unauthorized",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT ROUND(COUNT(*) FILTER (WHERE data->>'authorized' = 'false') * 100.0 / NULLIF(COUNT(*), 0), 1) as value FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Loss Rate % (Today)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Total number of unauthorized exits in the last 24 hours",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as value FROM events WHERE data->>'type' = 'exit.confirmed' AND data->>'authorized' = 'false' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Unauthorized Exits (Today)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Gate cycles where multiple people exited",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as value FROM incidents WHERE type = 'tailgating_detected' AND created_at > NOW() - INTERVAL '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Tailgating Incidents (Today)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "People who visited POS zone but didn't pay",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "sum(increase(gateway_pos_visit_unpaid_total{site=\"NETTO-GRANDI\"}[24h])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "title": "POS Visits Without Payment (Today)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Daily loss rate percentage over the past week",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', time) as time, 'Loss Rate %' as metric, ROUND(COUNT(*) FILTER (WHERE data->>'authorized' = 'false') * 100.0 / NULLIF(COUNT(*), 0), 2) as value FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '7 days' GROUP BY 1 HAVING COUNT(*) > 0 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Loss Rate Trend (7 Days)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "When unauthorized exits occur throughout the day",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "red",
+            "mode": "fixed"
+          },
+          "custom": {
+            "barMaxWidth": 50,
+            "drawStyle": "bars",
+            "fillOpacity": 80
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 6,
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', time) as time, 'Unauthorized' as metric, COUNT(*) as value FROM events WHERE data->>'type' = 'exit.confirmed' AND data->>'authorized' = 'false' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Unauthorized Exits by Hour",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "When tailgating incidents occur throughout the day",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "orange",
+            "mode": "fixed"
+          },
+          "custom": {
+            "barMaxWidth": 50,
+            "drawStyle": "bars",
+            "fillOpacity": 80
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 7,
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 hour', created_at) as time, 'Tailgating' as metric, COUNT(*) as value FROM incidents WHERE type = 'tailgating_detected' AND created_at > NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Tailgating Incidents by Hour",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Breakdown of all incident types",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 8,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "xField": "Incident Type"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT type as \"Incident Type\", COUNT(*)::bigint as \"Count\" FROM incidents WHERE created_at > NOW() - INTERVAL '7 days' GROUP BY type ORDER BY \"Count\" DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Incidents by Type (7 Days)",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Which days have highest loss rates",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 9,
+      "options": {
+        "orientation": "vertical",
+        "showValue": "always",
+        "xField": "Day"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT CASE EXTRACT(dow FROM time) WHEN 0 THEN 'Sunday' WHEN 1 THEN 'Monday' WHEN 2 THEN 'Tuesday' WHEN 3 THEN 'Wednesday' WHEN 4 THEN 'Thursday' WHEN 5 THEN 'Friday' WHEN 6 THEN 'Saturday' END as \"Day\", ROUND(COUNT(*) FILTER (WHERE data->>'authorized' = 'false') * 100.0 / NULLIF(COUNT(*), 0), 1) as \"Loss Rate %\" FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '30 days' GROUP BY EXTRACT(dow FROM time) ORDER BY EXTRACT(dow FROM time)",
+          "refId": "A"
+        }
+      ],
+      "title": "Loss Rate by Day of Week",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Last 50 unauthorized exit events with details",
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Person ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Gate"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 10,
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT time as \"Time\", data->>'person_id' as \"Person ID\", data->>'gate_id' as \"Gate\", COALESCE(data->>'reason', 'unknown') as \"Reason\", data->>'dwell_time_ms' as \"Dwell (ms)\" FROM events WHERE data->>'type' = 'exit.confirmed' AND data->>'authorized' = 'false' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' ORDER BY time DESC LIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Unauthorized Exits",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Last 25 tailgating incidents with details",
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Incident ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "id": 11,
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT created_at as \"Time\", id as \"Incident ID\", context->>'gate_id' as \"Gate\", context->>'person_count' as \"People Count\", context->>'cycle_duration_ms' as \"Cycle Duration (ms)\", status as \"Status\" FROM incidents WHERE type = 'tailgating_detected' AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC LIMIT 25",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Tailgating Incidents",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Exits where person spent less than 30 seconds in store - potentially suspicious",
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Authorized"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "true": {
+                        "color": "green",
+                        "text": "Yes"
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
+                      "false": {
+                        "color": "red",
+                        "text": "No"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "id": 12,
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "table",
+          "rawSql": "SELECT time as \"Time\", data->>'person_id' as \"Person ID\", data->>'gate_id' as \"Gate\", ROUND((data->>'dwell_time_ms')::numeric / 1000, 1) as \"Dwell (s)\", data->>'authorized' as \"Authorized\" FROM events WHERE data->>'type' = 'exit.confirmed' AND (data->>'dwell_time_ms')::int < 30000 AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '24 hours' ORDER BY time DESC LIMIT 30",
+          "refId": "A"
+        }
+      ],
+      "title": "Quick Exits (Dwell < 30s)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Daily authorization success rate - target is 100%",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "pointSize": 8,
+            "showPoints": "always"
+          },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 90
+              },
+              {
+                "color": "green",
+                "value": 98
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "id": 13,
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket('1 day', time) as time, 'Authorization Rate' as metric, ROUND(COUNT(*) FILTER (WHERE data->>'authorized' = 'true') * 100.0 / NULLIF(COUNT(*), 0), 1) as value FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '7 days' GROUP BY 1 HAVING COUNT(*) > 0 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Authorization Rate % (7 Day Trend)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "description": "Ratio of payments to exits - should be ~1.0, lower indicates loss",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "pointSize": 8,
+            "showPoints": "always"
+          },
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.98
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "id": 14,
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "format": "time_series",
+          "rawSql": "WITH payments AS (SELECT time_bucket('1 day', time) as day, COUNT(*) as cnt FROM events WHERE event_type = 'payments' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '7 days' GROUP BY 1), exits AS (SELECT time_bucket('1 day', time) as day, COUNT(*) as cnt FROM events WHERE data->>'type' = 'exit.confirmed' AND site = 'AP-NETTO-GR-01' AND time > NOW() - INTERVAL '7 days' GROUP BY 1) SELECT COALESCE(p.day, e.day) as time, 'Payment:Exit' as metric, ROUND(COALESCE(p.cnt, 0)::float / NULLIF(e.cnt, 0), 2) as value FROM payments p FULL OUTER JOIN exits e ON p.day = e.day ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Payment:Exit Ratio (7 Day Trend)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 37,
+  "tags": [
+    "avero",
+    "loss-prevention",
+    "security",
+    "timescaledb"
+  ],
+  "timezone": "browser",
+  "title": "Loss Prevention",
+  "uid": "loss-prevention",
+  "version": 2
+}

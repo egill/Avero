@@ -30,13 +30,14 @@ defmodule AveroCommand.Store do
   """
   def recent_events(limit \\ 100, site \\ nil) do
     query =
-      from e in Event,
+      from(e in Event,
         order_by: [desc: e.time],
         limit: ^limit
+      )
 
     query =
       if site do
-        from e in query, where: e.site == ^site
+        from(e in query, where: e.site == ^site)
       else
         query
       end
@@ -85,7 +86,10 @@ defmodule AveroCommand.Store do
     |> Repo.all()
   rescue
     e ->
-      Logger.warning("Store.events_for_person failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      Logger.warning(
+        "Store.events_for_person failed: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
       []
   end
 
@@ -124,17 +128,22 @@ defmodule AveroCommand.Store do
     Repo.all(query)
   rescue
     e ->
-      Logger.warning("Store.events_for_person_extended failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      Logger.warning(
+        "Store.events_for_person_extended failed: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
       []
   end
 
   defp coerce_to_integer(val) when is_integer(val), do: val
+
   defp coerce_to_integer(val) when is_binary(val) do
     case Integer.parse(val) do
       {int, ""} -> int
       _ -> nil
     end
   end
+
   defp coerce_to_integer(_), do: nil
 
   @doc """
@@ -150,7 +159,10 @@ defmodule AveroCommand.Store do
     |> Repo.all()
   rescue
     e ->
-      Logger.warning("Store.get_events_in_range failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      Logger.warning(
+        "Store.get_events_in_range failed: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
       []
   end
 
@@ -168,7 +180,10 @@ defmodule AveroCommand.Store do
     |> Repo.one()
   rescue
     e ->
-      Logger.warning("Store.count_backward_crossings failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      Logger.warning(
+        "Store.count_backward_crossings failed: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
       0
   end
 
@@ -233,7 +248,10 @@ defmodule AveroCommand.Store do
     }
   rescue
     e ->
-      Logger.warning("Store.get_gate_timing_stats failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      Logger.warning(
+        "Store.get_gate_timing_stats failed: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
       %{total_cycles: 0, min_ms: 0, max_ms: 0, avg_ms: 0, long_openings: 0, by_gate: %{}}
   end
 
@@ -247,17 +265,24 @@ defmodule AveroCommand.Store do
 
     @primary_key {:site, :string, []}
     schema "site_configs" do
-      field :name, :string
-      field :timezone, :string
-      field :operating_hours, :map
-      field :scenario_config, :map
-      field :notification_config, :map
+      field(:name, :string)
+      field(:timezone, :string)
+      field(:operating_hours, :map)
+      field(:scenario_config, :map)
+      field(:notification_config, :map)
       timestamps(inserted_at: :created_at)
     end
 
     def changeset(config, attrs) do
       config
-      |> cast(attrs, [:site, :name, :timezone, :operating_hours, :scenario_config, :notification_config])
+      |> cast(attrs, [
+        :site,
+        :name,
+        :timezone,
+        :operating_hours,
+        :scenario_config,
+        :notification_config
+      ])
       |> validate_required([:site, :name])
     end
   end
@@ -269,7 +294,10 @@ defmodule AveroCommand.Store do
     Repo.all(SiteConfig)
   rescue
     e ->
-      Logger.warning("Store.list_site_configs failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      Logger.warning(
+        "Store.list_site_configs failed: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
       []
   end
 
@@ -280,7 +308,10 @@ defmodule AveroCommand.Store do
     Repo.get(SiteConfig, site)
   rescue
     e ->
-      Logger.warning("Store.get_site_config failed: #{Exception.format(:error, e, __STACKTRACE__)}")
+      Logger.warning(
+        "Store.get_site_config failed: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
       nil
   end
 end

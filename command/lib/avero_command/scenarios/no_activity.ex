@@ -13,8 +13,10 @@ defmodule AveroCommand.Scenarios.NoActivity do
   alias AveroCommand.Store
 
   # Thresholds in seconds
-  @warning_threshold_seconds 300   # 5 minutes
-  @critical_threshold_seconds 900  # 15 minutes
+  # 5 minutes
+  @warning_threshold_seconds 300
+  # 15 minutes
+  @critical_threshold_seconds 900
 
   @doc """
   Evaluate if this event triggers the no-activity scenario.
@@ -87,7 +89,14 @@ defmodule AveroCommand.Scenarios.NoActivity do
       context: %{
         inactivity_seconds: inactivity_seconds,
         inactivity_minutes: inactivity_minutes,
-        threshold_minutes: div(if(severity == "critical", do: @critical_threshold_seconds, else: @warning_threshold_seconds), 60),
+        threshold_minutes:
+          div(
+            if(severity == "critical",
+              do: @critical_threshold_seconds,
+              else: @warning_threshold_seconds
+            ),
+            60
+          ),
         message: "No activity for #{inactivity_minutes} minutes"
       },
       suggested_actions: [
