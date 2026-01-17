@@ -12,12 +12,14 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use parking_lot::Mutex;
 use tokio::sync::{mpsc, watch};
 use tracing::info;
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::EnvFilter;
 
 use gateway::infra::{Config, Metrics};
+use gateway::io::analysis_logger::{AnalysisLogger, RotationStrategy};
 use gateway::io::{
     create_egress_channel, create_egress_writer, start_acc_listener, AccListenerConfig,
     MqttPublisher, Rs485Monitor,
@@ -86,6 +88,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "config_loaded"
     );
 
+    // Initialize analysis logger if enabled (for offline position data analysis)
+    let analysis_logger = if config.analysis_log_enabled() {
+        let rotation = match config.analysis_log_rotation() {
+            s if s.starts_with("size:") => {
+                let mb: u64 = s[5..].parse().unwrap_or(100);
+                RotationStrategy::Size(mb * 1024 * 1024)
+            }
+            _ => RotationStrategy::Daily,
+        };
+        Some(Arc::new(Mutex::new(AnalysisLogger::with_rotation(
+            config.analysis_log_dir(),
+            config.site_id(),
+            rotation,
+        ))))
+    } else {
+        None
+    };
+
     // Create shutdown signal
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -135,23 +155,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (door_tx, door_rx) = watch::channel(gateway::domain::types::DoorStatus::Unknown);
 
     // Start RS485 monitor (with watch channel for door state changes)
-    let rs485_monitor = Rs485Monitor::new(&config).with_door_tx(door_tx);
+    // Clone door_tx since we also need it for the HTTP /door/simulate endpoint
+    let rs485_monitor = Rs485Monitor::new(&config).with_door_tx(door_tx.clone());
     let rs485_shutdown = shutdown_rx.clone();
     tokio::spawn(async move {
         rs485_monitor.run(rs485_shutdown).await;
     });
 
-    // Start MQTT client (with metrics for drop tracking)
+    // Start MQTT client (with metrics for drop tracking and position streaming)
     let mqtt_config = config.clone();
     let mqtt_tx = event_tx.clone();
     let mqtt_metrics = metrics.clone();
     let mqtt_shutdown = shutdown_rx.clone();
+    let mqtt_analysis_logger = analysis_logger.clone();
+    let mqtt_egress_sender = egress_sender.clone();
     tokio::spawn(async move {
         if let Err(e) = gateway::io::mqtt::start_mqtt_client(
             &mqtt_config,
             mqtt_tx,
             mqtt_metrics,
             mqtt_shutdown,
+            mqtt_analysis_logger,
+            mqtt_egress_sender,
         )
         .await
         {
@@ -182,6 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let prom_metrics = metrics.clone();
         let prom_site_id = config.site_id().to_string();
         let prom_gate = gate.clone();
+        let prom_door_tx = door_tx.clone(); // For /door/simulate endpoint
         let prom_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
             if let Err(e) = gateway::io::prometheus::start_metrics_server(
@@ -190,6 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 prom_site_id,
                 Some(prom_gate),
                 Some(prom_event_tx),
+                Some(prom_door_tx),
                 prom_shutdown,
             )
             .await

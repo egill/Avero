@@ -3,7 +3,7 @@
 //! Exposes gateway metrics in Prometheus text format at /metrics.
 //! Uses hyper for the HTTP server.
 
-use crate::domain::types::{EventType, ParsedEvent, TrackId};
+use crate::domain::types::{DoorStatus, EventType, ParsedEvent, TrackId};
 use crate::infra::metrics::{
     Metrics, MetricsSummary, METRICS_BUCKET_BOUNDS, METRICS_NUM_BUCKETS, METRICS_STITCH_DIST_BOUNDS,
 };
@@ -599,6 +599,7 @@ async fn handle_request<G: GateCommand>(
     site_id: Arc<String>,
     gate: Option<Arc<G>>,
     event_tx: Option<mpsc::Sender<ParsedEvent>>,
+    door_tx: Option<watch::Sender<DoorStatus>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
@@ -712,6 +713,63 @@ async fn handle_request<G: GateCommand>(
             .header("Access-Control-Allow-Headers", "Content-Type")
             .body(Full::new(Bytes::from("")))
             .expect("static response should not fail")),
+        // Door state simulation endpoint - POST /door/simulate?status=moving|open|closed
+        // Used by mock_cloudplus to simulate RS485 door state changes
+        (&Method::POST, "/door/simulate") => {
+            if let Some(ref door_tx) = door_tx {
+                let query = req.uri().query().unwrap_or("");
+                let status_str = query
+                    .split('&')
+                    .find_map(|p| p.strip_prefix("status="))
+                    .unwrap_or("unknown");
+
+                let status = match status_str {
+                    "moving" => DoorStatus::Moving,
+                    "open" => DoorStatus::Open,
+                    "closed" => DoorStatus::Closed,
+                    _ => {
+                        return Ok(Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("Content-Type", "application/json")
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(Full::new(Bytes::from(
+                                r#"{"ok":false,"error":"invalid_status","valid":["moving","open","closed"]}"#,
+                            )))
+                            .expect("static response should not fail"));
+                    }
+                };
+
+                door_tx.send_replace(status);
+                info!(status = %status.as_str(), "door_simulate_sent");
+
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Full::new(Bytes::from(format!(
+                        r#"{{"ok":true,"status":"{}"}}"#,
+                        status.as_str()
+                    ))))
+                    .expect("static response should not fail"))
+            } else {
+                Ok(Response::builder()
+                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                    .header("Content-Type", "application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Full::new(Bytes::from(
+                        r#"{"ok":false,"error":"door_simulation_not_enabled"}"#,
+                    )))
+                    .expect("static response should not fail"))
+            }
+        }
+        // CORS preflight for door/simulate
+        (&Method::OPTIONS, "/door/simulate") => Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            .header("Access-Control-Allow-Headers", "Content-Type")
+            .body(Full::new(Bytes::from("")))
+            .expect("static response should not fail")),
         _ => Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Full::new(Bytes::from("Not Found")))
@@ -726,6 +784,7 @@ pub async fn start_metrics_server<G: GateCommand + 'static>(
     site_id: String,
     gate: Option<Arc<G>>,
     event_tx: Option<mpsc::Sender<ParsedEvent>>,
+    door_tx: Option<watch::Sender<DoorStatus>>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -744,6 +803,7 @@ pub async fn start_metrics_server<G: GateCommand + 'static>(
                         let site_id = site_id.clone();
                         let gate = gate.clone();
                         let event_tx = event_tx.clone();
+                        let door_tx = door_tx.clone();
 
                         tokio::spawn(async move {
                             let service = service_fn(move |req| {
@@ -751,7 +811,8 @@ pub async fn start_metrics_server<G: GateCommand + 'static>(
                                 let site_id = site_id.clone();
                                 let gate = gate.clone();
                                 let event_tx = event_tx.clone();
-                                async move { handle_request(req, metrics, site_id, gate, event_tx).await }
+                                let door_tx = door_tx.clone();
+                                async move { handle_request(req, metrics, site_id, gate, event_tx, door_tx).await }
                             });
 
                             if let Err(e) = http1::Builder::new()

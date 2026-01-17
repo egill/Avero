@@ -8,8 +8,8 @@ use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyEventType, JourneyOu
 use crate::domain::types::{DoorStatus, GeometryId, ParsedEvent, Person, TrackId};
 use crate::infra::metrics::{GATE_STATE_CLOSED, GATE_STATE_MOVING, GATE_STATE_OPEN};
 use crate::io::{
-    AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload,
-    ZoneEventPayload,
+    AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, PositionPayload,
+    TrackEventPayload, ZoneEventPayload,
 };
 use crate::services::gate_worker::GateCmd;
 use crate::services::stitcher::StitchMatch;
@@ -317,6 +317,7 @@ impl Tracker {
                 total_dwell_ms: Some(journey_dwell),
                 event_time: Some(event.event_time),
             });
+
         }
 
         if self.config.is_pos_zone(geometry_id.0) || self.config.is_dwell_zone(geometry_id.0) {
@@ -335,13 +336,9 @@ impl Tracker {
                 .map(|j| (j.gate_open_count, j.gate_zone_exited))
                 .unwrap_or((0, false));
 
-            let can_open = if gate_open_count == 0 {
-                true // First chance
-            } else if gate_open_count == 1 && gate_zone_exited {
-                true // Second (last) chance - they went back and returned
-            } else {
-                false // Already used 2 chances, or still in gate zone from first open
-            };
+            // First chance (count=0) or second chance (count=1 and exited gate zone then returned)
+            let can_open =
+                gate_open_count == 0 || (gate_open_count == 1 && gate_zone_exited);
 
             if authorized && can_open {
                 self.send_gate_open_command(track_id, ts, "tracker", event.received_at);
@@ -469,6 +466,7 @@ impl Tracker {
                 total_dwell_ms: Some(journey_dwell),
                 event_time: Some(event.event_time),
             });
+
         }
 
         // Track gate zone exits for "second chance" logic
@@ -752,13 +750,8 @@ impl Tracker {
             .map(|j| (j.gate_open_count, j.gate_zone_exited))
             .unwrap_or((0, false));
 
-        let can_open = if gate_open_count == 0 {
-            true // First chance
-        } else if gate_open_count == 1 && gate_zone_exited {
-            true // Second (last) chance
-        } else {
-            false // Already used 2 chances
-        };
+        // First chance (count=0) or second chance (count=1 and exited gate zone then returned)
+        let can_open = gate_open_count == 0 || (gate_open_count == 1 && gate_zone_exited);
 
         if can_open {
             self.send_gate_open_command(track_id, ts, "acc", received_at);

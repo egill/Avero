@@ -46,7 +46,7 @@ config :avero_command, :mqtt,
   username: System.get_env("MQTT_USERNAME"),
   password: System.get_env("MQTT_PASSWORD"),
   client_id: System.get_env("MQTT_CLIENT_ID", "avero_command_#{System.get_env("MIX_ENV", "dev")}"),
-  topics: String.split(System.get_env("MQTT_TOPICS", "gateway/journeys,gateway/events,gateway/gate,gateway/acc,gateway/metrics"), ",")
+  topics: String.split(System.get_env("MQTT_TOPICS", "gateway/journeys,gateway/events,gateway/gate,gateway/acc,gateway/metrics,gateway/positions,xovis/sensor"), ",")
 
 # Gateway-PoC configuration
 # GATEWAY_SITE: Default site ID for journeys from gateway-poc (if not included in JSON)

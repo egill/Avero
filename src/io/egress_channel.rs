@@ -23,6 +23,8 @@ pub enum EgressMessage {
     TrackEvent(TrackEventPayload),
     /// ACC (payment terminal) event
     AccEvent(AccEventPayload),
+    /// Position update for spatial tracking investigation
+    Position(PositionPayload),
 }
 
 /// Payload for completed journeys
@@ -296,6 +298,37 @@ pub struct AccEventPayload {
     pub debug_pending: Option<Vec<AccDebugPending>>,
 }
 
+/// Payload for position updates (spatial tracking investigation)
+///
+/// Used to capture PERSON and GROUP position data for analysis.
+/// Published to gateway/positions topic.
+#[derive(Debug, Clone, Serialize)]
+pub struct PositionPayload {
+    /// Site identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
+    /// Timestamp (epoch ms)
+    pub ts: u64,
+    /// Track ID from Xovis
+    pub tid: i64,
+    /// Object type: "PERSON" or "GROUP"
+    pub obj_type: String,
+    /// X coordinate (meters)
+    pub x: f64,
+    /// Y coordinate (meters)
+    pub y: f64,
+    /// Z coordinate / height (meters)
+    pub z: f64,
+    /// Zone name if in a known zone
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zone: Option<String>,
+    /// Authorization status
+    pub auth: bool,
+    /// Event context (e.g., "zone_entry", "zone_exit", "continuous")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ctx: Option<String>,
+}
+
 /// Sender handle for egress messages
 ///
 /// Clone this to share across multiple producers.
@@ -353,6 +386,13 @@ impl EgressSender {
     pub fn send_acc_event(&self, mut payload: AccEventPayload) {
         payload.site = Some(self.site_id.clone());
         let _ = self.tx.try_send(EgressMessage::AccEvent(payload));
+    }
+
+    /// Send a position update for spatial tracking investigation
+    /// Injects site_id into the payload
+    pub fn send_position(&self, mut payload: PositionPayload) {
+        payload.site = Some(self.site_id.clone());
+        let _ = self.tx.try_send(EgressMessage::Position(payload));
     }
 }
 

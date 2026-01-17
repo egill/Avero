@@ -1,0 +1,81 @@
+# Simulation configuration
+# Use for local testing without real hardware (Xovis, RS485, CloudPlus)
+#
+# Usage:
+#   Terminal 1: cargo run --bin mock_cloudplus -- --port 8000
+#   Terminal 2: cargo run -- --config config/sim.toml
+#   Terminal 3: cargo run --bin sim -- --config config/sim.toml
+
+[site]
+id = "sim"
+
+[mqtt]
+# Use embedded broker on localhost
+host = "localhost"
+port = 1883
+topic = "#"
+
+[broker]
+# Enable embedded MQTT broker
+bind_address = "0.0.0.0"
+port = 1883
+
+[gate]
+mode = "tcp"
+# Point to mock CloudPlus server running locally
+tcp_addr = "127.0.0.1:8000"
+http_url = ""  # Not used in TCP mode, but required by config parser
+timeout_ms = 2000
+
+[rs485]
+# Will fail to open /dev/null - door state comes from HTTP /door/simulate endpoint
+# Called by mock_cloudplus when it receives gate commands
+device = "/dev/null"
+baud = 19200
+poll_interval_ms = 250
+
+[zones]
+# Standard zone configuration matching production
+pos_zones = [1001, 1002, 1003, 1004, 1005]
+gate_zone = 1007
+exit_line = 1006
+entry_line = 1008
+
+[zones.names]
+1001 = "POS_1"
+1002 = "POS_2"
+1003 = "POS_3"
+1004 = "POS_4"
+1005 = "POS_5"
+1006 = "EXIT_1"
+1007 = "GATE_1"
+1008 = "ENTRY_1"
+
+[authorization]
+# 7 seconds minimum dwell for authorization
+min_dwell_ms = 7000
+
+[metrics]
+prometheus_port = 9091
+interval_secs = 5
+
+[acc]
+# Enable ACC TCP listener for payment terminal events
+listener_enabled = true
+listener_port = 25803
+flicker_merge_s = 10
+recent_exit_window_ms = 3000
+
+# IP to POS zone mapping for simulation
+# Sim TUI will connect from localhost, can specify zone via IP
+[acc.ip_to_pos]
+"127.0.0.1" = "POS_1"
+"127.0.0.2" = "POS_2"
+"127.0.0.3" = "POS_3"
+"127.0.0.4" = "POS_4"
+"127.0.0.5" = "POS_5"
+
+[mqtt_egress]
+enabled = true
+host = "localhost"
+port = 1883

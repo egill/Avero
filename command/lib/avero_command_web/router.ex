@@ -64,6 +64,9 @@ defmodule AveroCommandWeb.Router do
 
       # POS Test (simple ACC simulation page)
       live("/pos-test", PosTestLive, :index)
+
+      # Floor map visualization (real-time position tracking)
+      live("/floor-map", FloorMapLive, :index)
     end
   end
 

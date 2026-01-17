@@ -76,7 +76,12 @@ defmodule AveroCommandWeb.AccController do
 
         conn
         |> put_status(502)
-        |> json(%{ok: false, pos: pos, site: site, error: "Failed to contact gateway: #{inspect(reason)}"})
+        |> json(%{
+          ok: false,
+          pos: pos,
+          site: site,
+          error: "Failed to contact gateway: #{inspect(reason)}"
+        })
     end
   end
 end

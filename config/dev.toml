@@ -62,3 +62,9 @@ recent_exit_window_ms = 3000
 # Production ACC terminal IPs (update with real IPs)
 # "192.168.1.10" = "POS_1"
 # "192.168.1.11" = "POS_2"
+
+[analysis_log]
+# Enable JSONL logging for offline position data analysis
+enabled = false  # Set to true for local testing
+dir = "logs"
+rotation = "daily"  # "daily" or "size:100" for 100MB rotation

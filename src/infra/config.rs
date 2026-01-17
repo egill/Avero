@@ -169,6 +169,8 @@ pub struct MqttEgressConfig {
     pub tracks_topic: String,
     #[serde(default = "Defaults::acc_topic")]
     pub acc_topic: String,
+    #[serde(default = "Defaults::positions_topic")]
+    pub positions_topic: String,
     #[serde(default = "Defaults::metrics_publish_interval")]
     pub metrics_publish_interval_secs: u64,
 }
@@ -187,6 +189,7 @@ impl Default for MqttEgressConfig {
             gate_topic: "gateway/gate".to_string(),
             tracks_topic: "gateway/tracks".to_string(),
             acc_topic: "gateway/acc".to_string(),
+            positions_topic: "gateway/positions".to_string(),
             metrics_publish_interval_secs: DEFAULT_METRICS_PUBLISH_INTERVAL,
         }
     }
@@ -215,6 +218,28 @@ pub struct SiteConfig {
 impl Default for SiteConfig {
     fn default() -> Self {
         Self { id: "gateway".to_string() }
+    }
+}
+
+/// Analysis logging configuration (for offline position data analysis)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AnalysisLogConfig {
+    /// Enable analysis logging (default: false)
+    pub enabled: bool,
+    /// Directory to write log files (default: "logs")
+    pub dir: String,
+    /// Rotation strategy: "daily" or "size:100" for 100MB (default: "daily")
+    pub rotation: String,
+}
+
+impl Default for AnalysisLogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dir: "logs".to_string(),
+            rotation: "daily".to_string(),
+        }
     }
 }
 
@@ -261,6 +286,9 @@ impl Defaults {
     fn acc_topic() -> String {
         "gateway/acc".to_string()
     }
+    fn positions_topic() -> String {
+        "gateway/positions".to_string()
+    }
     fn metrics_publish_interval() -> u64 {
         DEFAULT_METRICS_PUBLISH_INTERVAL
     }
@@ -296,6 +324,8 @@ pub struct TomlConfig {
     pub mqtt_egress: MqttEgressConfig,
     #[serde(default)]
     pub pos_tracking: PosTrackingConfig,
+    #[serde(default)]
+    pub analysis_log: AnalysisLogConfig,
 }
 
 // ============================================================================
@@ -371,7 +401,13 @@ pub struct Config {
     mqtt_egress_gate_topic: String,
     mqtt_egress_tracks_topic: String,
     mqtt_egress_acc_topic: String,
+    mqtt_egress_positions_topic: String,
     mqtt_egress_metrics_interval_secs: u64,
+
+    // Analysis logging
+    analysis_log_enabled: bool,
+    analysis_log_dir: String,
+    analysis_log_rotation: String,
 }
 
 /// Macro to generate simple getter methods
@@ -454,7 +490,11 @@ impl Default for Config {
             mqtt_egress_gate_topic: mqtt_egress.gate_topic,
             mqtt_egress_tracks_topic: mqtt_egress.tracks_topic,
             mqtt_egress_acc_topic: mqtt_egress.acc_topic,
+            mqtt_egress_positions_topic: mqtt_egress.positions_topic,
             mqtt_egress_metrics_interval_secs: mqtt_egress.metrics_publish_interval_secs,
+            analysis_log_enabled: false,
+            analysis_log_dir: "logs".to_string(),
+            analysis_log_rotation: "daily".to_string(),
         }
     }
 }
@@ -602,9 +642,13 @@ impl Config {
             mqtt_egress_gate_topic: toml_config.mqtt_egress.gate_topic,
             mqtt_egress_tracks_topic: toml_config.mqtt_egress.tracks_topic,
             mqtt_egress_acc_topic: toml_config.mqtt_egress.acc_topic,
+            mqtt_egress_positions_topic: toml_config.mqtt_egress.positions_topic,
             mqtt_egress_metrics_interval_secs: toml_config
                 .mqtt_egress
                 .metrics_publish_interval_secs,
+            analysis_log_enabled: toml_config.analysis_log.enabled,
+            analysis_log_dir: toml_config.analysis_log.dir,
+            analysis_log_rotation: toml_config.analysis_log.rotation,
         })
     }
 
@@ -687,6 +731,9 @@ impl Config {
         mqtt_egress_gate_topic,
         mqtt_egress_tracks_topic,
         mqtt_egress_acc_topic,
+        mqtt_egress_positions_topic,
+        analysis_log_dir,
+        analysis_log_rotation,
     );
 
     config_getters!(copy:
@@ -706,6 +753,7 @@ impl Config {
         broker_port -> u16,
         mqtt_egress_enabled -> bool,
         mqtt_egress_metrics_interval_secs -> u64,
+        analysis_log_enabled -> bool,
     );
 
     config_getters!(opt_i32: entry_line, approach_line);

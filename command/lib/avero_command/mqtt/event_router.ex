@@ -27,8 +27,14 @@ defmodule AveroCommand.MQTT.EventRouter do
         Task.start(fn -> Journeys.create_from_gateway_json(event_data) end)
         :ok
 
+      ["gateway", "positions"] ->
+        route_gateway_positions(event_data)
+
       ["gateway", topic_name] ->
         route_gateway_event(topic_name, event_data)
+
+      ["xovis", "sensor"] ->
+        route_xovis_sensor(event_data)
 
       _ ->
         route_legacy_event(topic, event_data)
@@ -413,5 +419,65 @@ defmodule AveroCommand.MQTT.EventRouter do
         gate_id: gate_id,
         data: Map.merge(event.data, Map.put(extra_data, "_source", "gateway"))
     }
+  end
+
+  # Gateway position data routing for floor map visualization
+  # Format: { ts, tid, obj_type, x, y, z, zone, auth, ctx }
+  defp route_gateway_positions(data) do
+    position = %{
+      track_id: data["tid"],
+      type: data["obj_type"] || "PERSON",
+      x: data["x"],
+      y: data["y"],
+      z: data["z"]
+    }
+
+    # Skip GROUP tracks (high bit set)
+    if Bitwise.band(position.track_id || 0, 0x80000000) == 0 do
+      Phoenix.PubSub.broadcast(
+        AveroCommand.PubSub,
+        "positions",
+        {:positions_update, %{positions: [position], timestamp: DateTime.utc_now()}}
+      )
+    end
+
+    :ok
+  end
+
+  # Xovis sensor position data routing for floor map visualization
+  defp route_xovis_sensor(data) do
+    case data do
+      %{"live_data" => %{"frames" => frames}} ->
+        Enum.each(frames, &broadcast_positions/1)
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp broadcast_positions(frame) do
+    tracked_objects = frame["tracked_objects"] || []
+
+    positions =
+      Enum.map(tracked_objects, fn obj ->
+        [x, y, z] = obj["position"] || [0, 0, 0]
+
+        %{
+          track_id: obj["track_id"],
+          type: obj["type"] || "PERSON",
+          x: x,
+          y: y,
+          z: z
+        }
+      end)
+
+    if positions != [] do
+      Phoenix.PubSub.broadcast(
+        AveroCommand.PubSub,
+        "positions",
+        {:positions_update, %{positions: positions, timestamp: DateTime.utc_now()}}
+      )
+    end
   end
 end

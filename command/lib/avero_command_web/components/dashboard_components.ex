@@ -67,10 +67,12 @@ defmodule AveroCommandWeb.DashboardComponents do
 
   def sidebar(assigns) do
     # Get Grafana URL for selected site
-    grafana_url = AveroCommand.Sites.grafana_dashboard_url(assigns.selected_site) ||
-      "https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s"
+    grafana_url =
+      AveroCommand.Sites.grafana_dashboard_url(assigns.selected_site) ||
+        "https://grafana.e18n.net/d/command-live/command-live?orgId=1&theme=dark&kiosk=tv&refresh=5s"
 
     assigns = assign(assigns, :grafana_url, grafana_url)
+
     ~H"""
     <aside
       id="sidebar"

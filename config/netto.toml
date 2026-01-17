@@ -68,3 +68,9 @@ host = "100.112.14.22"  # VerneMQ on e18n.net via Tailscale
 port = 1883
 username = "avero"
 password = "avero"
+
+[analysis_log]
+# JSONL logging for offline position data analysis
+enabled = true
+dir = "/opt/avero/logs"
+rotation = "daily"
