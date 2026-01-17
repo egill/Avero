@@ -10,7 +10,6 @@ defmodule AveroCommand.MQTT.EventRouter do
   alias AveroCommand.Entities.{GateRegistry, PersonRegistry}
   alias AveroCommand.Journeys
   alias AveroCommand.Scenarios.{Evaluator, UnusualGateOpening}
-  alias AveroCommand.Sites
   alias AveroCommand.Store
 
   @doc """
