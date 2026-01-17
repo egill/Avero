@@ -69,6 +69,11 @@ port = 1883
 username = "avero"
 password = "avero"
 
+[exit_detection]
+position_threshold_y_m = 2.3
+position_threshold_x_min_m = 1.5
+position_threshold_x_max_m = 3.0
+
 [analysis_log]
 # JSONL logging for offline position data analysis
 enabled = true

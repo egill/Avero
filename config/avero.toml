@@ -51,6 +51,11 @@ listener_port = 25803
 flicker_merge_s = 10
 recent_exit_window_ms = 3000
 
+[exit_detection]
+position_threshold_y_m = 2.3
+position_threshold_x_min_m = 1.5
+position_threshold_x_max_m = 3.0
+
 [mqtt_egress]
 enabled = true
 host = "100.112.14.22"  # VerneMQ on e18n.net via Tailscale

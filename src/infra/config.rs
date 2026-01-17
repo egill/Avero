@@ -24,6 +24,11 @@ const DEFAULT_BROKER_PORT: u16 = 1883;
 const DEFAULT_METRICS_PUBLISH_INTERVAL: u64 = 5;
 const DEFAULT_POS_EXIT_GRACE_MS: u64 = 5000;
 
+// Exit detection defaults (meters)
+const DEFAULT_EXIT_POSITION_THRESHOLD_Y: f32 = 2.3;
+const DEFAULT_EXIT_POSITION_THRESHOLD_X_MIN: f32 = 1.5;
+const DEFAULT_EXIT_POSITION_THRESHOLD_X_MAX: f32 = 3.0;
+
 // ============================================================================
 // TOML config structs
 // ============================================================================
@@ -235,10 +240,28 @@ pub struct AnalysisLogConfig {
 
 impl Default for AnalysisLogConfig {
     fn default() -> Self {
+        Self { enabled: false, dir: "logs".to_string(), rotation: "daily".to_string() }
+    }
+}
+
+/// Exit detection configuration for position-based exit detection
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ExitDetectionConfig {
+    /// Y position threshold (meters). EXIT_1 is at y=2.1
+    pub position_threshold_y_m: f32,
+    /// Minimum x position for exit region (meters)
+    pub position_threshold_x_min_m: f32,
+    /// Maximum x position for exit region (meters)
+    pub position_threshold_x_max_m: f32,
+}
+
+impl Default for ExitDetectionConfig {
+    fn default() -> Self {
         Self {
-            enabled: false,
-            dir: "logs".to_string(),
-            rotation: "daily".to_string(),
+            position_threshold_y_m: DEFAULT_EXIT_POSITION_THRESHOLD_Y,
+            position_threshold_x_min_m: DEFAULT_EXIT_POSITION_THRESHOLD_X_MIN,
+            position_threshold_x_max_m: DEFAULT_EXIT_POSITION_THRESHOLD_X_MAX,
         }
     }
 }
@@ -326,6 +349,8 @@ pub struct TomlConfig {
     pub pos_tracking: PosTrackingConfig,
     #[serde(default)]
     pub analysis_log: AnalysisLogConfig,
+    #[serde(default)]
+    pub exit_detection: ExitDetectionConfig,
 }
 
 // ============================================================================
@@ -408,6 +433,9 @@ pub struct Config {
     analysis_log_enabled: bool,
     analysis_log_dir: String,
     analysis_log_rotation: String,
+
+    // Exit detection
+    exit_detection: ExitDetectionConfig,
 }
 
 /// Macro to generate simple getter methods
@@ -495,6 +523,7 @@ impl Default for Config {
             analysis_log_enabled: false,
             analysis_log_dir: "logs".to_string(),
             analysis_log_rotation: "daily".to_string(),
+            exit_detection: ExitDetectionConfig::default(),
         }
     }
 }
@@ -649,6 +678,7 @@ impl Config {
             analysis_log_enabled: toml_config.analysis_log.enabled,
             analysis_log_dir: toml_config.analysis_log.dir,
             analysis_log_rotation: toml_config.analysis_log.rotation,
+            exit_detection: toml_config.exit_detection,
         })
     }
 
@@ -819,17 +849,19 @@ impl Config {
     /// Get MQTT egress username, falling back to main mqtt username if not set
     #[inline]
     pub fn mqtt_egress_username(&self) -> Option<&str> {
-        self.mqtt_egress_username
-            .as_deref()
-            .or(self.mqtt_username.as_deref())
+        self.mqtt_egress_username.as_deref().or(self.mqtt_username.as_deref())
     }
 
     /// Get MQTT egress password, falling back to main mqtt password if not set
     #[inline]
     pub fn mqtt_egress_password(&self) -> Option<&str> {
-        self.mqtt_egress_password
-            .as_deref()
-            .or(self.mqtt_password.as_deref())
+        self.mqtt_egress_password.as_deref().or(self.mqtt_password.as_deref())
+    }
+
+    /// Get exit detection configuration
+    #[inline]
+    pub fn exit_detection(&self) -> &ExitDetectionConfig {
+        &self.exit_detection
     }
 
     /// Builder method for tests to set min_dwell_ms
@@ -930,5 +962,20 @@ mod tests {
         let pos_tracking = PosTrackingConfig::default();
         assert_eq!(pos_tracking.exit_grace_ms, 5000);
         assert!(pos_tracking.min_dwell_ms.is_none());
+    }
+
+    #[test]
+    fn test_exit_detection_config_defaults() {
+        let exit_detection = ExitDetectionConfig::default();
+        assert!((exit_detection.position_threshold_y_m - 2.3).abs() < f32::EPSILON);
+        assert!((exit_detection.position_threshold_x_min_m - 1.5).abs() < f32::EPSILON);
+        assert!((exit_detection.position_threshold_x_max_m - 3.0).abs() < f32::EPSILON);
+
+        // Verify Config::default() also has proper exit detection
+        let config = Config::default();
+        let cfg = config.exit_detection();
+        assert!((cfg.position_threshold_y_m - 2.3).abs() < f32::EPSILON);
+        assert!((cfg.position_threshold_x_min_m - 1.5).abs() < f32::EPSILON);
+        assert!((cfg.position_threshold_x_max_m - 3.0).abs() < f32::EPSILON);
     }
 }

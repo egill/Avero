@@ -164,7 +164,9 @@ impl Tracker {
             EventType::LineCrossForward => self.handle_line_cross(&event, "forward"),
             EventType::LineCrossBackward => self.handle_line_cross(&event, "backward"),
             EventType::AccEvent(ip) => self.handle_acc_event(&ip, event.received_at),
-            EventType::AccEventSimulated(pos) => self.handle_acc_event_simulated(&pos, event.received_at),
+            EventType::AccEventSimulated(pos) => {
+                self.handle_acc_event_simulated(&pos, event.received_at)
+            }
             // Door state comes via watch channel, not event channel
             EventType::DoorStateChange(_) | EventType::Unknown(_) => {}
         }

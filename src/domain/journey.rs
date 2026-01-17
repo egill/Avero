@@ -24,6 +24,7 @@ pub enum JourneyOutcome {
     Completed,       // crossed EXIT line forward
     ReturnedToStore, // went back into store (backward entry cross or zone entry to STORE)
     Lost,            // track disappeared between ENTRY and EXIT (true loss)
+    PassThrough,     // reached exit area but no zone engagement
 }
 
 impl JourneyOutcome {
@@ -34,6 +35,7 @@ impl JourneyOutcome {
             JourneyOutcome::Completed => "exit",
             JourneyOutcome::ReturnedToStore => "returned",
             JourneyOutcome::Lost => "lost",
+            JourneyOutcome::PassThrough => "pass_through",
         }
     }
 }
@@ -127,13 +129,13 @@ pub struct Journey {
     pub acc_matched: bool,
     pub acc_group_size: u8, // 1 = solo, 2+ = group (people at POS together)
     pub acc_group_tids: SmallVec<[TrackId; 4]>, // Track IDs of all group members
-    pub gate_cmd_at: Option<u64>,    // epoch ms (first gate command)
+    pub gate_cmd_at: Option<u64>, // epoch ms (first gate command)
     pub gate_opened_at: Option<u64>, // epoch ms from RS485
     pub gate_was_open: bool,
-    pub gate_open_count: u8,         // number of gate opens issued (max 2)
-    pub gate_zone_exited: bool,      // true if exited GATE zone without exiting store
-    pub started_at: u64,             // epoch ms
-    pub ended_at: Option<u64>, // epoch ms
+    pub gate_open_count: u8,    // number of gate opens issued (max 2)
+    pub gate_zone_exited: bool, // true if exited GATE zone without exiting store
+    pub started_at: u64,        // epoch ms
+    pub ended_at: Option<u64>,  // epoch ms
     pub crossed_entry: bool,
     pub exit_inferred: bool, // true if exit was inferred (track lost in exit corridor)
     pub events: Vec<JourneyEvent>,
@@ -404,5 +406,6 @@ mod tests {
         assert_eq!(JourneyOutcome::Completed.as_str(), "exit");
         assert_eq!(JourneyOutcome::ReturnedToStore.as_str(), "returned");
         assert_eq!(JourneyOutcome::Lost.as_str(), "lost");
+        assert_eq!(JourneyOutcome::PassThrough.as_str(), "pass_through");
     }
 }

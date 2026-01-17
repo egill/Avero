@@ -201,12 +201,30 @@ pub struct Person {
     pub current_zone: Option<GeometryId>,
     pub authorized: bool,
     pub last_position: Option<[f64; 3]>, // [x, y, height] for stitching
+    /// Maximum y-position observed during journey (for observability)
+    pub max_y: f32,
+    /// Whether any zone events occurred (ZoneEntry/ZoneExit)
+    pub has_zone_events: bool,
 }
 
 impl Person {
     #[inline]
     pub fn new(track_id: TrackId) -> Self {
-        Self { track_id, current_zone: None, authorized: false, last_position: None }
+        Self {
+            track_id,
+            current_zone: None,
+            authorized: false,
+            last_position: None,
+            max_y: 0.0,
+            has_zone_events: false,
+        }
+    }
+
+    /// Check if person's last position is within exit region bounds
+    pub fn in_exit_region(&self, y_threshold: f32, x_min: f32, x_max: f32) -> bool {
+        self.last_position.is_some_and(|pos| {
+            pos[1] as f32 > y_threshold && pos[0] as f32 >= x_min && pos[0] as f32 <= x_max
+        })
     }
 }
 

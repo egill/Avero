@@ -247,6 +247,22 @@ fn write_gate_metrics(
         site,
         summary.exits_total,
     );
+    write_metric(
+        output,
+        "gateway_journeys_position_exit_total",
+        "Journeys completed via position-detected exit",
+        MetricType::Counter,
+        site,
+        summary.journeys_position_exit_total,
+    );
+    write_metric(
+        output,
+        "gateway_journeys_pass_through_total",
+        "Journeys completed as pass-through (no POS dwell)",
+        MetricType::Counter,
+        site,
+        summary.journeys_pass_through_total,
+    );
 }
 
 fn write_track_metrics(output: &mut String, site: &str, summary: &MetricsSummary) {
@@ -701,7 +717,9 @@ async fn handle_request<G: GateCommand>(
                     .status(StatusCode::SERVICE_UNAVAILABLE)
                     .header("Content-Type", "application/json")
                     .header("Access-Control-Allow-Origin", "*")
-                    .body(Full::new(Bytes::from(r#"{"ok":false,"error":"event_channel_not_configured"}"#)))
+                    .body(Full::new(Bytes::from(
+                        r#"{"ok":false,"error":"event_channel_not_configured"}"#,
+                    )))
                     .expect("static response should not fail"))
             }
         }
@@ -718,10 +736,8 @@ async fn handle_request<G: GateCommand>(
         (&Method::POST, "/door/simulate") => {
             if let Some(ref door_tx) = door_tx {
                 let query = req.uri().query().unwrap_or("");
-                let status_str = query
-                    .split('&')
-                    .find_map(|p| p.strip_prefix("status="))
-                    .unwrap_or("unknown");
+                let status_str =
+                    query.split('&').find_map(|p| p.strip_prefix("status=")).unwrap_or("unknown");
 
                 let status = match status_str {
                     "moving" => DoorStatus::Moving,

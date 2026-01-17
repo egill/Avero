@@ -63,6 +63,11 @@ recent_exit_window_ms = 3000
 # "192.168.1.10" = "POS_1"
 # "192.168.1.11" = "POS_2"
 
+[exit_detection]
+position_threshold_y_m = 2.3
+position_threshold_x_min_m = 1.5
+position_threshold_x_max_m = 3.0
+
 [analysis_log]
 # Enable JSONL logging for offline position data analysis
 enabled = false  # Set to true for local testing

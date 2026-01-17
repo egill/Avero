@@ -159,6 +159,10 @@ pub struct Metrics {
     gate_very_long_counted: AtomicU64,
     /// Total exits through gate (monotonic)
     exits_total: AtomicU64,
+    /// Journeys completed via position-detected exit (monotonic)
+    journeys_position_exit: AtomicU64,
+    /// Journeys completed as pass-through (no POS dwell) (monotonic)
+    journeys_pass_through: AtomicU64,
     /// ACC events received (monotonic)
     acc_events_total: AtomicU64,
     /// ACC events matched to a track (monotonic)
@@ -266,6 +270,8 @@ impl Metrics {
             gate_long_counted: AtomicU64::new(0),
             gate_very_long_counted: AtomicU64::new(0),
             exits_total: AtomicU64::new(0),
+            journeys_position_exit: AtomicU64::new(0),
+            journeys_pass_through: AtomicU64::new(0),
             acc_events_total: AtomicU64::new(0),
             acc_matched_total: AtomicU64::new(0),
             stitch_matched_total: AtomicU64::new(0),
@@ -505,6 +511,32 @@ impl Metrics {
     #[allow(dead_code)]
     pub fn exits_total(&self) -> u64 {
         self.exits_total.load(Ordering::Relaxed)
+    }
+
+    /// Record a journey completed via position-detected exit (lock-free)
+    #[inline]
+    pub fn record_journey_position_exit(&self) {
+        self.journeys_position_exit.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a journey completed as pass-through (no POS dwell) (lock-free)
+    #[inline]
+    pub fn record_journey_pass_through(&self) {
+        self.journeys_pass_through.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total position-detected exits
+    #[inline]
+    #[allow(dead_code)]
+    pub fn journeys_position_exit_total(&self) -> u64 {
+        self.journeys_position_exit.load(Ordering::Relaxed)
+    }
+
+    /// Get total pass-through journeys
+    #[inline]
+    #[allow(dead_code)]
+    pub fn journeys_pass_through_total(&self) -> u64 {
+        self.journeys_pass_through.load(Ordering::Relaxed)
     }
 
     /// Record an ACC event received (lock-free)
@@ -853,6 +885,8 @@ impl Metrics {
         // Get current gate state and exits (don't reset)
         let gate_state = self.gate_state.load(Ordering::Relaxed);
         let exits_total = self.exits_total.load(Ordering::Relaxed);
+        let journeys_position_exit_total = self.journeys_position_exit.load(Ordering::Relaxed);
+        let journeys_pass_through_total = self.journeys_pass_through.load(Ordering::Relaxed);
 
         // Get ACC and stitch counters (don't reset)
         let acc_events_total = self.acc_events_total.load(Ordering::Relaxed);
@@ -946,6 +980,8 @@ impl Metrics {
             gate_lat_p99_us: gate_lat_p99,
             gate_state,
             exits_total,
+            journeys_position_exit_total,
+            journeys_pass_through_total,
             acc_events_total,
             acc_matched_total,
             stitch_matched_total,
@@ -1035,6 +1071,10 @@ pub struct MetricsSummary {
     pub gate_state: u64,
     /// Total exits through gate
     pub exits_total: u64,
+    /// Journeys completed via position-detected exit
+    pub journeys_position_exit_total: u64,
+    /// Journeys completed as pass-through (no POS dwell)
+    pub journeys_pass_through_total: u64,
     /// Total ACC events received
     pub acc_events_total: u64,
     /// Total ACC events matched to tracks

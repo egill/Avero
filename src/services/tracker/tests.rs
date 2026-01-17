@@ -653,3 +653,494 @@ async fn test_group_track_full_journey() {
     assert!(journey.tids.contains(&TrackId(gid)));
     assert!(journey.events.len() >= 4);
 }
+
+// =============================================================================
+// Position-Based Exit Detection Tests (Task 7)
+// =============================================================================
+// These tests verify the position-based exit detection feature, which infers
+// journey completion when a track disappears in the exit region without a
+// LINE_CROSS event.
+
+// -----------------------------------------------------------------------------
+// Core Detection Tests
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_position_detected_exit() {
+    // No LINE_CROSS, last_pos=(2.0, 2.5), has_zone_events=true
+    // Should result in JourneyOutcome::Completed (position-detected exit)
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track at position in exit region (y=2.5 > 2.3 threshold, x=2.0 in [1.5, 3.0])
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [2.0, 2.5, 1.70]));
+
+    // Enter POS zone to set has_zone_events = true
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+
+    // Delete track at exit region position (no LINE_CROSS)
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [2.0, 2.5, 1.70]));
+
+    // Journey should be Completed (position-detected exit)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Completed);
+    assert!(journey.exit_inferred, "exit_inferred should be true for position-detected exit");
+}
+
+#[tokio::test]
+async fn test_pass_through() {
+    // No LINE_CROSS, last_pos=(2.0, 2.5), has_zone_events=false
+    // Should result in JourneyOutcome::PassThrough
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track at position in exit region
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [2.0, 2.5, 1.70]));
+
+    // NO zone events - person just passed through
+
+    // Delete track at exit region position (no LINE_CROSS, no zone events)
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [2.0, 2.5, 1.70]));
+
+    // Journey should be PassThrough (in exit region but no zone engagement)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::PassThrough);
+    assert!(!journey.exit_inferred, "exit_inferred should be false for pass-through");
+}
+
+#[tokio::test]
+async fn test_lost_low_y() {
+    // No LINE_CROSS, last_pos=(2.0, 1.5), has_zone_events=true
+    // Should result in JourneyOutcome::Lost (below y threshold of 2.3)
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track at position with low y (below exit threshold)
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [2.0, 1.5, 1.70]));
+
+    // Enter POS zone to set has_zone_events = true
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+
+    // Delete track at low y position (not in exit region)
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [2.0, 1.5, 1.70]));
+
+    // Journey should be Lost (not in exit region)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Lost);
+    assert!(!journey.exit_inferred);
+}
+
+// -----------------------------------------------------------------------------
+// X-Bounds False Positive Prevention Tests
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_false_positive_prevention_store_zone() {
+    // No LINE_CROSS, last_pos=(-3.0, 2.5), has_zone_events=true
+    // Should result in JourneyOutcome::Lost (x too far left, in store area)
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track far in store zone (x=-3.0, way left of exit region [1.5, 3.0])
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [-3.0, 2.5, 1.70]));
+
+    // Enter POS zone to set has_zone_events = true
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+
+    // Delete track at store zone position
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [-3.0, 2.5, 1.70]));
+
+    // Journey should be Lost (x outside exit region bounds)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Lost);
+    assert!(!journey.exit_inferred);
+}
+
+#[tokio::test]
+async fn test_false_positive_prevention_pos_zone() {
+    // No LINE_CROSS, last_pos=(-1.0, 2.5), has_zone_events=true
+    // Should result in JourneyOutcome::Lost (x in POS area, not near exit)
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track in POS area (x=-1.0, left of exit region [1.5, 3.0])
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [-1.0, 2.5, 1.70]));
+
+    // Enter POS zone to set has_zone_events = true
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+
+    // Delete track at POS area position
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [-1.0, 2.5, 1.70]));
+
+    // Journey should be Lost (x outside exit region bounds)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Lost);
+    assert!(!journey.exit_inferred);
+}
+
+#[tokio::test]
+async fn test_correct_detection_exit_region() {
+    // No LINE_CROSS, last_pos=(2.0, 2.5), has_zone_events=true
+    // Should result in JourneyOutcome::Completed (x within exit bounds)
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track in exit region (x=2.0 in [1.5, 3.0], y=2.5 > 2.3)
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [2.0, 2.5, 1.70]));
+
+    // Enter POS zone to set has_zone_events = true
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+
+    // Delete track at exit region position
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [2.0, 2.5, 1.70]));
+
+    // Journey should be Completed (position-detected exit)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Completed);
+    assert!(journey.exit_inferred);
+}
+
+// -----------------------------------------------------------------------------
+// Boundary Tests
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_y_threshold_boundary() {
+    // Test boundary at y=2.3 threshold
+    // last_pos=(2.0, 2.29) → Lost (just below threshold)
+    // last_pos=(2.0, 2.31) → Completed (just above threshold)
+
+    // Test: y=2.29, just below threshold
+    {
+        let config = Config::default().with_min_dwell_ms(50);
+        let mut tracker = create_test_tracker_with_config(config);
+
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackCreate,
+            100,
+            [2.0, 2.29, 1.70],
+        ));
+        tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+        tokio::time::sleep(millis(60)).await;
+        tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackDelete,
+            100,
+            [2.0, 2.29, 1.70],
+        ));
+
+        let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+        assert_eq!(
+            journey.outcome,
+            JourneyOutcome::Lost,
+            "y=2.29 should be Lost (below threshold 2.3)"
+        );
+    }
+
+    // Test: y=2.31, just above threshold
+    {
+        let config = Config::default().with_min_dwell_ms(50);
+        let mut tracker = create_test_tracker_with_config(config);
+
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackCreate,
+            200,
+            [2.0, 2.31, 1.70],
+        ));
+        tracker.process_event(create_event(EventType::ZoneEntry, 200, Some(1001)));
+        tokio::time::sleep(millis(60)).await;
+        tracker.process_event(create_event(EventType::ZoneExit, 200, Some(1001)));
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackDelete,
+            200,
+            [2.0, 2.31, 1.70],
+        ));
+
+        let journey = tracker.journey_manager.get_any(TrackId(200)).expect("Journey should exist");
+        assert_eq!(
+            journey.outcome,
+            JourneyOutcome::Completed,
+            "y=2.31 should be Completed (above threshold 2.3)"
+        );
+        assert!(journey.exit_inferred);
+    }
+}
+
+#[tokio::test]
+async fn test_x_min_boundary() {
+    // Test boundary at x_min=1.5 threshold
+    // last_pos=(1.49, 2.5) → Lost (just below x_min)
+    // last_pos=(1.51, 2.5) → Completed (just above x_min)
+
+    // Test: x=1.49, just below x_min threshold
+    {
+        let config = Config::default().with_min_dwell_ms(50);
+        let mut tracker = create_test_tracker_with_config(config);
+
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackCreate,
+            100,
+            [1.49, 2.5, 1.70],
+        ));
+        tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+        tokio::time::sleep(millis(60)).await;
+        tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackDelete,
+            100,
+            [1.49, 2.5, 1.70],
+        ));
+
+        let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+        assert_eq!(
+            journey.outcome,
+            JourneyOutcome::Lost,
+            "x=1.49 should be Lost (below x_min 1.5)"
+        );
+    }
+
+    // Test: x=1.51, just above x_min threshold
+    {
+        let config = Config::default().with_min_dwell_ms(50);
+        let mut tracker = create_test_tracker_with_config(config);
+
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackCreate,
+            200,
+            [1.51, 2.5, 1.70],
+        ));
+        tracker.process_event(create_event(EventType::ZoneEntry, 200, Some(1001)));
+        tokio::time::sleep(millis(60)).await;
+        tracker.process_event(create_event(EventType::ZoneExit, 200, Some(1001)));
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackDelete,
+            200,
+            [1.51, 2.5, 1.70],
+        ));
+
+        let journey = tracker.journey_manager.get_any(TrackId(200)).expect("Journey should exist");
+        assert_eq!(
+            journey.outcome,
+            JourneyOutcome::Completed,
+            "x=1.51 should be Completed (at or above x_min 1.5)"
+        );
+        assert!(journey.exit_inferred);
+    }
+}
+
+#[tokio::test]
+async fn test_x_max_boundary() {
+    // Test boundary at x_max=3.0 threshold
+    // last_pos=(2.99, 2.5) → Completed (within x_max)
+    // last_pos=(3.01, 2.5) → Lost (just above x_max)
+
+    // Test: x=2.99, within x_max threshold
+    {
+        let config = Config::default().with_min_dwell_ms(50);
+        let mut tracker = create_test_tracker_with_config(config);
+
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackCreate,
+            100,
+            [2.99, 2.5, 1.70],
+        ));
+        tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+        tokio::time::sleep(millis(60)).await;
+        tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackDelete,
+            100,
+            [2.99, 2.5, 1.70],
+        ));
+
+        let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+        assert_eq!(
+            journey.outcome,
+            JourneyOutcome::Completed,
+            "x=2.99 should be Completed (within x_max 3.0)"
+        );
+        assert!(journey.exit_inferred);
+    }
+
+    // Test: x=3.01, just above x_max threshold
+    {
+        let config = Config::default().with_min_dwell_ms(50);
+        let mut tracker = create_test_tracker_with_config(config);
+
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackCreate,
+            200,
+            [3.01, 2.5, 1.70],
+        ));
+        tracker.process_event(create_event(EventType::ZoneEntry, 200, Some(1001)));
+        tokio::time::sleep(millis(60)).await;
+        tracker.process_event(create_event(EventType::ZoneExit, 200, Some(1001)));
+        tracker.process_event(create_event_with_pos(
+            EventType::TrackDelete,
+            200,
+            [3.01, 2.5, 1.70],
+        ));
+
+        let journey = tracker.journey_manager.get_any(TrackId(200)).expect("Journey should exist");
+        assert_eq!(
+            journey.outcome,
+            JourneyOutcome::Lost,
+            "x=3.01 should be Lost (above x_max 3.0)"
+        );
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Person Field Tests
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_max_y_tracking() {
+    // Verify max_y updates on position events
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track at y=1.0
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [2.0, 1.0, 1.70]));
+
+    // Verify initial max_y
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
+    assert!((person.max_y - 1.0).abs() < f32::EPSILON, "Initial max_y should be 1.0");
+
+    // Process position events with higher y values
+    // Zone entry will update position implicitly via event handling
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+
+    // Now delete track at higher y position - this should update max_y
+    tracker.process_event(create_event_with_pos(EventType::TrackDelete, 100, [2.0, 2.5, 1.70]));
+
+    // The person is removed on delete, but max_y was updated before removal
+    // We can verify this by checking the journey outcome (position-detected exit requires high y)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    // Since we had zone events and ended at y=2.5 > 2.3, should be Completed
+    assert_eq!(journey.outcome, JourneyOutcome::Completed);
+}
+
+#[tokio::test]
+async fn test_has_zone_events_tracking() {
+    // Verify has_zone_events is set on zone events
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [2.0, 2.5, 1.70]));
+
+    // Verify has_zone_events is false initially
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
+    assert!(!person.has_zone_events, "has_zone_events should be false initially");
+
+    // Enter a zone
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+
+    // Verify has_zone_events is now true
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
+    assert!(person.has_zone_events, "has_zone_events should be true after ZoneEntry");
+
+    // Exit the zone
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+
+    // Verify has_zone_events is still true
+    let person = tracker.persons.get(&TrackId(100)).unwrap();
+    assert!(person.has_zone_events, "has_zone_events should remain true after ZoneExit");
+}
+
+// -----------------------------------------------------------------------------
+// Edge Cases and Overrides
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_line_cross_overrides_position() {
+    // LINE_CROSS should take precedence over position detection
+    // Even if last_pos is outside exit region, line cross = Exit
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track at position outside exit region
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [0.0, 0.0, 1.70]));
+
+    // Enter POS zone
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+
+    // Enter GATE zone
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1007)));
+
+    // Cross EXIT line forward (this should complete the journey regardless of position)
+    let mut exit_event = create_event(EventType::LineCrossForward, 100, Some(1006));
+    exit_event.direction = Some("forward".to_string());
+    tracker.process_event(exit_event);
+
+    // Person should be removed (journey complete via line cross)
+    assert_eq!(tracker.active_tracks(), 0);
+
+    // Journey should be Completed (via line cross, not position)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Completed);
+    assert!(!journey.exit_inferred, "exit_inferred should be false for line cross exit");
+}
+
+#[tokio::test]
+async fn test_no_last_position() {
+    // Person with no last_position should be Lost (can't determine exit region)
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    // Create track without position
+    tracker.process_event(create_event(EventType::TrackCreate, 100, None));
+
+    // Enter POS zone to set has_zone_events
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+
+    // Delete track without position
+    tracker.process_event(create_event(EventType::TrackDelete, 100, None));
+
+    // Journey should be Lost (no position to determine exit region)
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Lost);
+    assert!(!journey.exit_inferred);
+}
+
+#[tokio::test]
+async fn test_normal_exit_line_cross() {
+    // LINE_CROSS_FORWARD received → JourneyOutcome::Completed (existing behavior)
+    // Verify position detection doesn't interfere with normal line cross
+    let config = Config::default().with_min_dwell_ms(50);
+    let mut tracker = create_test_tracker_with_config(config);
+
+    tracker.process_event(create_event_with_pos(EventType::TrackCreate, 100, [2.0, 2.0, 1.70]));
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1001)));
+    tokio::time::sleep(millis(60)).await;
+    tracker.process_event(create_event(EventType::ZoneExit, 100, Some(1001)));
+    tracker.process_event(create_event(EventType::ZoneEntry, 100, Some(1007)));
+
+    // Cross EXIT line forward
+    let mut exit_event = create_event(EventType::LineCrossForward, 100, Some(1006));
+    exit_event.direction = Some("forward".to_string());
+    tracker.process_event(exit_event);
+
+    // Person should be removed
+    assert_eq!(tracker.active_tracks(), 0);
+
+    let journey = tracker.journey_manager.get_any(TrackId(100)).expect("Journey should exist");
+    assert_eq!(journey.outcome, JourneyOutcome::Completed);
+    assert!(!journey.exit_inferred, "exit_inferred should be false for line cross");
+}

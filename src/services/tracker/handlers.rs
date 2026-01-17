@@ -8,8 +8,8 @@ use crate::domain::journey::{epoch_ms, JourneyEvent, JourneyEventType, JourneyOu
 use crate::domain::types::{DoorStatus, GeometryId, ParsedEvent, Person, TrackId};
 use crate::infra::metrics::{GATE_STATE_CLOSED, GATE_STATE_MOVING, GATE_STATE_OPEN};
 use crate::io::{
-    AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, PositionPayload,
-    TrackEventPayload, ZoneEventPayload,
+    AccDebugPending, AccDebugTrack, AccEventPayload, GateStatePayload, TrackEventPayload,
+    ZoneEventPayload,
 };
 use crate::services::gate_worker::GateCmd;
 use crate::services::stitcher::StitchMatch;
@@ -78,8 +78,20 @@ impl Tracker {
 
             // Stitch found! Transfer state from old track to new track
             let old_track_id = person.track_id;
+            let old_max_y = person.max_y;
+            let old_has_zone_events = person.has_zone_events;
             person.track_id = track_id;
             person.last_position = event.position;
+            // Update max_y from new position if higher
+            if let Some(pos) = event.position {
+                if pos[1] as f32 > person.max_y {
+                    person.max_y = pos[1] as f32;
+                }
+            }
+            // Preserve max_y across stitched segments (take maximum)
+            person.max_y = person.max_y.max(old_max_y);
+            // Preserve has_zone_events across stitched segments
+            person.has_zone_events = person.has_zone_events || old_has_zone_events;
 
             let dwell_ms = self.journey_manager.get_dwell(old_track_id);
 
@@ -130,6 +142,12 @@ impl Tracker {
             debug!(track_id = %track_id, reentry = %reentry_match.is_some(), "track_created");
             let mut person = Person::new(track_id);
             person.last_position = event.position;
+            // Update max_y from initial position
+            if let Some(pos) = event.position {
+                if pos[1] as f32 > person.max_y {
+                    person.max_y = pos[1] as f32;
+                }
+            }
             self.persons.insert(track_id, person);
 
             // Create journey in journey manager (with parent if re-entry)
@@ -195,8 +213,12 @@ impl Tracker {
 
         if let Some(mut person) = self.persons.remove(&track_id) {
             // Update last position from event if available
-            if event.position.is_some() {
-                person.last_position = event.position;
+            if let Some(pos) = event.position {
+                person.last_position = Some(pos);
+                // Update max_y if this position is higher
+                if pos[1] as f32 > person.max_y {
+                    person.max_y = pos[1] as f32;
+                }
             }
 
             let last_zone: String = person
@@ -241,11 +263,12 @@ impl Tracker {
                     .with_extra(&format!("auth={},dwell={}", person.authorized, journey_dwell)),
             );
 
-            // Determine journey outcome based on events
+            // Determine journey outcome based on events and position
             // ReturnedToStore: went back into store (POS zone, STORE, or backward entry cross)
-            // Completed: exit inferred (track lost in exit corridor after approach cross)
+            // Completed: exit line crossed, or position-detected exit (in exit region with zone events)
+            // PassThrough: in exit region but no zone engagement
             // Lost: disappeared near gate/exit area without clear exit signal
-            let (outcome, exit_inferred) = self.determine_journey_outcome(track_id);
+            let (outcome, exit_inferred) = self.determine_journey_outcome(track_id, &person);
             if exit_inferred {
                 if let Some(journey) = self.journey_manager.get_mut(track_id) {
                     journey.exit_inferred = true;
@@ -292,6 +315,8 @@ impl Tracker {
         // Get or create person
         let person = self.persons.entry(track_id).or_insert_with(|| Person::new(track_id));
         person.current_zone = Some(geometry_id);
+        // Mark that this person has received zone events
+        person.has_zone_events = true;
         let journey_authorized =
             self.journey_manager.get_any(track_id).map(|j| j.authorized).unwrap_or(false);
         let authorized = person.authorized || journey_authorized;
@@ -317,7 +342,6 @@ impl Tracker {
                 total_dwell_ms: Some(journey_dwell),
                 event_time: Some(event.event_time),
             });
-
         }
 
         if self.config.is_pos_zone(geometry_id.0) || self.config.is_dwell_zone(geometry_id.0) {
@@ -337,8 +361,7 @@ impl Tracker {
                 .unwrap_or((0, false));
 
             // First chance (count=0) or second chance (count=1 and exited gate zone then returned)
-            let can_open =
-                gate_open_count == 0 || (gate_open_count == 1 && gate_zone_exited);
+            let can_open = gate_open_count == 0 || (gate_open_count == 1 && gate_zone_exited);
 
             if authorized && can_open {
                 self.send_gate_open_command(track_id, ts, "tracker", event.received_at);
@@ -392,6 +415,9 @@ impl Tracker {
         let Some(person) = self.persons.get_mut(&track_id) else {
             return;
         };
+
+        // Mark that this person has received zone events
+        person.has_zone_events = true;
 
         // Calculate dwell time if exiting a POS or DWELL zone (from PosOccupancyState)
         let is_pos = self.config.is_pos_zone(geometry_id.0);
@@ -466,7 +492,6 @@ impl Tracker {
                 total_dwell_ms: Some(journey_dwell),
                 event_time: Some(event.event_time),
             });
-
         }
 
         // Track gate zone exits for "second chance" logic
@@ -732,7 +757,13 @@ impl Tracker {
 
     /// Open gate if customer is in gate zone after ACC authorization
     /// Uses "second chance" logic: allows up to 2 gate opens per journey
-    fn open_gate_if_waiting(&mut self, track_id: TrackId, gate_zone: GeometryId, ts: u64, received_at: Instant) {
+    fn open_gate_if_waiting(
+        &mut self,
+        track_id: TrackId,
+        gate_zone: GeometryId,
+        ts: u64,
+        received_at: Instant,
+    ) {
         let in_gate_zone = self
             .persons
             .get(&track_id)
@@ -984,9 +1015,16 @@ impl Tracker {
     /// 1. EXIT line crossed → Completed (definitive exit)
     /// 2. Last zone was EXIT → Completed (they're gone)
     /// 3. Backward entry cross → ReturnedToStore (went back)
-    /// 4. Only touched STORE/ENTRY → ReturnedToStore (never went deep)
-    /// 5. Else → Lost (stitch candidate)
-    fn determine_journey_outcome(&self, track_id: TrackId) -> (JourneyOutcome, bool) {
+    /// 4. Position-based exit detection:
+    ///    - In exit region with zone events → Completed (position-detected exit)
+    ///    - In exit region without zone events → PassThrough
+    /// 5. Only touched STORE/ENTRY → ReturnedToStore (never went deep)
+    /// 6. Else → Lost (stitch candidate)
+    fn determine_journey_outcome(
+        &self,
+        track_id: TrackId,
+        person: &Person,
+    ) -> (JourneyOutcome, bool) {
         let Some(journey) = self.journey_manager.get_any(track_id) else {
             return (JourneyOutcome::Lost, false);
         };
@@ -1013,7 +1051,38 @@ impl Tracker {
             return (JourneyOutcome::ReturnedToStore, false);
         }
 
-        // 4. Only touched shallow zones (STORE/ENTRY) = never went deep into checkout
+        // 4. Position-based exit detection (check BEFORE went_deep to allow PassThrough)
+        let exit_cfg = self.config.exit_detection();
+        let in_exit_region = person.in_exit_region(
+            exit_cfg.position_threshold_y_m,
+            exit_cfg.position_threshold_x_min_m,
+            exit_cfg.position_threshold_x_max_m,
+        );
+
+        if in_exit_region && person.has_zone_events {
+            // Position-detected exit with zone engagement
+            info!(
+                track_id = %track_id,
+                last_pos = ?person.last_position,
+                max_y = %person.max_y,
+                "journey_completed_position_detected"
+            );
+            self.metrics.record_journey_position_exit();
+            return (JourneyOutcome::Completed, true);
+        }
+
+        if in_exit_region && !person.has_zone_events {
+            // Pass-through: reached exit area but no zone engagement
+            info!(
+                track_id = %track_id,
+                last_pos = ?person.last_position,
+                "journey_pass_through"
+            );
+            self.metrics.record_journey_pass_through();
+            return (JourneyOutcome::PassThrough, false);
+        }
+
+        // 5. Only touched shallow zones (STORE/ENTRY) = never went deep into checkout
         let went_deep = journey.events.iter().filter_map(|e| e.z.as_deref()).any(|z| {
             z.starts_with("POS_") || z.starts_with("GATE") || z == "APPROACH" || z == "EXIT"
         });
@@ -1023,7 +1092,7 @@ impl Tracker {
             return (JourneyOutcome::ReturnedToStore, false);
         }
 
-        // 5. Went deep but didn't exit = stitch candidate
+        // 6. Went deep but didn't exit = stitch candidate
         debug!(track_id = %track_id, "journey_lost_stitch_candidate");
         (JourneyOutcome::Lost, false)
     }
