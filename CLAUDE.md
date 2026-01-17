@@ -85,6 +85,35 @@ ssh avero@HOST "sudo journalctl -u gateway -f"  # Live logs
 ssh root@e18n.net "docker logs avero-command -f"
 ```
 
+### TimescaleDB Access
+
+The command app stores data in TimescaleDB on e18n.net.
+
+```bash
+# Connect to database
+ssh root@e18n.net "docker exec avero-timescaledb psql -U avero -d avero_command"
+
+# Example queries
+ssh root@e18n.net "docker exec avero-timescaledb psql -U avero -d avero_command -c \"SELECT outcome, COUNT(*) FROM person_journeys WHERE time > NOW() - INTERVAL '24 hours' GROUP BY outcome ORDER BY count DESC;\""
+
+ssh root@e18n.net "docker exec avero-timescaledb psql -U avero -d avero_command -c \"SELECT * FROM events ORDER BY time DESC LIMIT 10;\""
+```
+
+**Connection details:**
+- **Container:** `avero-timescaledb`
+- **User:** `avero`
+- **Database:** `avero_command`
+
+**Key tables:**
+| Table | Description |
+|-------|-------------|
+| `person_journeys` | Journey records (time, outcome, events, etc.) |
+| `events` | Raw Xovis/gateway events |
+| `incidents` | Anomaly detection incidents |
+| `action_logs` | Gate actions and system logs |
+
+**person_journeys columns:** `time`, `site`, `outcome`, `authorized`, `duration_ms`, `total_pos_dwell_ms`, `exit_type`, `events` (jsonb), etc.
+
 ### Grafana Dashboard
 
 Dashboards are stored locally and deployed to e18n.net.
