@@ -14,8 +14,7 @@ defmodule AveroCommandWeb.FloorMapLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(AveroCommand.PubSub, "positions")
       Phoenix.PubSub.subscribe(AveroCommand.PubSub, "acc_events")
-      # Periodic cleanup timer every 200ms
-      :timer.send_interval(200, self(), :cleanup_stale)
+      Phoenix.PubSub.subscribe(AveroCommand.PubSub, "events")
     end
 
     geometries = load_geometries()
@@ -32,42 +31,23 @@ defmodule AveroCommandWeb.FloorMapLive do
   @impl true
   def handle_info({:positions_update, %{positions: positions}}, socket) do
     now = DateTime.utc_now()
-    # Remove dots not updated in 500ms (publishing at 100ms intervals)
-    cutoff = DateTime.add(now, -500, :millisecond)
 
-    # Start with existing positions, remove stale ones first
-    current =
-      socket.assigns.positions
-      |> Enum.reject(fn {_id, p} ->
-        case p.last_seen do
-          nil -> true
-          ts -> DateTime.compare(ts, cutoff) == :lt
-        end
-      end)
-      |> Map.new()
-
-    # Update with new positions (only PERSON, no GROUP)
+    # Update positions (only PERSON, no GROUP) - keep existing positions for tracks not in update
     updated_positions =
-      Enum.reduce(positions, current, fn p, acc ->
+      Enum.reduce(positions, socket.assigns.positions, fn p, acc ->
         tid = p.track_id
 
         # Skip non-PERSON or GROUP tracks
         if p.type == "PERSON" && Bitwise.band(tid || 0, 0x80000000) == 0 do
-          # Always replace position for this track_id
-          Map.put(acc, tid, %{x: p.x, y: p.y, z: p.z, type: p.type, last_seen: now})
+          Map.put(acc, tid, %{x: p.x, y: p.y, z: p.z, type: p.type})
         else
           acc
         end
       end)
 
-    # Clean up authorized_tracks for tracks no longer visible
-    active_track_ids = Map.keys(updated_positions) |> MapSet.new()
-    cleaned_authorized = MapSet.intersection(socket.assigns.authorized_tracks, active_track_ids)
-
     {:noreply,
      socket
      |> assign(:positions, updated_positions)
-     |> assign(:authorized_tracks, cleaned_authorized)
      |> assign(:last_update, now)}
   end
 
@@ -77,24 +57,11 @@ defmodule AveroCommandWeb.FloorMapLive do
     {:noreply, assign(socket, :authorized_tracks, authorized)}
   end
 
-  # Periodic cleanup of stale positions
-  def handle_info(:cleanup_stale, socket) do
-    now = DateTime.utc_now()
-    cutoff = DateTime.add(now, -500, :millisecond)
-
-    updated_positions =
-      socket.assigns.positions
-      |> Enum.reject(fn {_id, p} ->
-        case p.last_seen do
-          nil -> true
-          ts -> DateTime.compare(ts, cutoff) == :lt
-        end
-      end)
-      |> Map.new()
-
-    # Clean up authorized_tracks too
-    active_track_ids = Map.keys(updated_positions) |> MapSet.new()
-    cleaned_authorized = MapSet.intersection(socket.assigns.authorized_tracks, active_track_ids)
+  # Remove dots on EXIT line cross or TRACK_DELETE - the only valid removal triggers
+  def handle_info({:event, %{type: type, tid: tid}}, socket)
+      when type in ["LINE_CROSS_FORWARD", "TRACK_DELETE"] and is_integer(tid) do
+    updated_positions = Map.delete(socket.assigns.positions, tid)
+    cleaned_authorized = MapSet.delete(socket.assigns.authorized_tracks, tid)
 
     {:noreply,
      socket
@@ -140,14 +107,6 @@ defmodule AveroCommandWeb.FloorMapLive do
       String.starts_with?(name, "GATE") -> "rgba(234, 179, 8, 0.3)"
       name == "STORE" -> "rgba(34, 197, 94, 0.1)"
       true -> "rgba(156, 163, 175, 0.2)"
-    end
-  end
-
-  defp person_color(track_id, authorized_tracks) do
-    if MapSet.member?(authorized_tracks, track_id) do
-      "#22c55e"  # Green for authorized (ACC matched)
-    else
-      "#3b82f6"  # Blue for regular
     end
   end
 
@@ -201,24 +160,41 @@ defmodule AveroCommandWeb.FloorMapLive do
           <!-- Tracked people -->
           <%= for {track_id, pos} <- @positions do %>
             <g>
-              <circle
-                cx={to_svg_x(pos.x)}
-                cy={to_svg_y(pos.y)}
-                r="15"
-                fill={person_color(track_id, @authorized_tracks)}
-                stroke="white"
-                stroke-width="2"
-                opacity="0.9"
-              />
+              <title><%= track_id %></title>
+              <%= if MapSet.member?(@authorized_tracks, track_id) do %>
+                <rect
+                  x={to_svg_x(pos.x) - 12}
+                  y={to_svg_y(pos.y) - 12}
+                  width="24"
+                  height="24"
+                  fill="#22c55e"
+                  stroke="white"
+                  stroke-width="2"
+                  opacity="0.9"
+                  style="transition: x 0.15s ease-out, y 0.15s ease-out;"
+                />
+              <% else %>
+                <circle
+                  cx={to_svg_x(pos.x)}
+                  cy={to_svg_y(pos.y)}
+                  r="12"
+                  fill="#3b82f6"
+                  stroke="white"
+                  stroke-width="2"
+                  opacity="0.9"
+                  style="transition: cx 0.15s ease-out, cy 0.15s ease-out;"
+                />
+              <% end %>
               <text
                 x={to_svg_x(pos.x)}
-                y={to_svg_y(pos.y) + 5}
+                y={to_svg_y(pos.y) + 4}
                 text-anchor="middle"
                 fill="white"
                 font-size="10"
                 font-weight="bold"
+                style="transition: x 0.15s ease-out, y 0.15s ease-out;"
               >
-                <%= rem(track_id, 1000) %>
+                <%= rem(track_id, 100) %>
               </text>
             </g>
           <% end %>
@@ -232,7 +208,7 @@ defmodule AveroCommandWeb.FloorMapLive do
           <span>Person</span>
         </div>
         <div class="flex items-center gap-2">
-          <div class="w-4 h-4 rounded-full bg-green-500"></div>
+          <div class="w-4 h-4 bg-green-500"></div>
           <span>Paid (ACC)</span>
         </div>
         <div class="flex items-center gap-2">
