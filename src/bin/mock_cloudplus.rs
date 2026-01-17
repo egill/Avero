@@ -144,15 +144,7 @@ fn parse_frame(buf: &[u8]) -> Option<(ParsedFrame, usize)> {
         return Some((ParsedFrame::Invalid("checksum mismatch".to_string()), total_len));
     }
 
-    Some((
-        ParsedFrame::Valid {
-            _rand: rand,
-            command,
-            _address: address,
-            door,
-        },
-        total_len,
-    ))
+    Some((ParsedFrame::Valid { _rand: rand, command, _address: address, door }, total_len))
 }
 
 #[derive(Debug)]
@@ -176,11 +168,7 @@ async fn simulate_door_sequence(
     tokio::time::sleep(Duration::from_millis(move_delay_ms)).await;
 
     // Moving
-    if let Err(e) = client
-        .post(format!("{}?status=moving", base_url))
-        .send()
-        .await
-    {
+    if let Err(e) = client.post(format!("{}?status=moving", base_url)).send().await {
         eprintln!("[MOCK] Failed to send moving state: {}", e);
     } else {
         println!("[MOCK] Door -> MOVING");
@@ -190,11 +178,7 @@ async fn simulate_door_sequence(
     tokio::time::sleep(Duration::from_millis(open_delay_ms)).await;
 
     // Open
-    if let Err(e) = client
-        .post(format!("{}?status=open", base_url))
-        .send()
-        .await
-    {
+    if let Err(e) = client.post(format!("{}?status=open", base_url)).send().await {
         eprintln!("[MOCK] Failed to send open state: {}", e);
     } else {
         println!("[MOCK] Door -> OPEN");
@@ -204,11 +188,7 @@ async fn simulate_door_sequence(
     tokio::time::sleep(Duration::from_millis(open_duration_ms)).await;
 
     // Close
-    if let Err(e) = client
-        .post(format!("{}?status=closed", base_url))
-        .send()
-        .await
-    {
+    if let Err(e) = client.post(format!("{}?status=closed", base_url)).send().await {
         eprintln!("[MOCK] Failed to send closed state: {}", e);
     } else {
         println!("[MOCK] Door -> CLOSED");
@@ -324,7 +304,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║ Move delay:      {:>5} ms                                ║", args.move_delay_ms);
     println!("║ Open delay:      {:>5} ms                                ║", args.open_delay_ms);
     println!("║ Open duration:   {:>5} ms                                ║", args.open_duration_ms);
-    println!("║ Heartbeat:       {:>5} s                                 ║", args.heartbeat_interval_secs);
+    println!(
+        "║ Heartbeat:       {:>5} s                                 ║",
+        args.heartbeat_interval_secs
+    );
     println!("╚══════════════════════════════════════════════════════════╝");
     println!();
     println!("[MOCK] Waiting for gateway connection...");

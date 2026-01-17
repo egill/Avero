@@ -2,8 +2,7 @@
 
 use crate::domain::journey::epoch_ms;
 use crate::domain::types::{
-    EventType, Frame, GeometryId, ParsedEvent, TimestampValue, TrackId, TrackedObject,
-    XovisMessage,
+    EventType, Frame, GeometryId, ParsedEvent, TimestampValue, TrackId, TrackedObject, XovisMessage,
 };
 use crate::infra::config::Config;
 use crate::infra::metrics::Metrics;
@@ -76,8 +75,7 @@ impl PositionThrottler {
 
     /// Remove stale tracks (not seen in a while)
     fn cleanup_stale(&mut self, active_track_ids: &[i64]) {
-        self.last_positions
-            .retain(|tid, _| active_track_ids.contains(tid));
+        self.last_positions.retain(|tid, _| active_track_ids.contains(tid));
     }
 }
 
@@ -188,6 +186,10 @@ pub async fn start_mqtt_client(
                                     debug!(topic = %topic, event_count = %events.len(), "MQTT message with events");
                                 }
                                 for event in events {
+                                    // Skip GROUP tracks (high bit set) - same person as base track
+                                    if event.track_id.0 & XOVIS_GROUP_BIT != 0 {
+                                        continue;
+                                    }
                                     debug!(track_id = %event.track_id, event_type = ?event.event_type, "Parsed event");
                                     metrics.record_mqtt_event_received();
                                     if let Err(e) = event_tx.try_send(event) {

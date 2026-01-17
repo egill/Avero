@@ -444,7 +444,8 @@ async fn send_track_delete(client: &AsyncClient, state: &mut AppState, track_id:
 async fn send_zone_entry(client: &AsyncClient, state: &mut AppState, track_id: i64, zone: &str) {
     if let Some(track) = state.tracks.get_mut(&track_id) {
         let geometry_id = zone_name_to_geometry_id(zone);
-        let msg = build_xovis_message("ZONE_ENTRY", track_id, Some(geometry_id), track.position, None);
+        let msg =
+            build_xovis_message("ZONE_ENTRY", track_id, Some(geometry_id), track.position, None);
         if client.publish(XOVIS_TOPIC, QoS::AtLeastOnce, false, msg).await.is_ok() {
             track.current_zone = Some(zone.to_string());
             state.log_sent(format!("ZONE_ENTRY T{} {}", track_id, zone));
@@ -455,7 +456,8 @@ async fn send_zone_entry(client: &AsyncClient, state: &mut AppState, track_id: i
 async fn send_zone_exit(client: &AsyncClient, state: &mut AppState, track_id: i64, zone: &str) {
     if let Some(track) = state.tracks.get_mut(&track_id) {
         let geometry_id = zone_name_to_geometry_id(zone);
-        let msg = build_xovis_message("ZONE_EXIT", track_id, Some(geometry_id), track.position, None);
+        let msg =
+            build_xovis_message("ZONE_EXIT", track_id, Some(geometry_id), track.position, None);
         if client.publish(XOVIS_TOPIC, QoS::AtLeastOnce, false, msg).await.is_ok() {
             if track.current_zone.as_deref() == Some(zone) {
                 track.current_zone = None;
@@ -468,7 +470,13 @@ async fn send_zone_exit(client: &AsyncClient, state: &mut AppState, track_id: i6
 async fn send_line_cross(client: &AsyncClient, state: &mut AppState, track_id: i64, line: &str) {
     if let Some(track) = state.tracks.get(&track_id) {
         let geometry_id = zone_name_to_geometry_id(line);
-        let msg = build_xovis_message("LINE_CROSS", track_id, Some(geometry_id), track.position, Some("forward"));
+        let msg = build_xovis_message(
+            "LINE_CROSS",
+            track_id,
+            Some(geometry_id),
+            track.position,
+            Some("forward"),
+        );
         if client.publish(XOVIS_TOPIC, QoS::AtLeastOnce, false, msg).await.is_ok() {
             state.log_sent(format!("LINE_CROSS T{} {}", track_id, line));
         }
@@ -492,11 +500,7 @@ fn send_acc_event(state: &mut AppState, _pos: &str, acc_port: u16) {
 // Scenario Execution
 // ============================================================================
 
-async fn execute_scenario_step(
-    client: &AsyncClient,
-    state: &mut AppState,
-    acc_port: u16,
-) {
+async fn execute_scenario_step(client: &AsyncClient, state: &mut AppState, acc_port: u16) {
     // Extract scenario info without holding borrow
     let (step, track_id, scenario_name) = {
         let scenario = match &mut state.scenario {
@@ -674,11 +678,8 @@ fn draw_tracks(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .title(" Tracks (↑↓ select, t=new, d=del) ")
-            .borders(Borders::ALL),
-    );
+    let list = List::new(items)
+        .block(Block::default().title(" Tracks (↑↓ select, t=new, d=del) ").borders(Borders::ALL));
 
     f.render_widget(list, area);
 }
@@ -713,11 +714,8 @@ fn draw_scenario(f: &mut Frame, area: Rect, state: &AppState) {
         ]
     };
 
-    let para = Paragraph::new(content).block(
-        Block::default()
-            .title(" Scenarios ")
-            .borders(Borders::ALL),
-    );
+    let para =
+        Paragraph::new(content).block(Block::default().title(" Scenarios ").borders(Borders::ALL));
 
     f.render_widget(para, area);
 }
@@ -739,11 +737,7 @@ fn draw_log(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .title(" Event Log ")
-            .borders(Borders::ALL),
-    );
+    let list = List::new(items).block(Block::default().title(" Event Log ").borders(Borders::ALL));
 
     f.render_widget(list, area);
 }
@@ -979,11 +973,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Cleanup
     mqtt_handle.abort();
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     Ok(())

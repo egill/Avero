@@ -29,7 +29,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Gauge},
+    widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph},
     Frame, Terminal,
 };
 use rumqttc::{AsyncClient, Event as MqttEvent, MqttOptions, Packet, QoS};
@@ -328,10 +328,8 @@ impl ScenarioRunner {
         // Check for timeout
         if let Some(start) = self.start_time {
             if start.elapsed().as_millis() as u64 > scenario.timeout_ms {
-                self.status = ScenarioStatus::Failed(format!(
-                    "Timeout waiting for {:?}",
-                    scenario.expected
-                ));
+                self.status =
+                    ScenarioStatus::Failed(format!("Timeout waiting for {:?}", scenario.expected));
                 return true;
             }
         }
@@ -339,11 +337,13 @@ impl ScenarioRunner {
         // Check for wrong outcome
         match scenario.expected {
             ExpectedOutcome::GateOpen if self.observed_gate_blocked => {
-                self.status = ScenarioStatus::Failed("Got GateBlocked, expected GateOpen".to_string());
+                self.status =
+                    ScenarioStatus::Failed("Got GateBlocked, expected GateOpen".to_string());
                 return true;
             }
             ExpectedOutcome::GateBlocked if self.observed_gate_open => {
-                self.status = ScenarioStatus::Failed("Got GateOpen, expected GateBlocked".to_string());
+                self.status =
+                    ScenarioStatus::Failed("Got GateOpen, expected GateBlocked".to_string());
                 return true;
             }
             _ => {}
@@ -353,7 +353,10 @@ impl ScenarioRunner {
     }
 
     fn is_running(&self) -> bool {
-        matches!(self.status, ScenarioStatus::Running { .. } | ScenarioStatus::WaitingForOutcome { .. })
+        matches!(
+            self.status,
+            ScenarioStatus::Running { .. } | ScenarioStatus::WaitingForOutcome { .. }
+        )
     }
 
     fn progress(&self) -> (usize, usize) {
@@ -363,8 +366,12 @@ impl ScenarioRunner {
         };
         match self.status {
             ScenarioStatus::Running { step_index, .. } => (step_index, scenario.steps.len()),
-            ScenarioStatus::WaitingForOutcome { .. } => (scenario.steps.len(), scenario.steps.len()),
-            ScenarioStatus::Passed | ScenarioStatus::Failed(_) => (scenario.steps.len(), scenario.steps.len()),
+            ScenarioStatus::WaitingForOutcome { .. } => {
+                (scenario.steps.len(), scenario.steps.len())
+            }
+            ScenarioStatus::Passed | ScenarioStatus::Failed(_) => {
+                (scenario.steps.len(), scenario.steps.len())
+            }
             ScenarioStatus::NotStarted => (0, scenario.steps.len()),
         }
     }
@@ -470,12 +477,7 @@ struct SimTrack {
 impl SimTrack {
     fn new(track_id: i64, spawn_in_store: bool) -> Self {
         let position = if spawn_in_store { POS_IN_STORE } else { POS_ENTRANCE };
-        Self {
-            track_id,
-            position,
-            current_zone: None,
-            created_at: Instant::now(),
-        }
+        Self { track_id, position, current_zone: None, created_at: Instant::now() }
     }
 }
 
@@ -631,7 +633,9 @@ impl AppState {
         } else if topic.contains("journey") {
             self.gateway_state.journeys_completed += 1;
 
-            if payload_str.contains("\"authorized\":true") || payload_str.contains("\"outcome\":\"authorized\"") {
+            if payload_str.contains("\"authorized\":true")
+                || payload_str.contains("\"outcome\":\"authorized\"")
+            {
                 self.gateway_state.journeys_authorized += 1;
                 self.scenario_runner.observed_journey_auth = true;
             } else {
@@ -671,11 +675,8 @@ fn generate_config_toml(config: &SimConfig) -> String {
         config.gate_tcp_addr.clone()
     };
 
-    let rs485_device = if config.emulate_rs485 {
-        "/dev/null".to_string()
-    } else {
-        config.rs485_device.clone()
-    };
+    let rs485_device =
+        if config.emulate_rs485 { "/dev/null".to_string() } else { config.rs485_device.clone() };
 
     let mqtt_host = if config.emulate_xovis { "localhost" } else { &config.mqtt_host };
     let mqtt_port = if config.emulate_xovis { 1883 } else { config.mqtt_port };
@@ -782,9 +783,8 @@ fn find_binary(name: &str) -> Option<std::path::PathBuf> {
 }
 
 fn spawn_gateway(config_path: &str) -> io::Result<Child> {
-    let binary = find_binary("gateway").ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "gateway binary not found")
-    })?;
+    let binary = find_binary("gateway")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "gateway binary not found"))?;
 
     Command::new(binary)
         .args(["--config", config_path])
@@ -889,7 +889,8 @@ async fn send_track_delete(client: &AsyncClient, state: &mut AppState, track_id:
 async fn send_zone_entry(client: &AsyncClient, state: &mut AppState, track_id: i64, zone: &str) {
     if let Some(track) = state.tracks.get_mut(&track_id) {
         let geometry_id = zone_name_to_id(zone);
-        let msg = build_xovis_message("ZONE_ENTRY", track_id, Some(geometry_id), track.position, None);
+        let msg =
+            build_xovis_message("ZONE_ENTRY", track_id, Some(geometry_id), track.position, None);
         if client.publish(XOVIS_TOPIC, QoS::AtLeastOnce, false, msg).await.is_ok() {
             track.current_zone = Some(zone.to_string());
             state.log(LogSource::SimCtl, format!("→ ZONE_ENTRY T{} {}", track_id, zone));
@@ -901,7 +902,8 @@ async fn send_zone_entry(client: &AsyncClient, state: &mut AppState, track_id: i
 async fn send_zone_exit(client: &AsyncClient, state: &mut AppState, track_id: i64, zone: &str) {
     if let Some(track) = state.tracks.get_mut(&track_id) {
         let geometry_id = zone_name_to_id(zone);
-        let msg = build_xovis_message("ZONE_EXIT", track_id, Some(geometry_id), track.position, None);
+        let msg =
+            build_xovis_message("ZONE_EXIT", track_id, Some(geometry_id), track.position, None);
         if client.publish(XOVIS_TOPIC, QoS::AtLeastOnce, false, msg).await.is_ok() {
             if track.current_zone.as_deref() == Some(zone) {
                 track.current_zone = None;
@@ -921,10 +923,19 @@ async fn send_line_cross(
 ) {
     if let Some(track) = state.tracks.get(&track_id) {
         let geometry_id = zone_name_to_id(line);
-        let msg = build_xovis_message("LINE_CROSS", track_id, Some(geometry_id), track.position, Some(direction));
+        let msg = build_xovis_message(
+            "LINE_CROSS",
+            track_id,
+            Some(geometry_id),
+            track.position,
+            Some(direction),
+        );
         if client.publish(XOVIS_TOPIC, QoS::AtLeastOnce, false, msg).await.is_ok() {
             let dir_symbol = if direction == DIR_FORWARD { "→" } else { "←" };
-            state.log(LogSource::SimCtl, format!("{} LINE_CROSS T{} {} ({})", dir_symbol, track_id, line, direction));
+            state.log(
+                LogSource::SimCtl,
+                format!("{} LINE_CROSS T{} {} ({})", dir_symbol, track_id, line, direction),
+            );
             state.events_sent += 1;
         }
     }
@@ -958,16 +969,10 @@ async fn send_acc_event(state: &mut AppState, pos_zone: &str) {
             state.events_sent += 1;
         }
         Ok(resp) => {
-            state.log(
-                LogSource::SimCtl,
-                format!("ACC {} failed: {}", pos_zone, resp.status()),
-            );
+            state.log(LogSource::SimCtl, format!("ACC {} failed: {}", pos_zone, resp.status()));
         }
         Err(e) => {
-            state.log(
-                LogSource::SimCtl,
-                format!("ACC {} error: {}", pos_zone, e),
-            );
+            state.log(LogSource::SimCtl, format!("ACC {} error: {}", pos_zone, e));
         }
     }
 }
@@ -976,11 +981,7 @@ async fn send_acc_event(state: &mut AppState, pos_zone: &str) {
 // Scenario Execution
 // ============================================================================
 
-async fn execute_scenario_step(
-    client: &AsyncClient,
-    state: &mut AppState,
-    step: ScenarioStep,
-) {
+async fn execute_scenario_step(client: &AsyncClient, state: &mut AppState, step: ScenarioStep) {
     match step {
         ScenarioStep::CreateTrack { in_store } => {
             let track_id = state.create_track(in_store);
@@ -1075,7 +1076,14 @@ fn draw_config_menu(f: &mut Frame, state: &AppState) {
             ListItem::new(vec![
                 Line::from(vec![
                     Span::raw(prefix),
-                    Span::styled(checkbox, if *enabled { Style::default().fg(Color::Green) } else { Style::default().fg(Color::DarkGray) }),
+                    Span::styled(
+                        checkbox,
+                        if *enabled {
+                            Style::default().fg(Color::Green)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
+                    ),
                     Span::raw(" "),
                     Span::styled(*name, style),
                 ]),
@@ -1105,9 +1113,9 @@ fn draw_running(f: &mut Frame, state: &AppState) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(10),    // Main content
-            Constraint::Length(3),  // Help
+            Constraint::Length(3), // Header
+            Constraint::Min(10),   // Main content
+            Constraint::Length(3), // Help
         ])
         .split(f.area());
 
@@ -1151,10 +1159,13 @@ fn draw_header(f: &mut Frame, area: Rect, state: &AppState) {
         Span::raw("  "),
         Span::styled(format!("Sent: {}", state.events_sent), Style::default().fg(Color::White)),
         Span::raw("  "),
-        Span::styled(format!("Gate: {} open, {} blocked",
-            state.gateway_state.gate_open_count,
-            state.gateway_state.gate_blocked_count
-        ), Style::default().fg(Color::Yellow)),
+        Span::styled(
+            format!(
+                "Gate: {} open, {} blocked",
+                state.gateway_state.gate_open_count, state.gateway_state.gate_blocked_count
+            ),
+            Style::default().fg(Color::Yellow),
+        ),
         Span::styled(scenario_status, Style::default().fg(Color::Magenta)),
     ]))
     .block(
@@ -1202,43 +1213,43 @@ fn draw_state_view(f: &mut Frame, area: Rect, state: &AppState) {
     let gate_status = vec![
         Line::from(vec![
             Span::raw("Gate Status: "),
-            Span::styled(&state.gateway_state.gate_status,
+            Span::styled(
+                &state.gateway_state.gate_status,
                 if state.gateway_state.gate_status == "OPEN CMD" {
                     Style::default().fg(Color::Green)
                 } else if state.gateway_state.gate_status == "BLOCKED" {
                     Style::default().fg(Color::Red)
                 } else {
                     Style::default().fg(Color::DarkGray)
-                }
+                },
             ),
         ]),
         Line::from(vec![
             Span::raw("Door Status: "),
-            Span::styled(&state.gateway_state.door_status,
+            Span::styled(
+                &state.gateway_state.door_status,
                 if state.gateway_state.door_status == "OPEN" {
                     Style::default().fg(Color::Green)
                 } else if state.gateway_state.door_status == "MOVING" {
                     Style::default().fg(Color::Yellow)
                 } else {
                     Style::default().fg(Color::DarkGray)
-                }
+                },
             ),
         ]),
         Line::from(""),
         Line::from(format!("Gate Opens: {}", state.gateway_state.gate_open_count)),
         Line::from(format!("Gate Blocked: {}", state.gateway_state.gate_blocked_count)),
-        Line::from(format!("Journeys: {} ({} auth, {} unauth)",
+        Line::from(format!(
+            "Journeys: {} ({} auth, {} unauth)",
             state.gateway_state.journeys_completed,
             state.gateway_state.journeys_authorized,
             state.gateway_state.journeys_unauthorized,
         )),
     ];
 
-    let gate_widget = Paragraph::new(gate_status).block(
-        Block::default()
-            .title(" Gate & Journey Stats ")
-            .borders(Borders::ALL),
-    );
+    let gate_widget = Paragraph::new(gate_status)
+        .block(Block::default().title(" Gate & Journey Stats ").borders(Borders::ALL));
     f.render_widget(gate_widget, left_chunks[0]);
 
     // Persons from gateway
@@ -1256,11 +1267,8 @@ fn draw_state_view(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let persons_widget = List::new(person_items).block(
-        Block::default()
-            .title(" Gateway Person States ")
-            .borders(Borders::ALL),
-    );
+    let persons_widget = List::new(person_items)
+        .block(Block::default().title(" Gateway Person States ").borders(Borders::ALL));
     f.render_widget(persons_widget, left_chunks[1]);
 
     // Right: Recent events
@@ -1273,11 +1281,8 @@ fn draw_state_view(f: &mut Frame, area: Rect, state: &AppState) {
         .map(|e| ListItem::new(e.as_str()))
         .collect();
 
-    let events_widget = List::new(event_items).block(
-        Block::default()
-            .title(" Recent Gateway Events ")
-            .borders(Borders::ALL),
-    );
+    let events_widget = List::new(event_items)
+        .block(Block::default().title(" Recent Gateway Events ").borders(Borders::ALL));
     f.render_widget(events_widget, chunks[1]);
 }
 
@@ -1295,7 +1300,8 @@ fn draw_scenarios_view(f: &mut Frame, area: Rect, state: &AppState) {
             let selected = i == state.scenario_selection;
             let prefix = if selected { "▸ " } else { "  " };
 
-            let status_indicator = if state.scenario_runner.scenario.map(|r| r.name) == Some(s.name) {
+            let status_indicator = if state.scenario_runner.scenario.map(|r| r.name) == Some(s.name)
+            {
                 match &state.scenario_runner.status {
                     ScenarioStatus::Running { .. } => " [RUNNING]",
                     ScenarioStatus::WaitingForOutcome { .. } => " [WAITING]",
@@ -1317,14 +1323,15 @@ fn draw_scenarios_view(f: &mut Frame, area: Rect, state: &AppState) {
                 Line::from(vec![
                     Span::raw(prefix),
                     Span::styled(s.name, style),
-                    Span::styled(status_indicator,
+                    Span::styled(
+                        status_indicator,
                         if status_indicator.contains("PASSED") {
                             Style::default().fg(Color::Green)
                         } else if status_indicator.contains("FAILED") {
                             Style::default().fg(Color::Red)
                         } else {
                             Style::default().fg(Color::Yellow)
-                        }
+                        },
                     ),
                 ]),
                 Line::from(vec![
@@ -1336,9 +1343,7 @@ fn draw_scenarios_view(f: &mut Frame, area: Rect, state: &AppState) {
         .collect();
 
     let scenarios_widget = List::new(scenario_items).block(
-        Block::default()
-            .title(" Test Scenarios (Enter=run, ↑↓=select) ")
-            .borders(Borders::ALL),
+        Block::default().title(" Test Scenarios (Enter=run, ↑↓=select) ").borders(Borders::ALL),
     );
     f.render_widget(scenarios_widget, chunks[0]);
 
@@ -1356,19 +1361,22 @@ fn draw_scenarios_view(f: &mut Frame, area: Rect, state: &AppState) {
             .enumerate()
             .map(|(i, step)| {
                 let (current_step, _) = state.scenario_runner.progress();
-                let is_current = state.scenario_runner.scenario.map(|s| s.name) == Some(scenario.name)
+                let is_current = state.scenario_runner.scenario.map(|s| s.name)
+                    == Some(scenario.name)
                     && matches!(state.scenario_runner.status, ScenarioStatus::Running { .. })
                     && i == current_step;
 
                 let prefix = if is_current { "▶ " } else { "  " };
                 let step_str = match step {
-                    ScenarioStep::CreateTrack { in_store } =>
-                        format!("CreateTrack({})", if *in_store { "in_store" } else { "entrance" }),
+                    ScenarioStep::CreateTrack { in_store } => {
+                        format!("CreateTrack({})", if *in_store { "in_store" } else { "entrance" })
+                    }
                     ScenarioStep::DeleteTrack => "DeleteTrack".to_string(),
                     ScenarioStep::ZoneEntry(z) => format!("ZoneEntry({})", z),
                     ScenarioStep::ZoneExit(z) => format!("ZoneExit({})", z),
-                    ScenarioStep::LineCross { line, forward } =>
-                        format!("LineCross({}, {})", line, if *forward { "→" } else { "←" }),
+                    ScenarioStep::LineCross { line, forward } => {
+                        format!("LineCross({}, {})", line, if *forward { "→" } else { "←" })
+                    }
                     ScenarioStep::Acc(pos) => format!("ACC {}", pos),
                     ScenarioStep::Wait(ms) => format!("Wait({}ms)", ms),
                 };
@@ -1390,11 +1398,8 @@ fn draw_scenarios_view(f: &mut Frame, area: Rect, state: &AppState) {
         ];
         details.extend(steps);
 
-        let details_widget = Paragraph::new(details).block(
-            Block::default()
-                .title(format!(" {} ", scenario.name))
-                .borders(Borders::ALL),
-        );
+        let details_widget = Paragraph::new(details)
+            .block(Block::default().title(format!(" {} ", scenario.name)).borders(Borders::ALL));
         f.render_widget(details_widget, right_chunks[0]);
     }
 
@@ -1411,15 +1416,21 @@ fn draw_scenarios_view(f: &mut Frame, area: Rect, state: &AppState) {
         f.render_widget(gauge, right_chunks[1]);
     } else if let ScenarioStatus::Failed(ref msg) = state.scenario_runner.status {
         let result = Paragraph::new(vec![
-            Line::from(Span::styled("FAILED", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                "FAILED",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            )),
             Line::from(""),
             Line::from(msg.as_str()),
-        ]).block(Block::default().title(" Result ").borders(Borders::ALL));
+        ])
+        .block(Block::default().title(" Result ").borders(Borders::ALL));
         f.render_widget(result, right_chunks[1]);
     } else if state.scenario_runner.status == ScenarioStatus::Passed {
-        let result = Paragraph::new(vec![
-            Line::from(Span::styled("PASSED ✓", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
-        ]).block(Block::default().title(" Result ").borders(Borders::ALL));
+        let result = Paragraph::new(vec![Line::from(Span::styled(
+            "PASSED ✓",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ))])
+        .block(Block::default().title(" Result ").borders(Borders::ALL));
         f.render_widget(result, right_chunks[1]);
     }
 }
@@ -1445,11 +1456,8 @@ fn draw_tracks_panel(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let tracks = List::new(track_items).block(
-        Block::default()
-            .title(" Tracks (t/T=new d=del) ")
-            .borders(Borders::ALL),
-    );
+    let tracks = List::new(track_items)
+        .block(Block::default().title(" Tracks (t/T=new d=del) ").borders(Borders::ALL));
     f.render_widget(tracks, area);
 }
 
@@ -1485,11 +1493,8 @@ fn draw_quick_actions(f: &mut Frame, area: Rect, _state: &AppState) {
         ]),
     ];
 
-    let actions_widget = Paragraph::new(actions).block(
-        Block::default()
-            .title(" Quick Actions ")
-            .borders(Borders::ALL),
-    );
+    let actions_widget = Paragraph::new(actions)
+        .block(Block::default().title(" Quick Actions ").borders(Borders::ALL));
     f.render_widget(actions_widget, area);
 }
 
@@ -1507,17 +1512,16 @@ fn draw_logs(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let logs = List::new(log_items).block(
-        Block::default()
-            .title(" Event Log ")
-            .borders(Borders::ALL),
-    );
+    let logs =
+        List::new(log_items).block(Block::default().title(" Event Log ").borders(Borders::ALL));
     f.render_widget(logs, area);
 }
 
 fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     let help_text = match state.view_mode {
-        ViewMode::Logs => "Tab/F1-F3=view t/T=track 1-5=POS g=gate a=ACC e=exit o=open r=reset q=quit",
+        ViewMode::Logs => {
+            "Tab/F1-F3=view t/T=track 1-5=POS g=gate a=ACC e=exit o=open r=reset q=quit"
+        }
         ViewMode::State => "Tab/F1-F3=view | State view shows gateway internal state",
         ViewMode::Scenarios => "Tab/F1-F3=view ↑↓=select Enter=run | Run test scenarios",
     };
@@ -1548,7 +1552,10 @@ async fn run_test_mode(test_arg: &str, verbose: bool) -> Result<i32, Box<dyn std
     println!("╔══════════════════════════════════════════════════════════╗");
     println!("║         Gateway Simulation - Test Mode                   ║");
     println!("╠══════════════════════════════════════════════════════════╣");
-    println!("║ Running {} scenario(s)                                    ║", scenarios_to_run.len());
+    println!(
+        "║ Running {} scenario(s)                                    ║",
+        scenarios_to_run.len()
+    );
     println!("╚══════════════════════════════════════════════════════════╝");
     println!();
 
@@ -1674,7 +1681,8 @@ async fn run_test_mode(test_arg: &str, verbose: bool) -> Result<i32, Box<dyn std
         loop {
             {
                 let mut s = state.lock().await;
-                s.scenario_runner.status = ScenarioStatus::WaitingForOutcome { started: Instant::now() };
+                s.scenario_runner.status =
+                    ScenarioStatus::WaitingForOutcome { started: Instant::now() };
                 if s.scenario_runner.check_outcome() {
                     break;
                 }
@@ -1774,18 +1782,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Draw
         {
             let state_guard = state.lock().await;
-            terminal.draw(|f| {
-                match state_guard.phase {
-                    AppPhase::ConfigMenu => draw_config_menu(f, &state_guard),
-                    AppPhase::Running => draw_running(f, &state_guard),
-                }
+            terminal.draw(|f| match state_guard.phase {
+                AppPhase::ConfigMenu => draw_config_menu(f, &state_guard),
+                AppPhase::Running => draw_running(f, &state_guard),
             })?;
         }
 
         // Process scenario steps if running
         if let Some(ref client) = mqtt_client {
             let mut state_guard = state.lock().await;
-            if let ScenarioStatus::Running { step_index, step_started } = state_guard.scenario_runner.status {
+            if let ScenarioStatus::Running { step_index, step_started } =
+                state_guard.scenario_runner.status
+            {
                 if let Some(scenario) = state_guard.scenario_runner.scenario {
                     if step_index < scenario.steps.len() {
                         let step = scenario.steps[step_index];
@@ -1801,9 +1809,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         step_started: Instant::now(),
                                     };
                                 } else {
-                                    state_guard.scenario_runner.status = ScenarioStatus::WaitingForOutcome {
-                                        started: Instant::now(),
-                                    };
+                                    state_guard.scenario_runner.status =
+                                        ScenarioStatus::WaitingForOutcome {
+                                            started: Instant::now(),
+                                        };
                                 }
                             }
                         } else {
@@ -1817,9 +1826,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     step_started: Instant::now(),
                                 };
                             } else {
-                                state_guard.scenario_runner.status = ScenarioStatus::WaitingForOutcome {
-                                    started: Instant::now(),
-                                };
+                                state_guard.scenario_runner.status =
+                                    ScenarioStatus::WaitingForOutcome { started: Instant::now() };
                             }
                         }
                     }
@@ -1827,7 +1835,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Check outcome if waiting
-            if matches!(state_guard.scenario_runner.status, ScenarioStatus::WaitingForOutcome { .. }) {
+            if matches!(
+                state_guard.scenario_runner.status,
+                ScenarioStatus::WaitingForOutcome { .. }
+            ) {
                 state_guard.scenario_runner.check_outcome();
             }
         }
@@ -1840,110 +1851,147 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut state_guard = state.lock().await;
 
                     match state_guard.phase {
-                        AppPhase::ConfigMenu => {
-                            match key.code {
-                                KeyCode::Char('q') => break 'main,
-                                KeyCode::Up => {
-                                    if state_guard.menu_selection > 0 {
-                                        state_guard.menu_selection -= 1;
-                                    }
+                        AppPhase::ConfigMenu => match key.code {
+                            KeyCode::Char('q') => break 'main,
+                            KeyCode::Up => {
+                                if state_guard.menu_selection > 0 {
+                                    state_guard.menu_selection -= 1;
                                 }
-                                KeyCode::Down => {
-                                    if state_guard.menu_selection < 3 {
-                                        state_guard.menu_selection += 1;
-                                    }
+                            }
+                            KeyCode::Down => {
+                                if state_guard.menu_selection < 3 {
+                                    state_guard.menu_selection += 1;
                                 }
-                                KeyCode::Char(' ') => {
-                                    match state_guard.menu_selection {
-                                        0 => state_guard.config.emulate_xovis = !state_guard.config.emulate_xovis,
-                                        1 => state_guard.config.emulate_gate = !state_guard.config.emulate_gate,
-                                        2 => state_guard.config.emulate_rs485 = !state_guard.config.emulate_rs485,
-                                        3 => state_guard.config.emulate_acc = !state_guard.config.emulate_acc,
-                                        _ => {}
-                                    }
+                            }
+                            KeyCode::Char(' ') => match state_guard.menu_selection {
+                                0 => {
+                                    state_guard.config.emulate_xovis =
+                                        !state_guard.config.emulate_xovis
                                 }
-                                KeyCode::Enter => {
-                                    let config_content = generate_config_toml(&state_guard.config);
-                                    let config_path = "/tmp/simctl_gateway.toml";
-                                    std::fs::write(config_path, &config_content)?;
-
-                                    state_guard.log(LogSource::SimCtl, "Starting services...".to_string());
-
-                                    if state_guard.config.emulate_gate {
-                                        state_guard.log(LogSource::SimCtl, "Starting mock CloudPlus server...".to_string());
-                                        match spawn_mock_gate("http://localhost:9091") {
-                                            Ok(child) => {
-                                                state_guard.mock_gate_process = Some(child);
-                                                state_guard.log(LogSource::MockGate, "Mock gate started on port 8000".to_string());
-                                            }
-                                            Err(e) => {
-                                                state_guard.log(LogSource::SimCtl, format!("Failed to start mock gate: {}", e));
-                                            }
-                                        }
-                                        tokio::time::sleep(Duration::from_millis(500)).await;
-                                    }
-
-                                    state_guard.log(LogSource::SimCtl, "Starting gateway...".to_string());
-                                    match spawn_gateway(config_path) {
-                                        Ok(child) => {
-                                            state_guard.gateway_process = Some(child);
-                                            state_guard.log(LogSource::Gateway, "Gateway starting...".to_string());
-                                        }
-                                        Err(e) => {
-                                            state_guard.log(LogSource::SimCtl, format!("Failed to start gateway: {}", e));
-                                        }
-                                    }
-
-                                    tokio::time::sleep(Duration::from_secs(2)).await;
-
-                                    let mqtt_host = if state_guard.config.emulate_xovis {
-                                        "localhost"
-                                    } else {
-                                        &state_guard.config.mqtt_host
-                                    };
-
-                                    let mut mqtt_options = MqttOptions::new(
-                                        "simctl",
-                                        mqtt_host,
-                                        if state_guard.config.emulate_xovis { 1883 } else { state_guard.config.mqtt_port },
-                                    );
-                                    mqtt_options.set_keep_alive(Duration::from_secs(30));
-
-                                    let (client, mut eventloop) = AsyncClient::new(mqtt_options, 100);
-                                    client.subscribe("gateway/#", QoS::AtLeastOnce).await?;
-
-                                    mqtt_client = Some(client);
-
-                                    let mqtt_state = state.clone();
-                                    tokio::spawn(async move {
-                                        loop {
-                                            match eventloop.poll().await {
-                                                Ok(MqttEvent::Incoming(Packet::ConnAck(_))) => {
-                                                    let mut s = mqtt_state.lock().await;
-                                                    s.mqtt_connected = true;
-                                                    s.log(LogSource::Mqtt, "Connected to MQTT broker".to_string());
-                                                }
-                                                Ok(MqttEvent::Incoming(Packet::Publish(publish))) => {
-                                                    let mut s = mqtt_state.lock().await;
-                                                    s.process_mqtt_message(&publish.topic, &publish.payload);
-                                                }
-                                                Ok(_) => {}
-                                                Err(e) => {
-                                                    let mut s = mqtt_state.lock().await;
-                                                    s.mqtt_connected = false;
-                                                    s.log(LogSource::Mqtt, format!("Error: {}", e));
-                                                    tokio::time::sleep(Duration::from_secs(1)).await;
-                                                }
-                                            }
-                                        }
-                                    });
-
-                                    state_guard.phase = AppPhase::Running;
-                                    state_guard.log(LogSource::SimCtl, "Ready! Use keyboard to inject events.".to_string());
+                                1 => {
+                                    state_guard.config.emulate_gate =
+                                        !state_guard.config.emulate_gate
+                                }
+                                2 => {
+                                    state_guard.config.emulate_rs485 =
+                                        !state_guard.config.emulate_rs485
+                                }
+                                3 => {
+                                    state_guard.config.emulate_acc = !state_guard.config.emulate_acc
                                 }
                                 _ => {}
+                            },
+                            KeyCode::Enter => {
+                                let config_content = generate_config_toml(&state_guard.config);
+                                let config_path = "/tmp/simctl_gateway.toml";
+                                std::fs::write(config_path, &config_content)?;
+
+                                state_guard
+                                    .log(LogSource::SimCtl, "Starting services...".to_string());
+
+                                if state_guard.config.emulate_gate {
+                                    state_guard.log(
+                                        LogSource::SimCtl,
+                                        "Starting mock CloudPlus server...".to_string(),
+                                    );
+                                    match spawn_mock_gate("http://localhost:9091") {
+                                        Ok(child) => {
+                                            state_guard.mock_gate_process = Some(child);
+                                            state_guard.log(
+                                                LogSource::MockGate,
+                                                "Mock gate started on port 8000".to_string(),
+                                            );
+                                        }
+                                        Err(e) => {
+                                            state_guard.log(
+                                                LogSource::SimCtl,
+                                                format!("Failed to start mock gate: {}", e),
+                                            );
+                                        }
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(500)).await;
+                                }
+
+                                state_guard
+                                    .log(LogSource::SimCtl, "Starting gateway...".to_string());
+                                match spawn_gateway(config_path) {
+                                    Ok(child) => {
+                                        state_guard.gateway_process = Some(child);
+                                        state_guard.log(
+                                            LogSource::Gateway,
+                                            "Gateway starting...".to_string(),
+                                        );
+                                    }
+                                    Err(e) => {
+                                        state_guard.log(
+                                            LogSource::SimCtl,
+                                            format!("Failed to start gateway: {}", e),
+                                        );
+                                    }
+                                }
+
+                                tokio::time::sleep(Duration::from_secs(2)).await;
+
+                                let mqtt_host = if state_guard.config.emulate_xovis {
+                                    "localhost"
+                                } else {
+                                    &state_guard.config.mqtt_host
+                                };
+
+                                let mut mqtt_options = MqttOptions::new(
+                                    "simctl",
+                                    mqtt_host,
+                                    if state_guard.config.emulate_xovis {
+                                        1883
+                                    } else {
+                                        state_guard.config.mqtt_port
+                                    },
+                                );
+                                mqtt_options.set_keep_alive(Duration::from_secs(30));
+
+                                let (client, mut eventloop) = AsyncClient::new(mqtt_options, 100);
+                                client.subscribe("gateway/#", QoS::AtLeastOnce).await?;
+
+                                mqtt_client = Some(client);
+
+                                let mqtt_state = state.clone();
+                                tokio::spawn(async move {
+                                    loop {
+                                        match eventloop.poll().await {
+                                            Ok(MqttEvent::Incoming(Packet::ConnAck(_))) => {
+                                                let mut s = mqtt_state.lock().await;
+                                                s.mqtt_connected = true;
+                                                s.log(
+                                                    LogSource::Mqtt,
+                                                    "Connected to MQTT broker".to_string(),
+                                                );
+                                            }
+                                            Ok(MqttEvent::Incoming(Packet::Publish(publish))) => {
+                                                let mut s = mqtt_state.lock().await;
+                                                s.process_mqtt_message(
+                                                    &publish.topic,
+                                                    &publish.payload,
+                                                );
+                                            }
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                let mut s = mqtt_state.lock().await;
+                                                s.mqtt_connected = false;
+                                                s.log(LogSource::Mqtt, format!("Error: {}", e));
+                                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                            }
+                                        }
+                                    }
+                                });
+
+                                state_guard.phase = AppPhase::Running;
+                                state_guard.log(
+                                    LogSource::SimCtl,
+                                    "Ready! Use keyboard to inject events.".to_string(),
+                                );
                             }
-                        }
+                            _ => {}
+                        },
                         AppPhase::Running => {
                             // View switching
                             match key.code {
@@ -1976,11 +2024,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     KeyCode::Enter => {
                                         if !state_guard.scenario_runner.is_running() {
-                                            let scenario = &SCENARIOS[state_guard.scenario_selection];
+                                            let scenario =
+                                                &SCENARIOS[state_guard.scenario_selection];
                                             state_guard.scenario_runner.start(scenario);
                                             state_guard.tracks.clear();
                                             state_guard.next_track_id = 100;
-                                            state_guard.log(LogSource::Scenario, format!("Starting scenario: {}", scenario.name));
+                                            state_guard.log(
+                                                LogSource::Scenario,
+                                                format!("Starting scenario: {}", scenario.name),
+                                            );
                                         }
                                     }
                                     _ => {}
@@ -1994,17 +2046,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         // Track management
                                         KeyCode::Char('t') if state_guard.config.emulate_xovis => {
                                             let track_id = state_guard.create_track(false);
-                                            state_guard.log(LogSource::SimCtl, format!("Created T{} at entrance", track_id));
-                                            send_track_create(client, &mut state_guard, track_id).await;
+                                            state_guard.log(
+                                                LogSource::SimCtl,
+                                                format!("Created T{} at entrance", track_id),
+                                            );
+                                            send_track_create(client, &mut state_guard, track_id)
+                                                .await;
                                         }
                                         KeyCode::Char('T') if state_guard.config.emulate_xovis => {
                                             let track_id = state_guard.create_track(true);
-                                            state_guard.log(LogSource::SimCtl, format!("Created T{} in-store", track_id));
-                                            send_track_create(client, &mut state_guard, track_id).await;
+                                            state_guard.log(
+                                                LogSource::SimCtl,
+                                                format!("Created T{} in-store", track_id),
+                                            );
+                                            send_track_create(client, &mut state_guard, track_id)
+                                                .await;
                                         }
                                         KeyCode::Char('d') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_track_delete(client, &mut state_guard, tid).await;
+                                                send_track_delete(client, &mut state_guard, tid)
+                                                    .await;
                                                 state_guard.delete_track(tid);
                                             }
                                         }
@@ -2014,108 +2075,234 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         // POS zones
                                         KeyCode::Char('1') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_entry(client, &mut state_guard, tid, "POS_1").await;
+                                                send_zone_entry(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_1",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('2') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_entry(client, &mut state_guard, tid, "POS_2").await;
+                                                send_zone_entry(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_2",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('3') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_entry(client, &mut state_guard, tid, "POS_3").await;
+                                                send_zone_entry(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_3",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('4') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_entry(client, &mut state_guard, tid, "POS_4").await;
+                                                send_zone_entry(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_4",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('5') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_entry(client, &mut state_guard, tid, "POS_5").await;
+                                                send_zone_entry(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_5",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('!') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_exit(client, &mut state_guard, tid, "POS_1").await;
+                                                send_zone_exit(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_1",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('@') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_exit(client, &mut state_guard, tid, "POS_2").await;
+                                                send_zone_exit(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_2",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('#') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_exit(client, &mut state_guard, tid, "POS_3").await;
+                                                send_zone_exit(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_3",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('$') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_exit(client, &mut state_guard, tid, "POS_4").await;
+                                                send_zone_exit(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_4",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('%') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_exit(client, &mut state_guard, tid, "POS_5").await;
+                                                send_zone_exit(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "POS_5",
+                                                )
+                                                .await;
                                             }
                                         }
 
                                         // Store zone
                                         KeyCode::Char('s') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_entry(client, &mut state_guard, tid, "STORE_1").await;
+                                                send_zone_entry(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "STORE_1",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('S') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_exit(client, &mut state_guard, tid, "STORE_1").await;
+                                                send_zone_exit(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "STORE_1",
+                                                )
+                                                .await;
                                             }
                                         }
 
                                         // Lines
                                         KeyCode::Char('i') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_line_cross(client, &mut state_guard, tid, "ENTRY_1", DIR_FORWARD).await;
+                                                send_line_cross(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "ENTRY_1",
+                                                    DIR_FORWARD,
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('I') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_line_cross(client, &mut state_guard, tid, "ENTRY_1", DIR_BACKWARD).await;
+                                                send_line_cross(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "ENTRY_1",
+                                                    DIR_BACKWARD,
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('p') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_line_cross(client, &mut state_guard, tid, "APPROACH_1", DIR_FORWARD).await;
+                                                send_line_cross(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "APPROACH_1",
+                                                    DIR_FORWARD,
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('P') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_line_cross(client, &mut state_guard, tid, "APPROACH_1", DIR_BACKWARD).await;
+                                                send_line_cross(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "APPROACH_1",
+                                                    DIR_BACKWARD,
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('e') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_line_cross(client, &mut state_guard, tid, "EXIT_1", DIR_FORWARD).await;
+                                                send_line_cross(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "EXIT_1",
+                                                    DIR_FORWARD,
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('E') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_line_cross(client, &mut state_guard, tid, "EXIT_1", DIR_BACKWARD).await;
+                                                send_line_cross(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "EXIT_1",
+                                                    DIR_BACKWARD,
+                                                )
+                                                .await;
                                             }
                                         }
 
                                         // Gate zone
                                         KeyCode::Char('g') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_entry(client, &mut state_guard, tid, "GATE_1").await;
+                                                send_zone_entry(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "GATE_1",
+                                                )
+                                                .await;
                                             }
                                         }
                                         KeyCode::Char('G') if state_guard.config.emulate_xovis => {
                                             if let Some(tid) = state_guard.selected_track_id {
-                                                send_zone_exit(client, &mut state_guard, tid, "GATE_1").await;
+                                                send_zone_exit(
+                                                    client,
+                                                    &mut state_guard,
+                                                    tid,
+                                                    "GATE_1",
+                                                )
+                                                .await;
                                             }
                                         }
 
@@ -2134,7 +2321,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             state_guard.tracks.clear();
                                             state_guard.selected_track_id = None;
                                             state_guard.next_track_id = 100;
-                                            state_guard.log(LogSource::SimCtl, "Simulation reset".to_string());
+                                            state_guard.log(
+                                                LogSource::SimCtl,
+                                                "Simulation reset".to_string(),
+                                            );
                                         }
 
                                         _ => {}
@@ -2164,11 +2354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     println!("Simulation controller stopped.");
